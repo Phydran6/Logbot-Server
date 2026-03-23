@@ -1,7 +1,6 @@
 ﻿#!/usr/bin/env python3
 # ==============================================================================
-# Name:        Philipp Fischer
-# Kontakt:     p.fischer@itconex.de
+# Name:        Phydran6
 # Version:     2026.02.16.12.00.00
 # Beschreibung: LogBot v2026.02.16.12.00.00 - Syslog Server mit UniFi Parsing
 #               EmpfÃ¤ngt Syslog auf UDP/TCP 514, parst verschiedene Formate
