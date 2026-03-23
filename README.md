@@ -1,8 +1,7 @@
 # LogBot v2026.03.19.13.26.52
 **Zentraler Log-Server für Linux/Windows Systeme und Netzwerkgeräte**
 
-Entwickelt von Philipp Fischer  
-Kontakt: p.fischer@itconex.de
+Entwickelt von Phydran6
 
 ## Features
 
