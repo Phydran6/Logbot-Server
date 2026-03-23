@@ -4,8 +4,7 @@
 
 Sendet System-Logs an den LogBot Server.
 
-Entwickelt von Philipp Fischer  
-Kontakt: p.fischer@itconex.de
+Entwickelt von Phydran6
 
 ## Features
 
