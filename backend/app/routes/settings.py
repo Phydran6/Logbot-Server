@@ -1,6 +1,5 @@
 # ==============================================================================
-# Name:        Philipp Fischer
-# Kontakt:     p.fischer@itconex.de
+# Name:        Phydran6
 # Version:     2026.03.03.17.18.19
 # Beschreibung: LogBot v2026.01.30.13.30.00 - Settings API Endpoints
 # ==============================================================================
