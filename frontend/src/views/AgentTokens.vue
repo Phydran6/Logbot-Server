@@ -1,6 +1,5 @@
 ﻿<!-- ==============================================================================
-     Name:        Philipp Fischer
-     Kontakt:     p.fischer@itconex.de
+     # Name:        Phydran6
      Version:     2026.02.20.18.00.00
      Beschreibung: LogBot - Agent Token Verwaltung (HTTPS Agents)
      ============================================================================= -->
