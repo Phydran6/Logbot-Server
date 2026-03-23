@@ -1,0 +1,121 @@
+# ==============================================================================
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
+# Version:     2026.01.30.13.30.00
+# Beschreibung: LogBot v2026.01.30.13.30.00 - Docker Compose Konfiguration
+# ==============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: logbot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-logbot}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD muss gesetzt sein}
+      POSTGRES_DB: ${DB_NAME:-logbot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-logbot} -d ${DB_NAME:-logbot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - logbot
+
+  syslog:
+    build: ./syslog
+    container_name: logbot-syslog
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-logbot}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-logbot}
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - logbot
+
+  backend:
+    build: ./backend
+    container_name: logbot-backend
+    restart: unless-stopped
+    privileged: true
+    pid: "host"
+    security_opt:
+      - seccomp=unconfined
+    cap_add:
+      - SYS_BOOT
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-logbot}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-logbot}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET muss gesetzt sein}
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - logbot
+
+  frontend:
+    build: ./frontend
+    container_name: logbot-frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - backend
+    networks:
+      - logbot
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: logbot-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - logbot
+
+  portainer-agent:
+    image: portainer/agent:latest
+    container_name: logbot-portainer-agent
+    restart: unless-stopped
+    ports:
+      - "9001:9001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+    networks:
+      - logbot
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  logbot:
+    driver: bridge

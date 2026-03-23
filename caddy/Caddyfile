@@ -1,0 +1,18 @@
+# ==============================================================================
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
+# Version:     2026.01.30.13.30.00
+# Beschreibung: LogBot v2026.01.30.13.30.00 - Caddy Reverse Proxy
+# ==============================================================================
+
+:80 {
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+    handle {
+        reverse_proxy frontend:80
+    }
+    log {
+        output stdout
+    }
+}

@@ -1,0 +1,86 @@
+/**
+ * ==============================================================================
+ * Name:           Phil Fischer
+ * E-Mail:         p.fischer@phytech.de
+ * Version:        30.01.2026.19.35.22
+ * ==============================================================================
+ * 
+ * LogBot CSS - Tailwind + Branding Theme System
+ * ==============================================
+ * 
+ * ==============================================================================
+ */
+
+/* Tailwind Directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   Default CSS Variables
+   ============================================================================= */
+
+:root {
+  /* Markenfarben */
+  --color-primary: #3b82f6;
+  --color-secondary: #8b5cf6;
+  --color-accent: #10b981;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  
+  /* Dark Scheme - Custom */
+  --dark-bg: #444464;
+  --dark-surface: #313146;
+  --dark-surface-elevated: #3a3a54;
+  --dark-border: #45455f;
+  --dark-text-primary: #f8fafc;
+  --dark-text-secondary: #e2e8f0;
+  --dark-text-muted: #cbd5e1;
+  
+  /* Light Scheme */
+  --light-bg: #f1f5f9;
+  --light-surface: #ffffff;
+  --light-surface-elevated: #f8fafc;
+  --light-border: #e2e8f0;
+  --light-text-primary: #0f172a;
+  --light-text-secondary: #334155;
+  --light-text-muted: #64748b;
+}
+
+/* =============================================================================
+   Dark Mode (Default)
+   ============================================================================= */
+
+:root,
+[data-theme="dark"] {
+  --color-bg: var(--dark-bg);
+  --color-surface: var(--dark-surface);
+  --color-surface-elevated: var(--dark-surface-elevated);
+  --color-border: var(--dark-border);
+  --color-text-primary: var(--dark-text-primary);
+  --color-text-secondary: var(--dark-text-secondary);
+  --color-text-muted: var(--dark-text-muted);
+}
+
+/* =============================================================================
+   Light Mode
+   ============================================================================= */
+
+[data-theme="light"] {
+  --color-bg: var(--light-bg);
+  --color-surface: var(--light-surface);
+  --color-surface-elevated: var(--light-surface-elevated);
+  --color-border: var(--light-border);
+  --color-text-primary: var(--light-text-primary);
+  --color-text-secondary: var(--light-text-secondary);
+  --color-text-muted: var(--light-text-muted);
+}
+
+/* =============================================================================
+   Smooth Theme Transition
+   ============================================================================= */
+
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
