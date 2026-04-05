@@ -48,6 +48,11 @@
       </form>
       
       <p class="text-center text-sm mt-6" :style="{ color: 'var(--color-text-muted)' }">Standard: admin / admin</p>
+
+      <div class="flex justify-center gap-4 mt-6 text-xs" :style="{ color: 'var(--color-text-muted)' }">
+        <router-link to="/impressum" class="hover:underline">Impressum</router-link>
+        <router-link to="/datenschutz" class="hover:underline">Datenschutz</router-link>
+      </div>
     </div>
   </div>
 </template>

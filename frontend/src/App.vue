@@ -15,12 +15,14 @@ Tailwind-kompatibel - überschreibt keine bestehenden Styles.
 
 <template>
   <router-view />
+  <CookieBanner />
 </template>
 
 <script setup>
 import { onMounted } from 'vue'
 import { useBrandingStore } from './stores/brandingStore'
 import { useThemeStore } from './stores/themeStore'
+import CookieBanner from './components/CookieBanner.vue'
 
 const brandingStore = useBrandingStore()
 const themeStore = useThemeStore()

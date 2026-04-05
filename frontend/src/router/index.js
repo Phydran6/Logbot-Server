@@ -23,11 +23,27 @@ const routes = [
   // ---------------------------------------------------------------------------
   // Öffentliche Route: Login
   // ---------------------------------------------------------------------------
-  { 
-    path: '/login', 
-    name: 'Login', 
-    component: () => import('../views/Login.vue'), 
-    meta: { public: true } 
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('../views/Login.vue'),
+    meta: { public: true }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Öffentliche Routen: Rechtliche Seiten
+  // ---------------------------------------------------------------------------
+  {
+    path: '/impressum',
+    name: 'Impressum',
+    component: () => import('../views/Impressum.vue'),
+    meta: { public: true }
+  },
+  {
+    path: '/datenschutz',
+    name: 'Datenschutz',
+    component: () => import('../views/Datenschutz.vue'),
+    meta: { public: true }
   },
   
   // ---------------------------------------------------------------------------

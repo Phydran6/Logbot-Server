@@ -98,6 +98,12 @@
       </div>
 
       <router-view />
+
+      <!-- Footer -->
+      <footer class="px-6 py-3 text-xs border-t flex gap-4" :style="{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)', backgroundColor: 'var(--color-surface)' }">
+        <router-link to="/impressum" class="hover:underline">Impressum</router-link>
+        <router-link to="/datenschutz" class="hover:underline">Datenschutz</router-link>
+      </footer>
     </main>
   </div>
 </template>
