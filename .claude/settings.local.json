@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"e:/Github/Logbot/Logbot-Server\" config user.name)",
+      "Bash(git -C \"e:/Github/Logbot/Logbot-Server\" config user.email)"
+    ]
+  }
+}

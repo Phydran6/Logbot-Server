@@ -1,4 +1,4 @@
-﻿<!-- ==============================================================================
+<!-- ==============================================================================
      Name:        Philipp Fischer
      Kontakt:     p.fischer@itconex.de
      Version:     2026.03.31.17.26.46
@@ -7,26 +7,37 @@
 
 <template>
   <div class="flex h-screen" :style="{ backgroundColor: 'var(--color-bg, #f3f4f6)' }">
+    <!-- Mobile Overlay -->
+    <div
+      v-if="sidebarOpen"
+      class="fixed inset-0 z-20 bg-black bg-opacity-50 md:hidden"
+      @click="sidebarOpen = false"
+    />
+
     <!-- Sidebar -->
-    <aside class="w-64 flex flex-col" :style="{ backgroundColor: 'var(--color-surface, #1f2937)', color: 'var(--color-text-primary, #fff)' }">
+    <aside
+      class="fixed inset-y-0 left-0 z-30 w-64 flex flex-col transform transition-transform duration-200 md:relative md:translate-x-0"
+      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+      :style="{ backgroundColor: 'var(--color-surface, #1f2937)', color: 'var(--color-text-primary, #fff)' }"
+    >
       <div class="p-4 border-b" :style="{ borderColor: 'var(--color-border, #374151)' }">
         <h1 class="text-xl font-bold">📄 {{ companyName }}</h1>
         <p class="text-sm" :style="{ color: 'var(--color-text-muted, #9ca3af)' }">v2026.03.31.17.26.46</p>
       </div>
-      
+
       <nav class="flex-1 p-4">
         <ul class="space-y-2">
-          <li><router-link to="/" class="nav-link" :class="{ active: $route.name === 'Dashboard' }">📈 Dashboard</router-link></li>
-          <li><router-link to="/logs" class="nav-link" :class="{ active: $route.name === 'Logs' }">📃 Logs</router-link></li>
-          <li><router-link to="/agents" class="nav-link" :class="{ active: $route.name === 'Agents' }">🛡️ Agents</router-link></li>
-          <li><router-link to="/webhooks" class="nav-link" :class="{ active: $route.name === 'Webhooks' }">🔗 Webhooks</router-link></li>
-          <li v-if="auth.isAdmin"><router-link to="/users" class="nav-link" :class="{ active: $route.name === 'Users' }">👥 Benutzer</router-link></li>
-          <li><router-link to="/settings" class="nav-link" :class="{ active: $route.name === 'Settings' }">⚙️ Einstellungen</router-link></li>
-          <li><router-link to="/settings/branding" class="nav-link" :class="{ active: $route.name === 'BrandingSettings' }">🎨 Branding</router-link></li>
-          <li><router-link to="/health" class="nav-link" :class="{ active: $route.name === 'Health' }">💚 Health</router-link></li>
+          <li><router-link to="/" class="nav-link" :class="{ active: $route.name === 'Dashboard' }" @click="sidebarOpen = false">📈 Dashboard</router-link></li>
+          <li><router-link to="/logs" class="nav-link" :class="{ active: $route.name === 'Logs' }" @click="sidebarOpen = false">📃 Logs</router-link></li>
+          <li><router-link to="/agents" class="nav-link" :class="{ active: $route.name === 'Agents' }" @click="sidebarOpen = false">🛡️ Agents</router-link></li>
+          <li><router-link to="/webhooks" class="nav-link" :class="{ active: $route.name === 'Webhooks' }" @click="sidebarOpen = false">🔗 Webhooks</router-link></li>
+          <li v-if="auth.isAdmin"><router-link to="/users" class="nav-link" :class="{ active: $route.name === 'Users' }" @click="sidebarOpen = false">👥 Benutzer</router-link></li>
+          <li><router-link to="/settings" class="nav-link" :class="{ active: $route.name === 'Settings' }" @click="sidebarOpen = false">⚙️ Einstellungen</router-link></li>
+          <li><router-link to="/settings/branding" class="nav-link" :class="{ active: $route.name === 'BrandingSettings' }" @click="sidebarOpen = false">🎨 Branding</router-link></li>
+          <li><router-link to="/health" class="nav-link" :class="{ active: $route.name === 'Health' }" @click="sidebarOpen = false">💚 Health</router-link></li>
         </ul>
       </nav>
-      
+
       <!-- Theme Toggle + User Info -->
       <div class="p-4 border-t" :style="{ borderColor: 'var(--color-border, #374151)' }">
         <!-- Theme Toggle -->
@@ -51,7 +62,7 @@
             </svg>
           </button>
         </div>
-        
+
         <!-- User Info -->
         <div class="flex items-center justify-between">
           <div>
@@ -68,16 +79,31 @@
         </div>
       </div>
     </aside>
-    
+
     <!-- Main Content -->
-    <main class="flex-1 overflow-auto" :style="{ backgroundColor: 'var(--color-bg, #f3f4f6)' }">
+    <main class="flex-1 overflow-auto min-w-0" :style="{ backgroundColor: 'var(--color-bg, #f3f4f6)' }">
+      <!-- Mobile Header with Hamburger -->
+      <div
+        class="flex items-center gap-3 p-3 border-b md:hidden"
+        :style="{ backgroundColor: 'var(--color-surface, #1f2937)', borderColor: 'var(--color-border, #374151)' }"
+      >
+        <button @click="sidebarOpen = true" class="hamburger-btn" aria-label="Menü öffnen">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+        <span class="font-bold text-lg" :style="{ color: 'var(--color-text-primary, #fff)' }">📄 {{ companyName }}</span>
+      </div>
+
       <router-view />
     </main>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/themeStore'
@@ -87,6 +113,8 @@ const router = useRouter()
 const auth = useAuthStore()
 const themeStore = useThemeStore()
 const brandingStore = useBrandingStore()
+
+const sidebarOpen = ref(false)
 
 // Computed
 const isDark = computed(() => themeStore.currentTheme === 'dark')
@@ -152,10 +180,28 @@ function handleLogout() {
   color: white;
 }
 
-.logout-btn svg {
+.logout-btn svg,
+.logout-btn path,
+.logout-btn polyline,
+.logout-btn line {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-</style>
 
+.hamburger-btn {
+  padding: 0.375rem;
+  border-radius: 0.375rem;
+  color: var(--color-text-secondary, #d1d5db);
+  transition: background-color 0.2s;
+}
+
+.hamburger-btn:hover {
+  background-color: var(--color-surface-elevated, #374151);
+}
+
+.hamburger-btn svg {
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+</style>
