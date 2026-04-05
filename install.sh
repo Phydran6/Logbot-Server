@@ -10,8 +10,9 @@
 # INSTALLATIONS-SCRIPT
 # ==============================================================================
 #
-# Autor:        Phydran6
-# Version:      2026.01.30.13.30.00
+# Autor:        Philipp Fischer
+# Kontakt:      p.fischer@itconex.de
+# Version:      2026.03.31.17.26.46
 # Erstellt:     Januar 2026
 #
 # Beschreibung:
@@ -203,6 +204,7 @@ print_summary() {
     echo "Web-Interface:"
     echo "  http://${LOCAL_IP}"
     echo "  http://localhost"
+    echo "  (HTTPS kannst du nach dem Start im UI unter Einstellungen -> Reverse Proxy & TLS aktivieren)"
     echo ""
     echo "Standard-Login:"
     echo "  Benutzer: admin"

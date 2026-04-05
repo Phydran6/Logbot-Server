@@ -1,19 +1,21 @@
 # ==============================================================================
-# Name:        Phydran6
-# Version:     2026.02.11.18.30.00
-# Beschreibung: LogBot v2026.02.11.18.30.00 - Agents API Endpoints
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
+# Version:     2026.03.31.17.26.46
+# Beschreibung: LogBot v2026.03.31.17.26.46 - Agents API Endpoints
 # ==============================================================================
 
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..models import Agent, AgentToken, Log, User, Setting
-from ..schemas import AgentResponse, AgentListResponse, AgentTokenCreate, AgentTokenResponse
+from ..schemas import AgentResponse, AgentListResponse, AgentTokenCreate, AgentTokenResponse, AgentDecommissionRequest
 from ..auth import get_current_user
+from fastapi import status
 
 router = APIRouter(prefix="/api/agents", tags=["Agents"])
 
@@ -99,12 +101,71 @@ async def get_agent(agent_id: int, db: AsyncSession = Depends(get_db), _=Depends
         log_count=log_count
     )
 
+
+@router.post("/decommission", status_code=status.HTTP_200_OK)
+async def decommission_agent(
+    payload: AgentDecommissionRequest,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Wird vom Agent bei \"vollst\u00e4ndig entfernen\" aufgerufen."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer Token erforderlich")
+    token_value = authorization[7:]
+
+    result = await db.execute(
+        select(AgentToken).where(AgentToken.token == token_value, AgentToken.is_active == True))
+    agent_token = result.scalar_one_or_none()
+    if not agent_token:
+        raise HTTPException(status_code=401, detail="Ung\u00fcltiger Agent-Token")
+
+    agent = None
+    if payload.mac_address:
+        agent = (await db.execute(select(Agent).where(Agent.mac_address == payload.mac_address))).scalar_one_or_none()
+    if not agent and payload.hostname and payload.ip_address:
+        agent = (await db.execute(
+            select(Agent).where(Agent.hostname == payload.hostname, Agent.ip_address == payload.ip_address)
+        )).scalar_one_or_none()
+    if not agent and payload.hostname:
+        agent = (await db.execute(select(Agent).where(Agent.hostname == payload.hostname))).scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent nicht gefunden")
+
+    if payload.purge:
+        await db.execute(delete(Log).where(Log.agent_id == agent.id))
+        await db.delete(agent)
+        await db.commit()
+        return {"status": "purged", "agent_id": agent.id}
+
+    # Markiere als decommissioned und setze last_seen zur\u00fcck
+    extra = getattr(agent, "extra_data", {}) or {}
+    extra.update({
+        "decommissioned": True,
+        "decommissioned_at": datetime.utcnow().isoformat(),
+        "decommissioned_token": agent_token.name,
+        "decommissioned_token_type": agent_token.device_type
+    })
+    agent.extra_data = extra
+    agent.last_seen = None
+    await db.commit()
+    return {"status": "decommissioned", "agent_id": agent.id}
+
 @router.delete("/{agent_id}", status_code=204)
-async def delete_agent(agent_id: int, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+async def delete_agent(
+    agent_id: int,
+    purge_logs: bool = Query(False, description="Logs des Agents mit l\u00f6schen"),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user)
+):
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent nicht gefunden")
+
+    if purge_logs:
+        await db.execute(delete(Log).where(Log.agent_id == agent_id))
+
     await db.delete(agent)
     await db.commit()
 
@@ -121,7 +182,7 @@ async def list_agent_tokens(db: AsyncSession = Depends(get_db), _=Depends(get_cu
 
 @token_router.post("", response_model=AgentTokenResponse, status_code=201)
 async def create_agent_token(data: AgentTokenCreate, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
-    token = AgentToken(name=data.name, token=secrets.token_hex(32))
+    token = AgentToken(name=data.name, token=secrets.token_hex(32), device_type=data.device_type)
     db.add(token)
     await db.commit()
     await db.refresh(token)

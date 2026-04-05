@@ -56,6 +56,14 @@ import { useAuthStore } from '../stores/auth'
 const auth = useAuthStore()
 const stats = ref(null)
 const logs = ref([])
+const loading = ref(false)
+
+// Clientseitiger Kurzzeit-Cache (reduziert wiederholte API-Calls beim Navigieren)
+const CACHE_MS = 30000
+let cachedStats = null
+let cachedStatsTs = 0
+let cachedLogs = null
+let cachedLogsTs = 0
 
 // Card Style mit CSS-Variablen
 const cardStyle = computed(() => ({
@@ -64,10 +72,28 @@ const cardStyle = computed(() => ({
 }))
 
 onMounted(async () => {
+  loading.value = true
   try {
-    stats.value = await auth.api('/api/logs/stats')
-    logs.value = await auth.api('/api/logs/recent?limit=10')
+    const now = Date.now()
+    const needsStats = !cachedStats || now - cachedStatsTs > CACHE_MS
+    const needsLogs = !cachedLogs || now - cachedLogsTs > CACHE_MS
+
+    const [s, l] = await Promise.all([
+      needsStats ? auth.api('/api/logs/stats') : Promise.resolve(cachedStats),
+      needsLogs ? auth.api('/api/logs/recent?limit=10') : Promise.resolve(cachedLogs)
+    ])
+
+    cachedStats = s
+    cachedStatsTs = now
+    cachedLogs = l
+    cachedLogsTs = now
+
+    stats.value = s
+    logs.value = l
   } catch (e) { console.error(e) }
+  finally {
+    loading.value = false
+  }
 })
 
 function formatTime(ts) { 

@@ -1,7 +1,8 @@
 # ==============================================================================
-# Name:        Phydran6
-# Version:     2026.03.19.13.26.52
-# Beschreibung: LogBot v2026.03.19.13.26.52 - Backend Konfiguration
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
+# Version:     2026.04.02.16.32.39
+# Beschreibung: LogBot v2026.03.31.17.26.46 - Backend Konfiguration
 # ==============================================================================
 
 from pydantic_settings import BaseSettings
@@ -15,7 +16,9 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
-    app_version: str = "2026.03.19.13.26.52"
+    app_version: str = "2026.04.02.16.32.39"
+    caddy_admin_url: str = "http://caddy:2019"
+    caddy_certs_dir: str = "/caddy-certs"
     
     @property
     def database_url(self) -> str:

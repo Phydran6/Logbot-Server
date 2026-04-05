@@ -1,7 +1,8 @@
 # ==============================================================================
-# Name:        Phydran6
-# Version:     2026.01.30.13.30.00
-# Beschreibung: LogBot v2026.01.30.13.30.00 - Backend API Dockerfile
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
+# Version:     2026.03.31.17.26.46
+# Beschreibung: LogBot v2026.03.31.17.26.46 - Backend API Dockerfile
 # ==============================================================================
 
 FROM python:3.12-slim

@@ -1,7 +1,8 @@
 # ==============================================================================
-# Name:        Phydran6
-# Version:     2026.03.03.17.18.19
-# Beschreibung: LogBot v2026.01.30.13.30.00 - Settings API Endpoints
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
+# Version:     2026.03.31.17.26.46
+# Beschreibung: LogBot v2026.03.31.17.26.46 - Settings API Endpoints
 # ==============================================================================
 
 import asyncio
@@ -10,9 +11,9 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from ..database import get_db
+from ..database import get_db, engine
 from ..models import Setting, Log, User
 from ..config import settings as app_settings
 from ..schemas import SettingsResponse, SettingUpdate, RetentionResponse, DatabaseSettingsResponse
@@ -110,6 +111,51 @@ async def execute_retention(days: int = Query(..., ge=1), db: AsyncSession = Dep
     result = await db.execute(delete(Log).where(Log.timestamp < cutoff))
     await db.commit()
     return RetentionResponse(deleted_count=result.rowcount, message=f"{result.rowcount} Logs geloescht")
+
+@router.delete("/logs/all", response_model=RetentionResponse)
+async def delete_all_logs(
+    confirm: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_admin),
+):
+    """
+    Loescht saemtliche Log-Eintraege via TRUNCATE und gibt Speicher sofort frei.
+    Erfordert Bestaetigung "DELETE_ALL_LOGS".
+    """
+    if confirm != "DELETE_ALL_LOGS":
+        raise HTTPException(status_code=400, detail="Bestaetigung fehlt oder ist falsch")
+
+    total_logs = (await db.execute(select(func.count(Log.id)))).scalar() or 0
+
+    # TRUNCATE innerhalb der laufenden Transaktion ausfuehren
+    await db.execute(text("TRUNCATE TABLE logs RESTART IDENTITY"))
+    await db.commit()
+
+    return RetentionResponse(
+        deleted_count=total_logs,
+        message=f"{total_logs} Logs geloescht (TRUNCATE)" if total_logs else "Keine Logs vorhanden"
+    )
+
+@router.post("/logs/compact")
+async def compact_logs(
+    confirm: str = Query(..., min_length=1),
+    _=Depends(get_current_admin),
+):
+    """
+    Fuehrt VACUUM FULL + ANALYZE auf der Tabelle logs aus, um belegten Plattenplatz zurueckzugeben.
+    Exklusiver Lock -> kurze Downtime fuer Schreib/Lesezugriffe.
+    """
+    if confirm != "COMPACT_LOGS":
+        raise HTTPException(status_code=400, detail="Bestaetigung fehlt oder ist falsch")
+
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.exec_driver_sql("VACUUM (FULL, ANALYZE) logs")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"VACUUM fehlgeschlagen: {exc}")
+
+    return {"message": "VACUUM FULL logs abgeschlossen"}
 
 @router.post("/reboot")
 async def reboot_system(_=Depends(get_current_admin)):

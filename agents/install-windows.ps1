@@ -1,6 +1,7 @@
 <#
 ==============================================================================
-# Name:        Phydran6
+Name:        Philipp Fischer
+Kontakt:     p.fischer@itconex.de
 Version:     2026.02.20.19.00.09
 Beschreibung: LogBot Agent v2026.02.20.19.00.09 - Windows Installer
               Start per Menue: 1=Install/Update, 2=Tests senden,

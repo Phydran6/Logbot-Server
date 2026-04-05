@@ -1,8 +1,13 @@
 # ==============================================================================
-# Name:        Phydran6
-# Version:     2026.01.30.13.30.00
-# Beschreibung: LogBot v2026.01.30.13.30.00 - Caddy Reverse Proxy
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
+# Version:     2026.03.31.17.26.46
+# Beschreibung: LogBot v2026.03.31.17.26.46 - Caddy Reverse Proxy
 # ==============================================================================
+
+{
+    admin 0.0.0.0:2019
+}
 
 :80 {
     handle /api/* {
@@ -10,8 +15,5 @@
     }
     handle {
         reverse_proxy frontend:80
-    }
-    log {
-        output stdout
     }
 }

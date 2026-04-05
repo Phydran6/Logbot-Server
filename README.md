@@ -1,28 +1,26 @@
-# LogBot v2026.03.19.13.26.52
-**Zentraler Log-Server für Linux/Windows Systeme und Netzwerkgeräte**
+# LogBot v2026.03.31.17.26.46
+Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
-Entwickelt von Phydran6
+Entwickelt von Philipp Fischer  
+Kontakt: p.fischer@itconex.de
 
 ## Features
-
-- 📋 **Syslog-Empfang** auf UDP/TCP Port 514
-- 🖥️ **Automatische Geräteerkennung** (UniFi APs, Linux, Windows)
-- 🔍 **Echtzeit Log-Suche** mit Filtern
-- 🔗 **Webhook-Integration** für n8n, Make, Zapier (ohne Login!)
-- 📊 **Dashboard** mit Statistiken
-- 👥 **Benutzerverwaltung** mit Rollen
-- 💚 **Health Monitoring** für System-Ressourcen
-- 🎨 **Whitelabel-System** mit Dark/Light Mode
-- 🐳 **Docker-basiert** für einfache Installation
+- Syslog-Empfang auf UDP/TCP Port 514
+- Automatische Geräteerkennung (UniFi APs, Linux, Windows)
+- Echtzeit Log-Suche mit Filtern
+- Webhook-Integration für n8n, Make, Zapier (ohne Login)
+- Dashboard mit Statistiken
+- Benutzerverwaltung mit Rollen
+- Health Monitoring für System-Ressourcen
+- Whitelabel-System mit Dark/Light Mode
+- Docker-basiert für einfache Installation
 
 ## Voraussetzungen
-
 - Linux Server (Ubuntu 20.04+ empfohlen)
 - Docker & Docker Compose
 - Root-Zugriff
 
 ## Installation
-
 ```bash
 # Repository klonen
 git clone https://github.com/DEIN-USERNAME/logbot.git
@@ -32,150 +30,98 @@ cd logbot
 sudo bash install.sh
 ```
 
-**Oder manuell:**
-
+**Oder manuell aus Archiv:**
 ```bash
-tar -xzf logbot-v2026.03.19.13.26.52.tar.gz
-cd logbot-v2026.03.19.13.26.52
+tar -xzf logbot-v2026.03.31.17.26.46.tar.gz
+cd logbot-v2026.03.31.17.26.46
 sudo bash install.sh
 ```
 
 ## Zugriff
-
-Nach der Installation:
-
-- **Web-Interface:** http://SERVER-IP
-- **API Docs:** http://SERVER-IP/api/docs
-- **Branding:** http://SERVER-IP/settings/branding
-- **Login:** admin / admin (bitte ändern!)
+- Web-Interface: http://SERVER-IP  
+  Hinweis: HTTPS ist nach der Grundinstallation noch aus. Aktiviere es im Web-UI unter „Einstellungen → Reverse Proxy & TLS“ (Let’s Encrypt oder eigenes Zertifikat).
+- API Docs: http://SERVER-IP/api/docs
+- Branding: http://SERVER-IP/settings/branding
+- Login: admin / admin (bitte direkt ändern)
 
 ## Syslog-Quellen konfigurieren
-
 ### Linux (rsyslog)
-
-```bash
+```
 # /etc/rsyslog.d/logbot.conf
 *.* @LOGBOT-IP:514
 ```
 
 ### UniFi Controller
-
 Settings → System → Remote Logging → Enable + LogBot IP
 
 ## Webhook-Nutzung
-
-Webhooks ermöglichen Zugriff ohne Login:
-
+Webhooks erlauben Zugriff ohne Login:
 ```
 GET /api/webhook/{id}/call?token={token}
 ```
 
 Ideal für n8n-Workflows:
-
 1. LogBot → Webhooks → Neuer Webhook
 2. Filter konfigurieren (Hostname, Level, etc.)
 3. URL in n8n HTTP Request Node einfügen
 
 ## Whitelabel / Branding
+LogBot bietet ein Whitelabel-System zur Anpassung an deine Marke.
 
-LogBot bietet ein vollständiges Whitelabel-System zur Anpassung an deine Marke.
-
-### Features
-
-- 🌓 **Dark/Light Mode** mit Toggle-Button
-- 🎨 **Farbschema** vollständig anpassbar
-- 🏢 **Firmenname & Logo** austauschbar
-- 🖼️ **Favicon** anpassbar
-- 📝 **Custom CSS** für erweiterte Anpassungen
+### Branding-Features
+- Dark/Light Mode mit Toggle
+- Farbschema anpassbar
+- Firmenname & Logo austauschbar
+- Favicon anpassbar
+- Custom CSS für Erweiterungen
 
 ### Konfiguration
-
 1. Navigiere zu **Settings → Branding** (`/settings/branding`)
-2. Passe Farben, Logo und Texte an
-3. Klicke auf **Speichern**
+2. Farben, Logo und Texte anpassen
+3. Speichern klicken
 
 ### Einstellungen
+| Einstellung      | Beschreibung                                  |
+|------------------|-----------------------------------------------|
+| Firmenname       | Anzeige im Header und Seitentitel             |
+| Tagline          | Slogan unter dem Firmennamen                  |
+| Logo             | PNG/JPG/SVG/WebP (empfohlen: 200x50 px)       |
+| Favicon          | ICO/PNG/SVG (empfohlen: 32x32 px)             |
+| Primärfarbe      | Buttons, Links, Akzente                       |
+| Dark/Light Mode  | Standard-Theme und Toggle-Erlaubnis           |
+| Custom CSS       | Eigene CSS-Regeln                             |
 
-| Einstellung | Beschreibung |
-|-------------|--------------|
-| Firmenname | Wird im Header und Seitentitel angezeigt |
-| Tagline | Slogan unter dem Firmennamen |
-| Logo | PNG, JPG, SVG oder WebP (empfohlen: 200x50px) |
-| Favicon | ICO, PNG oder SVG (empfohlen: 32x32px) |
-| Primärfarbe | Buttons, Links, Akzente |
-| Dark/Light Mode | Standard-Theme und Toggle-Erlaubnis |
-| Custom CSS | Eigene CSS-Regeln für erweiterte Anpassungen |
-
-### Theme-Toggle einbauen
-
-Der Theme-Toggle kann überall eingebaut werden:
-
+### Theme-Toggle Beispiel
 ```vue
 <template>
   <ThemeToggle />
-  <!-- oder mit Label: -->
+  <!-- oder mit Label -->
   <ThemeToggle :showLabel="true" />
 </template>
-
-<script setup>
-import ThemeToggle from '@/components/ThemeToggle.vue'
-</script>
 ```
 
-### API-Endpunkte
-
-| Methode | Endpoint | Beschreibung |
-|---------|----------|--------------|
-| GET | `/api/branding/config` | Aktuelle Konfiguration laden |
-| PUT | `/api/branding/config` | Konfiguration speichern |
-| POST | `/api/branding/upload/logo` | Logo hochladen |
-| POST | `/api/branding/upload/favicon` | Favicon hochladen |
-| POST | `/api/branding/reset` | Auf Standardwerte zurücksetzen |
-
-### Standard-Farben (itconex.de inspiriert)
-
-**Dark Mode:**
-- Hintergrund: `#0a0a0f`
-- Oberfläche: `#111118`
-- Primär: `#0ea5e9`
-
-**Light Mode:**
-- Hintergrund: `#f8fafc`
-- Oberfläche: `#ffffff`
-- Primär: `#0ea5e9`
-
-## Verzeichnisstruktur
-
+## Verzeichnisstruktur (Standard-Install unter /opt/logbot)
 ```
 /opt/logbot/
-├── docker-compose.yml
-├── .env                 # Zugangsdaten (geheim!)
-├── backend/             # FastAPI Backend
-│   └── app/
-│       └── branding.py  # Branding API
-├── frontend/            # Vue.js Frontend
-│   └── src/
-│       ├── stores/
-│       │   ├── themeStore.js
-│       │   └── brandingStore.js
-│       ├── components/
-│       │   └── ThemeToggle.vue
-│       └── views/
-│           └── BrandingSettings.vue
-├── syslog/              # Syslog Server
-├── caddy/               # Reverse Proxy
-└── db/                  # Datenbank-Schema
+  docker-compose.yml
+  .env                  # Zugangsdaten (geheim!)
+  backend/              # FastAPI Backend
+    app/
+  frontend/             # Vue.js Frontend
+    src/
+  syslog/               # Syslog Server
+  caddy/                # Reverse Proxy
+  db/                   # Datenbank-Schema
 ```
 
 ## Befehle
-
 ```bash
 cd /opt/logbot
 
-# Status anzeigen
+# Status
 docker compose ps
 
-# Logs anzeigen
+# Logs
 docker compose logs -f
 
 # Neustart
@@ -187,59 +133,66 @@ docker compose down
 # Starten
 docker compose up -d
 
-# Update (nach neuer Version)
+# Update auf neue Version
 docker compose pull
 docker compose up -d --build
 ```
 
 ## Datenbank-Backup
-
 ```bash
 # Backup erstellen
 docker compose exec postgres pg_dump -U logbot logbot > backup.sql
 
-# Backup wiederherstellen
+# Backup einspielen
 docker compose exec -T postgres psql -U logbot logbot < backup.sql
 ```
 
 ## Changelog
+### v2026.03.31.17.26.46 (2026-03-31)
+- Version-Bump Settings-View + Backend-App-Version auf 2026.04.02.16.32.39.
 
-### v2026.03.19.13.26.52 (2026-03-19)
-- Admin-Button „System neu starten“ ergänzt: Backend führt Reboot über SysRq/nsenter/reboot/shutdown aus (Container jetzt mit pid:host/privileged).
-- Health-Uptime bleibt in der Health-Ansicht; System-Karte in den Einstellungen ohne Uptime-Anzeige.
-- Backend-/Frontend-Versionen auf 2026.03.19.13.26.52 angehoben.
+### v2026.03.31.10.48.35 (2026-03-31)
+- NEU: Agent-Decommission/Purge Endpoint + Installer-Option „Server + Logs entfernen“.
+- NEU: Installer-Hauptmenü (Installieren/Deinstallieren/Test) und FQDN-Check.
+- FIX: Umlaute/Encoding in README, Syslog-Server, Agents-UI.
+- UI: Delete-Prompt + Label „Löschen“ korrigiert.
+
+### v2026.03.30.10.40.54 (2026-03-19)
+- Admin-Button „System neu starten“ ergänzt (Backend führt Reboot über SysRq/nsenter/reboot/shutdown aus; Container pid:host/privileged).
+- Health-Uptime bleibt in der Health-Ansicht; System-Karte in den Einstellungen ohne Uptime.
+- Backend/Frontend-Versionen auf 2026.03.19.13.26.52 angehoben.
 
 ### v2026.03.03.17.18.19 (2026-03-03)
 - Datenbank-Passwort im Einstellungsbereich (nur Admins) anzeigen/ausblenden/kopieren; neuer API-Endpoint `/api/settings/database`.
 
 ### v2026.02.20 (2026-02-20)
-- **NEU:** Web-UI Seite „Agent Token“ zeigt/erneuert den HTTPS-Agent-Token und Kopierlink.
-- **NEU:** Backend erzeugt beim Start automatisch ein Default-Agent-Token (falls keins vorhanden).
-- **FIX:** Robustere Login-Fehlerbehandlung im Frontend (verhindert JSON-Parse-Fehler).
+- NEU: Web-UI Seite „Agent Token“ zeigt/erneuert den HTTPS-Agent-Token und Kopierlink.
+- NEU: Backend erzeugt beim Start automatisch ein Default-Agent-Token (falls keins vorhanden).
+- FIX: Robustere Login-Fehlerbehandlung im Frontend (verhindert JSON-Parse-Fehler).
 
 ### v2026.02.16 (2026-02-16)
-- **FIX:** Agent löschen schlug fehl (async SQLAlchemy + Foreign Key Konflikt)
-- **FIX:** Health-Seite nicht erreichbar bei hoher DB-Last
-- **PERFORMANCE:** Syslog Server komplett überarbeitet:
+- FIX: Agent löschen schlug fehl (async SQLAlchemy + FK-Konflikt)
+- FIX: Health-Seite nicht erreichbar bei hoher DB-Last
+- PERFORMANCE: Syslog Server überarbeitet
   - Agent-Cache im Speicher (vermeidet DB-Lookup pro Nachricht)
-  - Batch-Inserts via PostgreSQL COPY (statt Einzel-INSERT pro Log)
-  - Gebündelte `last_seen` Updates (1x alle 2 Sek statt pro Nachricht)
-  - Ergebnis: ~96 DB-Ops/Sek → ~2 DB-Ops/Sek
-- **PERFORMANCE:** Dashboard/Logs/Health `COUNT(*)` über Millionen Zeilen eliminiert:
-  - Gesamtzahl via `pg_class.reltuples` (Schätzung, sofort verfügbar)
-  - Unique Hosts aus `agents`-Tabelle statt `COUNT(DISTINCT)` über `logs`
-  - Level/Source Statistiken nur für heute (nutzt timestamp-Index)
-- **PERFORMANCE:** Fehlender Index `idx_logs_agent_id` auf `logs.agent_id` ergänzt
+  - Batch-Inserts via PostgreSQL COPY
+  - Gebündelte `last_seen` Updates (alle 2 s)
+  - Ergebnis: ~96 DB-Ops/s → ~2 DB-Ops/s
+- PERFORMANCE: Dashboard/Logs/Health `COUNT(*)` über Millionen Zeilen eliminiert
+  - Gesamtzahl via `pg_class.reltuples` (Schätzung)
+  - Unique Hosts aus `agents` statt `COUNT(DISTINCT)` über `logs`
+  - Level/Source-Statistiken nur für heute (nutzt timestamp-Index)
+- PERFORMANCE: Index `idx_logs_agent_id` ergänzt
 
 ### v2026.01.30.17.30.00 (2026-01-30)
-- **NEU:** Whitelabel-System mit Dark/Light Mode
-- **NEU:** Branding-Einstellungen im Web-Interface
-- **NEU:** Logo und Favicon Upload
-- **NEU:** Custom CSS Support
-- **NEU:** Theme-Toggle Komponente
+- NEU: Whitelabel-System mit Dark/Light Mode
+- NEU: Branding-Einstellungen im Web-Interface
+- NEU: Logo- und Favicon-Upload
+- NEU: Custom CSS Support
+- NEU: Theme-Toggle Komponente
 
 ### v2026.01.30.13.30.00 (2026-01-30)
-- UniFi Netconsole Parsing Fix (Hex-ID != Hostname)
+- UniFi Netconsole Parsing Fix (Hex-ID ≠ Hostname)
 - Öffentliche Webhook-Endpoints ohne Bearer Token
 - Verbessertes Health Monitoring
 - Settings-Verwaltung im Web-Interface
@@ -256,5 +209,4 @@ docker compose exec -T postgres psql -U logbot logbot < backup.sql
 - Web-Interface
 
 ## Support
-
 Bei Fragen: p.fischer@itconex.de

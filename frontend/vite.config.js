@@ -6,5 +6,15 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: { '/api': { target: 'http://localhost:8000', changeOrigin: true } }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vue: ['vue', 'vue-router'],
+          pinia: ['pinia']
+        }
+      }
+    }
   }
 })

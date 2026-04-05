@@ -1,12 +1,13 @@
 ﻿<!-- ==============================================================================
-     # Name:        Phydran6
+     Name:        Philipp Fischer
+     Kontakt:     p.fischer@itconex.de
      Version:     2026.01.30.19.05.33
-     Beschreibung: LogBot - Agents/GerÃ¤te Ãœbersicht mit Theme-Support
+     Beschreibung: LogBot - Agents/Geräte Übersicht mit Theme-Support
      ============================================================================== -->
 
 <template>
   <div class="p-6">
-    <h1 class="text-2xl font-bold mb-6" :style="{ color: 'var(--color-text-primary)' }">Agents / Geraete</h1>
+    <h1 class="text-2xl font-bold mb-6" :style="{ color: 'var(--color-text-primary)' }">Agents / Geräte</h1>
     
     <!-- Suche -->
     <div class="rounded-lg shadow p-4 mb-6" :style="cardStyle">
@@ -103,7 +104,7 @@
             class="text-sm hover:opacity-70"
             :style="{ color: 'var(--color-danger)' }"
           >
-             Loeschen
+             Löschen
           </button>
         </div>
       </div>
@@ -208,8 +209,8 @@ async function loadAgents() {
   }
 }
 
-async function deleteAgent(agent) {
-  if (!confirm(`Agent "${agent.hostname}" wirklich lÃ¶schen?`)) return
+  async function deleteAgent(agent) {
+  if (!confirm(`Agent "${agent.hostname}" wirklich löschen?`)) return
 
   try {
     await authStore.api(`/api/agents/${agent.id}`, { method: 'DELETE' })

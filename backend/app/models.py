@@ -1,5 +1,6 @@
 # ==============================================================================
-# Name:        Phydran6
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
 # Version:     2026.02.16.12.00.00
 # Beschreibung: LogBot v2026.02.16.12.00.00 - SQLAlchemy Models
 # ==============================================================================
@@ -69,6 +70,7 @@ class AgentToken(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
     token = Column(String(64), unique=True, nullable=False)
+    device_type = Column(String(50))  # optional: 'linux' | 'windows' | None
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

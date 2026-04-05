@@ -1,8 +1,12 @@
 -- ==============================================================================
--- Name:        Phydran6
+-- Name:        Philipp Fischer
+-- Kontakt:     p.fischer@itconex.de
 -- Version:     2026.02.16.12.00.00
 -- Beschreibung: LogBot v2026.02.16.12.00.00 - PostgreSQL Datenbankschema
 -- ==============================================================================
+
+-- Performance-Extensions
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Benutzer-Tabelle
 CREATE TABLE IF NOT EXISTS users (
@@ -53,6 +57,10 @@ CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_hostname ON logs(hostname);
 CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
 CREATE INDEX IF NOT EXISTS idx_logs_source ON logs(source);
+CREATE INDEX IF NOT EXISTS idx_logs_hostname_trgm ON logs USING gin (hostname gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_logs_source_trgm ON logs USING gin (source gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_logs_message_trgm ON logs USING gin (message gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_logs_level_lower ON logs ((lower(level)));
 
 -- Webhooks-Tabelle
 CREATE TABLE IF NOT EXISTS webhooks (
@@ -89,6 +97,7 @@ CREATE TABLE IF NOT EXISTS agent_tokens (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     token VARCHAR(64) UNIQUE NOT NULL,
+    device_type VARCHAR(50),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

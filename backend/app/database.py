@@ -1,5 +1,6 @@
 # ==============================================================================
-# Name:        Phydran6
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
 # Version:     2026.01.30.13.30.00
 # Beschreibung: LogBot v2026.01.30.13.30.00 - Async SQLAlchemy Database
 # ==============================================================================

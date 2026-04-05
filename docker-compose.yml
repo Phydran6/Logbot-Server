@@ -1,6 +1,7 @@
 # ==============================================================================
-# Name:        Phydran6
-# Version:     2026.01.30.13.30.00
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
+# Version:     2026.03.31.17.26.46
 # Beschreibung: LogBot v2026.01.30.13.30.00 - Docker Compose Konfiguration
 # ==============================================================================
 
@@ -62,8 +63,12 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME:-logbot}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET muss gesetzt sein}
+      CADDY_ADMIN_URL: ${CADDY_ADMIN_URL:-http://caddy:2019}
+      CADDY_CERTS_DIR: ${CADDY_CERTS_DIR:-/caddy-certs}
     expose:
       - "8000"
+    volumes:
+      - caddy_certs:/caddy-certs
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,6 +97,7 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - caddy_certs:/etc/caddy/certs
     depends_on:
       - frontend
       - backend
@@ -114,6 +120,7 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
+  caddy_certs:
 
 networks:
   logbot:

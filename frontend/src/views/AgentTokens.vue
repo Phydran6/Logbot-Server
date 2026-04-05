@@ -1,6 +1,7 @@
 ﻿<!-- ==============================================================================
-     # Name:        Phydran6
-     Version:     2026.02.20.18.00.00
+     Name:        Philipp Fischer
+     Kontakt:     p.fischer@itconex.de
+     Version:     2026.03.31.17.26.46
      Beschreibung: LogBot - Agent Token Verwaltung (HTTPS Agents)
      ============================================================================= -->
 
@@ -10,26 +11,50 @@
 
     <!-- Neuer Token -->
     <div class="rounded-lg shadow p-4 mb-6" :style="cardStyle">
-      <div class="flex flex-col md:flex-row gap-3 items-start md:items-end">
-        <div class="flex-1 w-full">
-          <label class="block text-sm mb-1" :style="{ color: 'var(--color-text-secondary)' }">Token-Name</label>
-          <input
-            v-model="newTokenName"
-            type="text"
-            placeholder="z.B. Windows-Agent-Prod"
-            class="w-full rounded px-3 py-2"
-            :style="inputStyle"
-            @keyup.enter="createToken"
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-col md:flex-row gap-3 items-start md:items-end">
+          <div class="flex-1 w-full">
+            <label class="block text-sm mb-1" :style="{ color: 'var(--color-text-secondary)' }">Token-Name</label>
+            <input
+              v-model="newTokenName"
+              type="text"
+              placeholder="z.B. linux-agent-prod oder windows-agent-prod"
+              class="w-full rounded px-3 py-2"
+              :style="inputStyle"
+              @keyup.enter="createToken"
+            >
+          </div>
+          <button
+            @click="createToken"
+            class="text-white rounded px-4 py-2 hover:opacity-90"
+            :style="{ backgroundColor: 'var(--color-primary)' }"
+            :disabled="creating || !newTokenName.trim()"
           >
+            {{ creating ? 'Erstelle…' : 'Token erstellen' }}
+          </button>
         </div>
-        <button
-          @click="createToken"
-          class="text-white rounded px-4 py-2 hover:opacity-90"
-          :style="{ backgroundColor: 'var(--color-primary)' }"
-          :disabled="creating || !newTokenName.trim()"
-        >
-          {{ creating ? 'Erstelle…' : 'Token erstellen' }}
-        </button>
+
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="px-3 py-2 rounded text-sm text-white hover:opacity-90"
+            :style="{ backgroundColor: 'var(--color-primary)' }"
+            :disabled="creating"
+            @click="quickCreate('linux-agent')"
+          >
+            {{ creating && pendingPreset === 'linux-agent' ? 'Erstelle Linux-Token…' : 'Linux-Token erstellen' }}
+          </button>
+          <button
+            class="px-3 py-2 rounded text-sm text-white hover:opacity-90"
+            :style="{ backgroundColor: 'var(--color-primary)' }"
+            :disabled="creating"
+            @click="quickCreate('windows-agent')"
+          >
+            {{ creating && pendingPreset === 'windows-agent' ? 'Erstelle Windows-Token…' : 'Windows-Token erstellen' }}
+          </button>
+          <span v-if="statusMessage" class="text-sm" :style="{ color: statusColor }">
+            {{ statusMessage }}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -40,6 +65,7 @@
           <thead :style="{ color: 'var(--color-text-secondary)' }">
             <tr>
               <th class="text-left py-2 pr-4">Name</th>
+              <th class="text-left py-2 pr-4">OS</th>
               <th class="text-left py-2 pr-4">Token</th>
               <th class="text-left py-2 pr-4">Status</th>
               <th class="text-left py-2 pr-4">Erstellt</th>
@@ -49,6 +75,7 @@
           <tbody>
             <tr v-for="token in tokens" :key="token.id" class="border-t" :style="{ borderColor: 'var(--color-border)' }">
               <td class="py-2 pr-4" :style="{ color: 'var(--color-text-primary)' }">{{ token.name }}</td>
+              <td class="py-2 pr-4" :style="{ color: 'var(--color-text-primary)' }">{{ token.device_type || '—' }}</td>
               <td class="py-2 pr-4 font-mono break-all" :style="{ color: 'var(--color-text-primary)' }">{{ token.token }}</td>
               <td class="py-2 pr-4">
                 <span
@@ -94,6 +121,9 @@ const tokens = ref([])
 const loading = ref(false)
 const creating = ref(false)
 const newTokenName = ref('')
+const statusMessage = ref('')
+const statusColor = ref('var(--color-text-secondary)')
+const pendingPreset = ref('')
 
 const cardStyle = computed(() => ({
   backgroundColor: 'var(--color-surface)',
@@ -122,21 +152,37 @@ async function loadTokens() {
   }
 }
 
-async function createToken() {
+async function createToken(deviceTypeOverride = null) {
   if (!newTokenName.value.trim()) return
   creating.value = true
+  statusMessage.value = ''
   try {
     const token = await authStore.api('/api/agent-tokens', {
       method: 'POST',
-      body: JSON.stringify({ name: newTokenName.value.trim() })
+      body: {
+        name: newTokenName.value.trim(),
+        device_type: deviceTypeOverride || null
+      }
     })
     tokens.value = [token, ...tokens.value]
     newTokenName.value = ''
+    statusMessage.value = `Token "${token.name}" erstellt`
+    statusColor.value = 'var(--color-success, #16a34a)'
   } catch (e) {
-    alert('Erstellen fehlgeschlagen: ' + e.message)
+    alert('Erstellen fehlgeschlagen: ' + (e?.message || e))
+    statusMessage.value = 'Fehler beim Erstellen: ' + (e?.message || '')
+    statusColor.value = 'var(--color-danger, #dc2626)'
   } finally {
     creating.value = false
+    pendingPreset.value = ''
   }
+}
+
+async function quickCreate(presetName) {
+  pendingPreset.value = presetName
+  newTokenName.value = presetName
+  const device = presetName.startsWith('linux') ? 'linux' : presetName.startsWith('windows') ? 'windows' : null
+  await createToken(device)
 }
 
 async function regenerateToken(token) {
@@ -144,8 +190,12 @@ async function regenerateToken(token) {
   try {
     const updated = await authStore.api(`/api/agent-tokens/${token.id}/regenerate`, { method: 'POST' })
     tokens.value = tokens.value.map(t => t.id === token.id ? updated : t)
+    statusMessage.value = `Token "${updated.name}" regeneriert`
+    statusColor.value = 'var(--color-success, #16a34a)'
   } catch (e) {
     alert('Regeneration fehlgeschlagen: ' + e.message)
+    statusMessage.value = 'Fehler bei Regeneration'
+    statusColor.value = 'var(--color-danger, #dc2626)'
   }
 }
 
@@ -154,16 +204,24 @@ async function deleteToken(token) {
   try {
     await authStore.api(`/api/agent-tokens/${token.id}`, { method: 'DELETE' })
     tokens.value = tokens.value.filter(t => t.id !== token.id)
+    statusMessage.value = `Token "${token.name}" gelöscht`
+    statusColor.value = 'var(--color-success, #16a34a)'
   } catch (e) {
     alert('Löschen fehlgeschlagen: ' + e.message)
+    statusMessage.value = 'Fehler beim Löschen'
+    statusColor.value = 'var(--color-danger, #dc2626)'
   }
 }
 
 async function copyToken(value) {
   try {
     await navigator.clipboard.writeText(value)
+    statusMessage.value = 'Token kopiert'
+    statusColor.value = 'var(--color-success, #16a34a)'
   } catch (e) {
     console.warn('Clipboard fehlgeschlagen', e)
+    statusMessage.value = 'Kopieren fehlgeschlagen'
+    statusColor.value = 'var(--color-danger, #dc2626)'
   }
 }
 

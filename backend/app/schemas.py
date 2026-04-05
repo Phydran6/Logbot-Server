@@ -1,5 +1,6 @@
 # ==============================================================================
-# Name:        Phydran6
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
 # Version:     2026.03.03.17.18.19
 # Beschreibung: LogBot v2026.03.03.17.18.19 - Pydantic Schemas
 # ==============================================================================
@@ -123,11 +124,13 @@ class WebhookResponse(WebhookBase):
 
 class AgentTokenCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
+    device_type: Optional[str] = Field(default=None, pattern="^(linux|windows)$")
 
 class AgentTokenResponse(BaseModel):
     id: int
     name: str
     token: str
+    device_type: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -146,6 +149,12 @@ class LogIngestRequest(BaseModel):
 class LogIngestResponse(BaseModel):
     accepted: int
     message: str = "ok"
+
+class AgentDecommissionRequest(BaseModel):
+    hostname: Optional[str] = None
+    ip_address: Optional[str] = None
+    mac_address: Optional[str] = None
+    purge: bool = False
 
 class SettingsResponse(BaseModel):
     settings: Dict[str, Any]
@@ -181,3 +190,22 @@ class HealthDetailedResponse(HealthResponse):
     logs_last_24h: int
     agents_total: int
     agents_online: int
+
+# Caddy management
+class CaddyConfigResponse(BaseModel):
+    running_config: Dict[str, Any] = {}
+    saved_caddyfile: str = ""
+    cert_present: bool = False
+    last_error: Optional[str] = None
+
+class CaddyApplyRequest(BaseModel):
+    caddyfile: str
+    save: bool = True
+    mode: Optional[str] = Field(default=None, pattern="^(http|letsencrypt|custom)$")
+    domain: Optional[str] = None
+    letsencrypt_email: Optional[str] = None
+
+class CaddyTemplateRequest(BaseModel):
+    domain: Optional[str] = None
+    mode: str = Field(..., pattern="^(http|letsencrypt|custom)$")
+    letsencrypt_email: Optional[str] = None

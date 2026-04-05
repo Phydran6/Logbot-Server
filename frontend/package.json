@@ -1,6 +1,6 @@
 {
   "name": "logbot-frontend",
-  "version": "2026.03.19.13.26.52",
+  "version": "2026.03.31.17.26.46",
   "type": "module",
   "scripts": {
     "dev": "vite",

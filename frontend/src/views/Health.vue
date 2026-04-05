@@ -1,5 +1,6 @@
 <!-- ==============================================================================
-     # Name:        Phydran6
+     Name:        Philipp Fischer
+     Kontakt:     p.fischer@itconex.de
      Version:     2026.01.30.19.18.22
      Beschreibung: LogBot - System Health mit Theme-Support
      ============================================================================== -->
@@ -158,6 +159,11 @@ import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
 const health = ref(null)
+const loading = ref(false)
+
+const CACHE_MS = 5000
+let cachedHealth = null
+let cachedHealthTs = 0
 
 // Computed Styles
 const cardStyle = computed(() => ({
@@ -184,10 +190,21 @@ const warningBannerStyle = computed(() => ({
 onMounted(() => loadHealth())
 
 async function loadHealth() {
+  loading.value = true
   try {
-    health.value = await authStore.api('/api/health/detailed')
+    const now = Date.now()
+    if (cachedHealth && now - cachedHealthTs < CACHE_MS) {
+      health.value = cachedHealth
+      return
+    }
+    const data = await authStore.api('/api/health/detailed')
+    cachedHealth = data
+    cachedHealthTs = now
+    health.value = data
   } catch (e) {
     console.error('Fehler:', e)
+  } finally {
+    loading.value = false
   }
 }
 

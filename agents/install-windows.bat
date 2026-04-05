@@ -1,6 +1,7 @@
 @echo off
 :: ==============================================================================
-:: # Name:        Phydran6
+:: Name:        Philipp Fischer
+:: Kontakt:     p.fischer@itconex.de
 :: Version:     2026.01.30.13.30.00
 :: Beschreibung: LogBot Agent v2026.01.30.13.30.00 - Windows Installer Wrapper
 :: ==============================================================================

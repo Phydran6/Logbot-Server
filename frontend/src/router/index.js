@@ -1,6 +1,7 @@
 /**
  * ==============================================================================
- # Name:        Phydran6
+ * Name:           Phil Fischer
+ * E-Mail:         p.fischer@phytech.de
  * Version:        20.02.2026.12.00.00
  * ==============================================================================
  * 
@@ -57,13 +58,6 @@ const routes = [
         component: () => import('../views/Agents.vue') 
       },
 
-      // Agent Tokens (HTTPS Agents)
-      { 
-        path: 'agent-tokens', 
-        name: 'AgentTokens', 
-        component: () => import('../views/AgentTokens.vue') 
-      },
-      
       // Benutzer-Verwaltung
       { 
         path: 'users', 

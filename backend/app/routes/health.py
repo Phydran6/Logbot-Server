@@ -1,10 +1,13 @@
 # ==============================================================================
-# Name:        Phydran6
+# Name:        Philipp Fischer
+# Kontakt:     p.fischer@itconex.de
 # Version:     2026.02.16.12.00.00
 # Beschreibung: LogBot v2026.02.16.12.00.00 - Health API Endpoints
 # ==============================================================================
 
 import time
+import os
+import asyncio
 from datetime import datetime, timedelta
 import psutil
 from fastapi import APIRouter, Depends
@@ -18,6 +21,10 @@ from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/health", tags=["Health"])
 SERVER_START = time.time()
+_HEALTH_CACHE_TTL = int(os.getenv("HEALTH_CACHE_SECONDS", "5"))
+_health_cache = None
+_health_cache_expires = 0.0
+_health_cache_lock = asyncio.Lock()
 
 @router.get("", response_model=HealthResponse)
 async def health_check():
@@ -25,6 +32,17 @@ async def health_check():
 
 @router.get("/detailed", response_model=HealthDetailedResponse)
 async def health_detailed(db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+    global _health_cache, _health_cache_expires
+
+    now = time.time()
+    if _health_cache and now < _health_cache_expires:
+        return _health_cache
+
+    async with _health_cache_lock:
+        now = time.time()
+        if _health_cache and now < _health_cache_expires:
+            return _health_cache
+
     db_ok = True
     logs_total = logs_24h = agents_total = agents_online = 0
     try:
@@ -43,7 +61,7 @@ async def health_detailed(db: AsyncSession = Depends(get_db), _=Depends(get_curr
         status="healthy" if db_ok else "degraded",
         version=settings.app_version,
         uptime_seconds=time.time() - SERVER_START,
-        cpu_percent=psutil.cpu_percent(interval=0.1),
+        cpu_percent=psutil.cpu_percent(interval=None),
         memory_percent=psutil.virtual_memory().percent,
         disk_percent=psutil.disk_usage('/').percent,
         database_connected=db_ok,
@@ -52,3 +70,6 @@ async def health_detailed(db: AsyncSession = Depends(get_db), _=Depends(get_curr
         agents_total=agents_total,
         agents_online=agents_online
     )
+    _health_cache = response
+    _health_cache_expires = time.time() + _HEALTH_CACHE_TTL
+    return response
