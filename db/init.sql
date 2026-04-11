@@ -1,8 +1,8 @@
 -- ==============================================================================
 -- Name:        Philipp Fischer
 -- Kontakt:     p.fischer@itconex.de
--- Version:     2026.02.16.12.00.00
--- Beschreibung: LogBot v2026.02.16.12.00.00 - PostgreSQL Datenbankschema
+-- Version:     2026.04.11.13.38.42
+-- Beschreibung: LogBot v2026.04.11.13.38.42 - PostgreSQL Datenbankschema
 -- ==============================================================================
 
 -- Performance-Extensions

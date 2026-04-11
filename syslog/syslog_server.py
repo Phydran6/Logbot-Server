@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Philipp Fischer
 # Kontakt:     p.fischer@itconex.de
-# Version:     2026.04.11.00.00.00
+# Version:     2026.04.11.13.38.42
 # Beschreibung: LogBot - Syslog Server mit erweitertem Parsing
 #               Unterstützt: RFC 5424, RFC 3164 (BSD), UniFi Netconsole,
 #               UniFi MAC/Model, Cisco IOS, Fortinet key=value,

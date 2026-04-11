@@ -1,7 +1,7 @@
 # ==============================================================================
 # Name:        Philipp Fischer
 # Kontakt:     p.fischer@itconex.de
-# Version:     2026.04.11.00.00.00
+# Version:     2026.04.11.13.38.42
 # Beschreibung: LogBot - Backend Konfiguration
 # ==============================================================================
 
@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
-    app_version: str = "2026.04.11.00.00.00"
+    app_version: str = "2026.04.11.13.38.42"
     caddy_admin_url: str = "http://caddy:2019"
     caddy_certs_dir: str = "/caddy-certs"
     # CORS: Komma-getrennte Liste erlaubter Origins, z.B. "https://logbot.example.com"

@@ -1,7 +1,7 @@
 <!-- ==============================================================================
      Name:        Philipp Fischer
      Kontakt:     p.fischer@itconex.de
-     Version:     2026.03.31.17.26.46
+     Version:     2026.04.11.13.38.42
      Beschreibung: LogBot - Hauptlayout mit Sidebar/Navigation
      ============================================================================== -->
 
@@ -22,7 +22,7 @@
     >
       <div class="p-4 border-b" :style="{ borderColor: 'var(--color-border, #374151)' }">
         <h1 class="text-xl font-bold">📄 {{ companyName }}</h1>
-        <p class="text-sm" :style="{ color: 'var(--color-text-muted, #9ca3af)' }">v2026.03.31.17.26.46</p>
+        <p class="text-sm" :style="{ color: 'var(--color-text-muted, #9ca3af)' }">v2026.04.11.13.38.42</p>
       </div>
 
       <nav class="flex-1 p-4">

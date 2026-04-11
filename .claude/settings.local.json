@@ -3,7 +3,14 @@
     "allow": [
       "Bash(git -C \"e:/Github/Logbot/Logbot-Server\" config user.name)",
       "Bash(git -C \"e:/Github/Logbot/Logbot-Server\" config user.email)",
-      "Bash(wc -l /e/Github/Logbot/Logbot-Server/backend/app/*.py /e/Github/Logbot/Logbot-Server/backend/app/routes/*.py)"
+      "Bash(wc -l /e/Github/Logbot/Logbot-Server/backend/app/*.py /e/Github/Logbot/Logbot-Server/backend/app/routes/*.py)",
+      "WebSearch",
+      "WebFetch(domain:www.timeanddate.com)",
+      "Bash(sed -i 's/2026\\\\.03\\\\.31\\\\.17\\\\.26\\\\.46/2026.04.11.13.38.42/g' backend/app/routes/agents.py)",
+      "Bash(sed -i 's/2026\\\\.02\\\\.16\\\\.12\\\\.00\\\\.00/2026.04.11.13.38.42/g' backend/app/routes/logs.py)",
+      "Bash(sed -i 's/2026\\\\.01\\\\.30\\\\.19\\\\.20\\\\.45/2026.04.11.13.38.42/g' frontend/src/views/Login.vue)",
+      "Bash(sed -i 's/2026\\\\.03\\\\.31\\\\.17\\\\.26\\\\.46/2026.04.11.13.38.42/g' frontend/src/views/Layout.vue)",
+      "Bash(sed -i 's/2026\\\\.01\\\\.30\\\\.19\\\\.05\\\\.33/2026.04.11.13.38.42/g' frontend/src/views/Agents.vue)"
     ]
   }
 }
