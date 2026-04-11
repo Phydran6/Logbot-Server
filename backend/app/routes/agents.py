@@ -13,7 +13,7 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..models import Agent, AgentToken, Log, User, Setting
-from ..schemas import AgentResponse, AgentListResponse, AgentTokenCreate, AgentTokenResponse, AgentDecommissionRequest
+from ..schemas import AgentResponse, AgentListResponse, AgentTokenCreate, AgentTokenResponse, AgentDecommissionRequest, AgentRetentionUpdate
 from ..auth import get_current_user
 from fastapi import status
 
@@ -98,8 +98,70 @@ async def get_agent(agent_id: int, db: AsyncSession = Depends(get_db), _=Depends
         extra_data=getattr(agent, "extra_data", {}) or {},
         metadata=getattr(agent, "extra_data", {}) or {},
         is_online=is_online,
-        log_count=log_count
+        log_count=log_count,
+        retention_max_logs=agent.retention_max_logs,
+        retention_days=agent.retention_days,
     )
+
+
+@router.put("/{agent_id}/retention")
+async def set_agent_retention(
+    agent_id: int,
+    data: AgentRetentionUpdate,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Setzt die Retention-Policy für einen einzelnen Agent."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent nicht gefunden")
+    agent.retention_max_logs = data.retention_max_logs
+    agent.retention_days = data.retention_days
+    await db.commit()
+    return {
+        "agent_id": agent_id,
+        "retention_max_logs": agent.retention_max_logs,
+        "retention_days": agent.retention_days,
+    }
+
+
+@router.post("/{agent_id}/retention/execute")
+async def execute_agent_retention(
+    agent_id: int,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Führt die Retention-Policy für einen Agent sofort aus."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent nicht gefunden")
+
+    deleted = 0
+    if agent.retention_days:
+        cutoff = datetime.utcnow() - timedelta(days=agent.retention_days)
+        r = await db.execute(delete(Log).where(Log.agent_id == agent_id, Log.timestamp < cutoff))
+        deleted += r.rowcount or 0
+
+    if agent.retention_max_logs:
+        count = (await db.execute(
+            select(func.count(Log.id)).where(Log.agent_id == agent_id)
+        )).scalar() or 0
+        excess = count - agent.retention_max_logs
+        if excess > 0:
+            subq = (
+                select(Log.id)
+                .where(Log.agent_id == agent_id)
+                .order_by(Log.timestamp.asc())
+                .limit(excess)
+                .scalar_subquery()
+            )
+            r = await db.execute(delete(Log).where(Log.id.in_(subq)))
+            deleted += r.rowcount or 0
+
+    await db.commit()
+    return {"agent_id": agent_id, "deleted_count": deleted}
 
 
 @router.post("/decommission", status_code=status.HTTP_200_OK)

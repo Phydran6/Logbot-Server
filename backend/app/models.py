@@ -1,8 +1,8 @@
 # ==============================================================================
 # Name:        Philipp Fischer
 # Kontakt:     p.fischer@itconex.de
-# Version:     2026.02.16.12.00.00
-# Beschreibung: LogBot v2026.02.16.12.00.00 - SQLAlchemy Models
+# Version:     2026.04.11.00.00.00
+# Beschreibung: LogBot - SQLAlchemy Models
 # ==============================================================================
 
 from datetime import datetime
@@ -20,6 +20,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    app_login_tokens = relationship("AppLoginToken", back_populates="user", passive_deletes=True)
 
 class Agent(Base):
     __tablename__ = "agents"
@@ -32,6 +33,9 @@ class Agent(Base):
     first_seen = Column(DateTime, default=datetime.utcnow)
     extra_data = Column(JSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Retention-Policy pro Gerät (NULL = kein Limit)
+    retention_max_logs = Column(Integer, nullable=True)
+    retention_days = Column(Integer, nullable=True)
     logs = relationship("Log", back_populates="agent", passive_deletes=True)
 
 class Log(Base):
@@ -70,7 +74,7 @@ class AgentToken(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
     token = Column(String(64), unique=True, nullable=False)
-    device_type = Column(String(50))  # optional: 'linux' | 'windows' | None
+    device_type = Column(String(50))
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -82,3 +86,14 @@ class Setting(Base):
     value = Column(JSON, nullable=False)
     description = Column(Text)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class AppLoginToken(Base):
+    """Kurzlebiger Einmal-Token für die App-Authentifizierung via QR-Code."""
+    __tablename__ = "app_login_tokens"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String(64), unique=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    user = relationship("User", back_populates="app_login_tokens")

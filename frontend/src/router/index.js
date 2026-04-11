@@ -102,11 +102,18 @@ const routes = [
         component: () => import('../views/Health.vue') 
       },
       
-      // Branding-Einstellungen (NEU)
-      { 
-        path: 'settings/branding', 
-        name: 'BrandingSettings', 
-        component: () => import('../views/BrandingSettings.vue') 
+      // Branding-Einstellungen
+      {
+        path: 'settings/branding',
+        name: 'BrandingSettings',
+        component: () => import('../views/BrandingSettings.vue')
+      },
+
+      // App-Login via QR-Code
+      {
+        path: 'app-login',
+        name: 'AppLogin',
+        component: () => import('../views/AppQR.vue')
       }
     ]
   }

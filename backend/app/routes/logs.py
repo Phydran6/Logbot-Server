@@ -39,6 +39,19 @@ _stats_cache_lock = asyncio.Lock()
 _stats_cache_ttl = int(os.getenv("LOG_STATS_CACHE_SECONDS", "30"))
 
 
+_LIKE_ESCAPE_CHAR = "\\"
+_LIKE_ESCAPE_TABLE = str.maketrans({
+    _LIKE_ESCAPE_CHAR: _LIKE_ESCAPE_CHAR * 2,
+    "%": f"{_LIKE_ESCAPE_CHAR}%",
+    "_": f"{_LIKE_ESCAPE_CHAR}_",
+})
+
+
+def _escape_like(value: str) -> str:
+    """Escapt LIKE-Sonderzeichen (%, _, \) damit User-Input nicht als Wildcard wirkt."""
+    return value.translate(_LIKE_ESCAPE_TABLE)
+
+
 def _apply_filters(query, hostname, level, source, search, start_date, end_date):
     """Filter-Bedingungen auf eine Query anwenden."""
     hostname = hostname.strip() if hostname else None
@@ -47,13 +60,13 @@ def _apply_filters(query, hostname, level, source, search, start_date, end_date)
     search = search.strip() if search else None
 
     if hostname:
-        query = query.where(Log.hostname.ilike(f"%{hostname}%"))
+        query = query.where(Log.hostname.ilike(f"%{_escape_like(hostname)}%", escape=_LIKE_ESCAPE_CHAR))
     if level:
         query = query.where(func.lower(Log.level) == level.lower())
     if source:
-        query = query.where(Log.source.ilike(f"%{source}%"))
+        query = query.where(Log.source.ilike(f"%{_escape_like(source)}%", escape=_LIKE_ESCAPE_CHAR))
     if search:
-        query = query.where(Log.message.ilike(f"%{search}%"))
+        query = query.where(Log.message.ilike(f"%{_escape_like(search)}%", escape=_LIKE_ESCAPE_CHAR))
     if start_date:
         query = query.where(Log.timestamp >= start_date)
     if end_date:

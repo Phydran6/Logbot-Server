@@ -90,22 +90,35 @@
           </div>
         </div>
         
+        <!-- Retention-Anzeige -->
+        <div v-if="agent.retention_max_logs || agent.retention_days" class="mt-3 pt-3 border-t text-xs" :style="{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }">
+          <span v-if="agent.retention_max_logs">Max {{ agent.retention_max_logs.toLocaleString('de-DE') }} Logs</span>
+          <span v-if="agent.retention_max_logs && agent.retention_days"> · </span>
+          <span v-if="agent.retention_days">{{ agent.retention_days }} Tage</span>
+        </div>
+
         <!-- Actions -->
-        <div class="mt-4 pt-4 border-t flex justify-between" :style="{ borderColor: 'var(--color-border)' }">
-          <router-link 
+        <div class="mt-4 pt-4 border-t flex justify-between items-center" :style="{ borderColor: 'var(--color-border)' }">
+          <router-link
             :to="`/logs?hostname=${agent.hostname}`"
             class="hover:underline text-sm"
             :style="{ color: 'var(--color-primary)' }"
           >
-            Logs anzeigen ->
+            Logs anzeigen →
           </router-link>
-          <button
-            @click="deleteAgent(agent)"
-            class="text-sm hover:opacity-70"
-            :style="{ color: 'var(--color-danger)' }"
-          >
-             Löschen
-          </button>
+          <div class="flex gap-3">
+            <button
+              @click="openRetention(agent)"
+              class="text-xs hover:opacity-70"
+              :style="{ color: 'var(--color-text-muted)' }"
+              title="Retention-Policy einstellen"
+            >⚙ Retention</button>
+            <button
+              @click="deleteAgent(agent)"
+              class="text-sm hover:opacity-70"
+              :style="{ color: 'var(--color-danger)' }"
+            >Löschen</button>
+          </div>
         </div>
       </div>
     </div>
@@ -116,6 +129,58 @@
        <p class="text-sm mt-2" :style="{ color: 'var(--color-text-muted)' }">Agents werden automatisch erstellt wenn Logs empfangen werden</p>
     </div>
     
+    <!-- Retention Modal -->
+    <div
+      v-if="retentionModal.open"
+      class="fixed inset-0 flex items-center justify-center p-4 z-50"
+      style="background: rgba(0,0,0,0.6)"
+      @click.self="retentionModal.open = false"
+    >
+      <div class="rounded-lg shadow-xl w-full max-w-md" :style="cardStyle">
+        <div class="px-5 py-4 border-b flex justify-between items-center" :style="{ borderColor: 'var(--color-border)' }">
+          <h2 class="font-semibold" :style="{ color: 'var(--color-text-primary)' }">
+            Retention – {{ retentionModal.hostname }}
+          </h2>
+          <button @click="retentionModal.open = false" :style="{ color: 'var(--color-text-muted)' }">✕</button>
+        </div>
+        <div class="p-5 space-y-4">
+          <p class="text-sm" :style="{ color: 'var(--color-text-muted)' }">
+            Leer lassen = kein Limit. Die Policy wird stündlich automatisch durchgesetzt.
+          </p>
+          <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" :style="{ color: 'var(--color-text-secondary)' }">Max. Logs gesamt</label>
+            <input
+              v-model.number="retentionModal.max_logs"
+              type="number"
+              min="1000"
+              placeholder="z.B. 50000"
+              class="rounded px-3 py-2"
+              :style="inputStyle"
+            >
+          </div>
+          <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" :style="{ color: 'var(--color-text-secondary)' }">Logs älter als X Tage löschen</label>
+            <input
+              v-model.number="retentionModal.days"
+              type="number"
+              min="1"
+              placeholder="z.B. 30"
+              class="rounded px-3 py-2"
+              :style="inputStyle"
+            >
+          </div>
+          <div v-if="retentionModal.error" class="text-sm px-3 py-2 rounded" :style="{ backgroundColor: 'var(--color-surface-elevated)', color: 'var(--color-danger)', border: '1px solid var(--color-danger)' }">
+            {{ retentionModal.error }}
+          </div>
+          <div class="flex gap-2 justify-end pt-2 border-t" :style="{ borderColor: 'var(--color-border)' }">
+            <button @click="retentionModal.open = false" class="px-4 py-2 rounded text-sm" :style="buttonSecondaryStyle">Abbrechen</button>
+            <button @click="executeRetention" class="px-4 py-2 rounded text-sm text-white" :style="{ backgroundColor: 'var(--color-warning, #f59e0b)' }">Jetzt bereinigen</button>
+            <button @click="saveRetention" class="px-4 py-2 rounded text-sm text-white" :style="{ backgroundColor: 'var(--color-primary)' }">Speichern</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Pagination -->
     <div v-if="total > pageSize" class="mt-6 flex justify-center gap-2">
       <button
@@ -153,6 +218,15 @@ const loading = ref(false)
 const search = ref('')
 const deviceType = ref('')
 const offlineTimeout = ref(300)
+
+const retentionModal = ref({
+  open: false,
+  agentId: null,
+  hostname: '',
+  max_logs: null,
+  days: null,
+  error: '',
+})
 
 // Computed Styles
 const cardStyle = computed(() => ({
@@ -255,6 +329,57 @@ function isOnline(agent) {
 function formatTime(timestamp) {
   if (!timestamp) return '-'
   return new Date(timestamp).toLocaleString('de-DE')
+}
+
+function openRetention(agent) {
+  retentionModal.value = {
+    open: true,
+    agentId: agent.id,
+    hostname: agent.hostname,
+    max_logs: agent.retention_max_logs || null,
+    days: agent.retention_days || null,
+    error: '',
+  }
+}
+
+async function saveRetention() {
+  retentionModal.value.error = ''
+  try {
+    await authStore.api(`/api/agents/${retentionModal.value.agentId}/retention`, {
+      method: 'PUT',
+      body: {
+        retention_max_logs: retentionModal.value.max_logs || null,
+        retention_days: retentionModal.value.days || null,
+      },
+    })
+    retentionModal.value.open = false
+    loadAgents()
+  } catch (e) {
+    retentionModal.value.error = e.message
+  }
+}
+
+async function executeRetention() {
+  retentionModal.value.error = ''
+  try {
+    // Erst speichern, dann sofort ausführen
+    await authStore.api(`/api/agents/${retentionModal.value.agentId}/retention`, {
+      method: 'PUT',
+      body: {
+        retention_max_logs: retentionModal.value.max_logs || null,
+        retention_days: retentionModal.value.days || null,
+      },
+    })
+    const result = await authStore.api(
+      `/api/agents/${retentionModal.value.agentId}/retention/execute`,
+      { method: 'POST' }
+    )
+    retentionModal.value.open = false
+    loadAgents()
+    alert(`Bereinigung abgeschlossen: ${result.deleted_count} Logs gelöscht.`)
+  } catch (e) {
+    retentionModal.value.error = e.message
+  }
 }
 </script>
 

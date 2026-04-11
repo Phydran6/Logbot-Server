@@ -1,13 +1,14 @@
 # ==============================================================================
 # Name:        Philipp Fischer
 # Kontakt:     p.fischer@itconex.de
-# Version:     2026.03.03.17.18.19
-# Beschreibung: LogBot v2026.03.03.17.18.19 - Pydantic Schemas
+# Version:     2026.04.11.00.00.00
+# Beschreibung: LogBot - Pydantic Schemas
 # ==============================================================================
 
+import re
 from datetime import datetime
 from typing import Optional, List, Any, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class Token(BaseModel):
     access_token: str
@@ -22,13 +23,33 @@ class UserBase(BaseModel):
     role: str = Field(default="user")
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def password_complexity(cls, v: str) -> str:
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Passwort muss mindestens einen Großbuchstaben enthalten")
+        if not re.search(r"[0-9]", v):
+            raise ValueError("Passwort muss mindestens eine Ziffer enthalten")
+        return v
 
 class UserUpdate(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
-    password: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def password_complexity(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Passwort muss mindestens einen Großbuchstaben enthalten")
+        if not re.search(r"[0-9]", v):
+            raise ValueError("Passwort muss mindestens eine Ziffer enthalten")
+        return v
 
 class UserResponse(UserBase):
     id: int
@@ -49,8 +70,14 @@ class AgentResponse(BaseModel):
     metadata: Dict[str, Any] = {}
     is_online: Optional[bool] = None
     log_count: Optional[int] = None
+    retention_max_logs: Optional[int] = None
+    retention_days: Optional[int] = None
     class Config:
         from_attributes = True
+
+class AgentRetentionUpdate(BaseModel):
+    retention_max_logs: Optional[int] = Field(default=None, ge=1000, le=10_000_000)
+    retention_days: Optional[int] = Field(default=None, ge=1, le=3650)
 
 class AgentListResponse(BaseModel):
     items: List[AgentResponse]
@@ -168,7 +195,6 @@ class RetentionResponse(BaseModel):
     oldest_log_date: Optional[datetime] = None
     message: Optional[str] = None
 
-# Database
 class DatabaseSettingsResponse(BaseModel):
     host: str
     port: int
@@ -209,3 +235,19 @@ class CaddyTemplateRequest(BaseModel):
     domain: Optional[str] = None
     mode: str = Field(..., pattern="^(http|letsencrypt|custom)$")
     letsencrypt_email: Optional[str] = None
+
+# App-Login (QR-Code / Token-Exchange für Android-App)
+class AppTokenResponse(BaseModel):
+    token: str
+    expires_at: datetime
+    expires_in_seconds: int
+
+class AppTokenExchangeRequest(BaseModel):
+    token: str = Field(..., min_length=64, max_length=64)
+
+class AppQRResponse(BaseModel):
+    qr_image: str          # data:image/png;base64,...
+    token: str
+    expires_at: datetime
+    expires_in_seconds: int
+    api_url: str

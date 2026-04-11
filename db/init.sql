@@ -92,6 +92,10 @@ INSERT INTO users (username, email, password_hash, role)
 VALUES ('admin', 'admin@localhost', '$2b$12$XOE63DtzGEyiaLLBY05W0ulT6EVFIC243bkg7UivW1kfx0.bmmSj2', 'admin')
 ON CONFLICT (username) DO NOTHING;
 
+-- Retention-Policy Spalten (werden per Startup-Migration auch auf bestehende DBs angewendet)
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS retention_max_logs INTEGER;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS retention_days INTEGER;
+
 -- Agent-Tokens für authentifizierten HTTPS-Modus
 CREATE TABLE IF NOT EXISTS agent_tokens (
     id SERIAL PRIMARY KEY,
@@ -102,6 +106,19 @@ CREATE TABLE IF NOT EXISTS agent_tokens (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- App-Login-Tokens (für QR-Code-Authentifizierung der Android-App)
+CREATE TABLE IF NOT EXISTS app_login_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token VARCHAR(64) UNIQUE NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    used_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_login_tokens_token ON app_login_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_app_login_tokens_user_id ON app_login_tokens(user_id);
 
 -- Standard-Einstellungen
 INSERT INTO settings (key, value, description) VALUES
