@@ -1,7 +1,7 @@
 // ==============================================================================
 // Name:        Auth Store
 // Kontakt:     Phydran6
-// Version:     2026.02.20.12.00.00
+// Version:     2026.04.17.15.17.18
 // Beschreibung: Pinia Store für Auth (Login, Token, API Wrapper)
 // ==============================================================================
 import { defineStore } from 'pinia'

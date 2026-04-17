@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.04.11.13.38.42
+# Version:     2026.04.17.15.17.18
 # Beschreibung: LogBot - Syslog Server mit erweitertem Parsing
 #               Unterstützt: RFC 5424, RFC 3164 (BSD), UniFi Netconsole,
 #               UniFi MAC/Model, Cisco IOS, Fortinet key=value,
