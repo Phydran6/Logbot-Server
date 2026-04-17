@@ -12,7 +12,7 @@
 #
 # Autor:        Phydran6
 # Kontakt:      Phydran6
-# Version:      2026.03.31.17.26.46
+# Version:      2026.04.17.15.17.18
 # Erstellt:     Januar 2026
 #
 # Beschreibung:
@@ -40,7 +40,7 @@ NC='\033[0m'
 
 # Konfiguration
 INSTALL_DIR="/opt/logbot"
-LOGBOT_VERSION="2026.01.30.13.30.00"
+LOGBOT_VERSION="2026.04.17.15.17.18"
 
 # ==============================================================================
 # Hilfsfunktionen

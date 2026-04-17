@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.03.31.17.26.46
+# Version:     2026.04.17.15.17.18
 # Beschreibung: Linux Installer
 #               Konfiguriert rsyslog zum Weiterleiten an LogBot Server
 #               Keine zusätzlichen Abhängigkeiten erforderlich!
@@ -17,7 +17,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-AGENT_VERSION="2026.03.31.17.26.46"
+AGENT_VERSION="2026.04.17.15.17.18"
 CONFIG_FILE="/etc/rsyslog.d/99-logbot.conf"
 QUEUE_PREFIX="/var/spool/rsyslog/logbot_queue"
 
