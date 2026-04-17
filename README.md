@@ -1,8 +1,8 @@
 # LogBot v2026.04.11.13.38.42
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
-Entwickelt von Philipp Fischer  
-Kontakt: p.fischer@itconex.de
+Entwickelt von Phydran6 
+
 
 ## Features
 - Syslog-Empfang auf UDP/TCP Port 514
@@ -23,7 +23,7 @@ Kontakt: p.fischer@itconex.de
 ## Installation
 ```bash
 # Repository klonen
-git clone https://github.com/DEIN-USERNAME/logbot.git
+git clone https://github.com/Phydran6/Logbot-Server.git
 cd logbot
 
 # Installer ausführen
@@ -207,6 +207,3 @@ docker compose exec -T postgres psql -U logbot logbot < backup.sql
 - Initiale Version
 - Basis Syslog-Empfang
 - Web-Interface
-
-## Support
-Bei Fragen: p.fischer@itconex.de
