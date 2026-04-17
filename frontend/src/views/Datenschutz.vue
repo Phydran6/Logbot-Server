@@ -1,6 +1,6 @@
 <!-- ==============================================================================
-     Name:        Philipp Fischer
-     Kontakt:     p.fischer@itconex.de
+     Name:        Phydran6
+     Kontakt:     Phydran6
      Version:     2026.04.05
      Beschreibung: LogBot - Datenschutzerklärung (DSGVO)
      ============================================================================== -->
@@ -51,11 +51,11 @@
         <h2 class="text-lg font-semibold mb-2">2. Verantwortliche Stelle</h2>
         <p class="text-sm" :style="{ color: 'var(--color-text-muted)' }">
           Die verantwortliche Stelle für die Datenverarbeitung in dieser Anwendung ist:<br><br>
-          Philipp Fischer<br>
+          Phydran6<br>
           IT Conex<br>
           Musterstraße 1<br>
           12345 Musterstadt<br><br>
-          E-Mail: p.fischer@itconex.de
+          E-Mail: Phydran6
         </p>
       </section>
 

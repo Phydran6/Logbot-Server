@@ -1,6 +1,6 @@
 # ==============================================================================
-# Name:        Philipp Fischer
-# Kontakt:     p.fischer@itconex.de
+# Name:        Phydran6
+# Kontakt:     Phydran6
 # Version:     2026.03.31.17.26.46
 # Beschreibung: LogBot - Caddy Management API (Config Apply + Cert Upload)
 # ==============================================================================

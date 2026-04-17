@@ -1,6 +1,6 @@
 <!-- ==============================================================================
-     Name:        Philipp Fischer
-     Kontakt:     p.fischer@itconex.de
+     Name:        Phydran6
+     Kontakt:     Phydran6
      Version:     2026.04.05
      Beschreibung: LogBot - Impressum (§5 TMG)
      ============================================================================== -->
@@ -19,7 +19,7 @@
       <section class="mb-6">
         <h2 class="text-lg font-semibold mb-2">Angaben gemäß § 5 TMG</h2>
         <p :style="{ color: 'var(--color-text-secondary)' }">
-          Philipp Fischer<br>
+          Phydran6<br>
           IT Conex<br>
           Musterstraße 1<br>
           12345 Musterstadt<br>
@@ -30,14 +30,14 @@
       <section class="mb-6">
         <h2 class="text-lg font-semibold mb-2">Kontakt</h2>
         <p :style="{ color: 'var(--color-text-secondary)' }">
-          E-Mail: p.fischer@itconex.de
+          E-Mail: Phydran6
         </p>
       </section>
 
       <section class="mb-6">
         <h2 class="text-lg font-semibold mb-2">Verantwortlich für den Inhalt nach § 55 Abs. 2 RStV</h2>
         <p :style="{ color: 'var(--color-text-secondary)' }">
-          Philipp Fischer<br>
+          Phydran6<br>
           Musterstraße 1<br>
           12345 Musterstadt
         </p>

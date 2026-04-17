@@ -1,6 +1,6 @@
 // ==============================================================================
 // Name:        Auth Store
-// Kontakt:     p.fischer@itconex.de
+// Kontakt:     Phydran6
 // Version:     2026.02.20.12.00.00
 // Beschreibung: Pinia Store für Auth (Login, Token, API Wrapper)
 // ==============================================================================

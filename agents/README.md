@@ -2,8 +2,8 @@
 
 Log-Forwarder für Linux und Windows – keine zusätzlichen Abhängigkeiten.
 
-Entwickelt von Philipp Fischer  
-Kontakt: p.fischer@itconex.de
+Entwickelt von Phydran6  
+Kontakt: Phydran6
 
 ## Features
 - Linux: nutzt vorhandenes rsyslog – kein Python nötig

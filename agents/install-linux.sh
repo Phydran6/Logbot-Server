@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
-# Name:        Philipp Fischer
-# Kontakt:     p.fischer@itconex.de
+# Name:        Phydran6
+# Kontakt:     Phydran6
 # Version:     2026.03.31.17.26.46
 # Beschreibung: Linux Installer
 #               Konfiguriert rsyslog zum Weiterleiten an LogBot Server
@@ -235,8 +235,8 @@ configure_rsyslog() {
 # Erstellt: $(date)
 # Server: ${SERVER_HOST}:${SERVER_PORT} (${PROTO_NAME})
 #
-# Name:        Philipp Fischer
-# Kontakt:     p.fischer@itconex.de
+# Name:        Phydran6
+# Kontakt:     Phydran6
 # ==============================================================================
 
 # Queue für zuverlässige Übertragung (bei Verbindungsproblemen)

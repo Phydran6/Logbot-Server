@@ -1,6 +1,6 @@
 <!-- ==============================================================================
-     Name:        Philipp Fischer
-     Kontakt:     p.fischer@itconex.de
+     Name:        Phydran6
+     Kontakt:     Phydran6
      Version:     2026.01.30.19.18.22
      Beschreibung: LogBot - System Health mit Theme-Support
      ============================================================================== -->

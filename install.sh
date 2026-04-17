@@ -10,8 +10,8 @@
 # INSTALLATIONS-SCRIPT
 # ==============================================================================
 #
-# Autor:        Philipp Fischer
-# Kontakt:      p.fischer@itconex.de
+# Autor:        Phydran6
+# Kontakt:      Phydran6
 # Version:      2026.03.31.17.26.46
 # Erstellt:     Januar 2026
 #
