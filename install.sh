@@ -134,14 +134,15 @@ install_logbot() {
     log_info "Kopiere Dateien nach $INSTALL_DIR..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     cp -r "$SCRIPT_DIR" "$INSTALL_DIR"
-    
-    # .env Datei erstellen
-    if [[ ! -f "$INSTALL_DIR/.env" ]]; then
-        log_info "Erstelle .env Datei..."
-        DB_PASSWORD=$(generate_password)
-        JWT_SECRET=$(generate_password)
-        
-        cat > "$INSTALL_DIR/.env" << EOF
+
+    # .env Datei erstellen (im Zielverzeichnis und im Quellverzeichnis)
+    for ENV_DIR in "$INSTALL_DIR" "$SCRIPT_DIR"; do
+        if [[ ! -f "$ENV_DIR/.env" ]]; then
+            log_info "Erstelle .env Datei in $ENV_DIR..."
+            DB_PASSWORD=$(generate_password)
+            JWT_SECRET=$(generate_password)
+
+            cat > "$ENV_DIR/.env" << EOF
 # LogBot v${LOGBOT_VERSION} Konfiguration
 # Automatisch generiert am $(date)
 
@@ -153,9 +154,10 @@ DB_NAME=logbot
 # JWT Secret für API Authentifizierung
 JWT_SECRET=${JWT_SECRET}
 EOF
-        chmod 600 "$INSTALL_DIR/.env"
-        log_success ".env Datei erstellt"
-    fi
+            chmod 600 "$ENV_DIR/.env"
+            log_success ".env Datei erstellt in $ENV_DIR"
+        fi
+    done
     
     log_success "Dateien installiert"
 }

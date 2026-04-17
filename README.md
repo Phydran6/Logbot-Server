@@ -24,9 +24,9 @@ Entwickelt von Phydran6
 ```bash
 # Repository klonen
 git clone https://github.com/Phydran6/Logbot-Server.git
-cd logbot
+cd Logbot-Server
 
-# Installer ausführen
+# Installer ausführen (erstellt .env automatisch)
 sudo bash install.sh
 ```
 
@@ -35,6 +35,18 @@ sudo bash install.sh
 tar -xzf logbot-v2026.03.31.17.26.46.tar.gz
 cd logbot-v2026.03.31.17.26.46
 sudo bash install.sh
+```
+
+**Oder direkt mit Docker Compose (ohne install.sh):**
+```bash
+git clone https://github.com/Phydran6/Logbot-Server.git
+cd Logbot-Server
+
+# .env aus Vorlage erstellen und Passwörter setzen
+cp .env.example .env
+sed -i "s/CHANGE_ME/$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)/g" .env
+
+sudo docker compose up -d --build
 ```
 
 ## Zugriff
