@@ -109,12 +109,6 @@ const routes = [
         component: () => import('../views/BrandingSettings.vue')
       },
 
-      // App-Login via QR-Code
-      {
-        path: 'app-login',
-        name: 'AppLogin',
-        component: () => import('../views/AppQR.vue')
-      }
     ]
   }
 ]

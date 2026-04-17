@@ -35,7 +35,6 @@
           <li><router-link to="/settings" class="nav-link" :class="{ active: $route.name === 'Settings' }" @click="sidebarOpen = false">⚙️ Einstellungen</router-link></li>
           <li><router-link to="/settings/branding" class="nav-link" :class="{ active: $route.name === 'BrandingSettings' }" @click="sidebarOpen = false">🎨 Branding</router-link></li>
           <li><router-link to="/health" class="nav-link" :class="{ active: $route.name === 'Health' }" @click="sidebarOpen = false">💚 Health</router-link></li>
-          <li><router-link to="/app-login" class="nav-link" :class="{ active: $route.name === 'AppLogin' }" @click="sidebarOpen = false">📱 App-Login</router-link></li>
         </ul>
       </nav>
 
