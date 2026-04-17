@@ -65,6 +65,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET muss gesetzt sein}
       CADDY_ADMIN_URL: ${CADDY_ADMIN_URL:-http://caddy:2019}
       CADDY_CERTS_DIR: ${CADDY_CERTS_DIR:-/caddy-certs}
+      SITE_URL: ${SITE_URL:-}
     expose:
       - "8000"
     volumes:
