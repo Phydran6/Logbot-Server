@@ -9,7 +9,7 @@ import io
 import json
 import base64
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, delete
@@ -73,7 +73,7 @@ async def create_app_token(
     )
 
     token = secrets.token_hex(32)  # 64 Hex-Zeichen = 256 bit Entropie
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=_APP_TOKEN_TTL_MINUTES)
+    expires_at = datetime.utcnow() + timedelta(minutes=_APP_TOKEN_TTL_MINUTES)
 
     app_token = AppLoginToken(
         user_id=current_user.id,
@@ -105,7 +105,7 @@ async def exchange_app_token(
         select(AppLoginToken).where(
             AppLoginToken.token == data.token,
             AppLoginToken.used_at == None,  # noqa: E711
-            AppLoginToken.expires_at > datetime.now(timezone.utc),
+            AppLoginToken.expires_at > datetime.utcnow(),
         )
     )
     app_token = result.scalar_one_or_none()
@@ -113,7 +113,7 @@ async def exchange_app_token(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token ungültig oder abgelaufen")
 
     # Token sofort als benutzt markieren (verhindert Replay)
-    app_token.used_at = datetime.now(timezone.utc)
+    app_token.used_at = datetime.utcnow()
 
     user = await db.get(User, app_token.user_id)
     if not user or not user.is_active:
@@ -145,7 +145,7 @@ async def get_app_qr(
     )
 
     token = secrets.token_hex(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=_APP_TOKEN_TTL_MINUTES)
+    expires_at = datetime.utcnow() + timedelta(minutes=_APP_TOKEN_TTL_MINUTES)
 
     app_token = AppLoginToken(
         user_id=current_user.id,

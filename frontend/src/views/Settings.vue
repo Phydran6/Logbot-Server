@@ -347,91 +347,77 @@
       </p>
     </div>
     
-    <!-- App-Login -->
-    <div v-if="activeTab === 'app'" class="rounded-lg shadow p-6" :style="cardStyle">
-      <h2 class="text-lg font-semibold mb-2" :style="{ color: 'var(--color-text-primary)' }">App-Anmeldung</h2>
-      <p class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
-        Scanne den QR-Code mit der LogBot Android-App oder gib die API-URL manuell ein.
-      </p>
+    <!-- Konto (Passwort + App-Login) -->
+    <div v-if="activeTab === 'account'" class="space-y-6">
 
-      <div v-if="qrError" class="px-4 py-3 rounded mb-4 text-sm" :style="{ backgroundColor: 'var(--color-surface-elevated)', border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }">
-        {{ qrError }}
-      </div>
-
-      <div v-if="qrLoading" class="flex items-center justify-center py-8">
-        <span :style="{ color: 'var(--color-text-muted)' }">QR-Code wird generiert...</span>
-      </div>
-
-      <div v-else-if="qrData" class="text-center">
-        <img :src="qrData.qr_image" alt="App-Login QR-Code" class="mx-auto rounded mb-4" style="max-width: 240px; image-rendering: pixelated;" />
-
-        <div class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
-          <span v-if="qrSecondsLeft > 0">
-            Gültig noch <strong :style="{ color: qrSecondsLeft < 60 ? 'var(--color-danger)' : 'var(--color-text-primary)' }">{{ formatQrCountdown(qrSecondsLeft) }}</strong>
-          </span>
-          <span v-else class="font-semibold" :style="{ color: 'var(--color-danger)' }">
-            Abgelaufen – bitte neu generieren
-          </span>
-        </div>
-
-        <div class="p-3 rounded text-left mb-4" :style="{ backgroundColor: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)' }">
-          <p class="text-xs font-semibold mb-1" :style="{ color: 'var(--color-text-muted)' }">API-URL (für manuelle Eingabe in der App)</p>
-          <code class="text-sm break-all" :style="{ color: 'var(--color-text-primary)' }">{{ qrData.api_url }}</code>
-          <button @click="copyQrUrl" class="mt-2 text-xs px-2 py-1 rounded block" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }">
-            {{ qrCopied ? 'Kopiert!' : 'Kopieren' }}
+      <!-- Passwort ändern -->
+      <div class="rounded-lg shadow p-6" :style="cardStyle">
+        <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Passwort ändern</h2>
+        <form @submit.prevent="changePassword" class="max-w-md space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Neues Passwort</label>
+            <input v-model="newPassword" type="password" required minlength="6" class="w-full rounded px-3 py-2" :style="inputStyle">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Passwort bestätigen</label>
+            <input v-model="confirmPassword" type="password" required minlength="6" class="w-full rounded px-3 py-2" :style="inputStyle">
+          </div>
+          <button type="submit" class="text-white px-4 py-2 rounded hover:opacity-90" :style="{ backgroundColor: 'var(--color-primary)' }">
+            Passwort ändern
           </button>
-        </div>
-
-        <div class="text-left text-sm space-y-2 mb-4" :style="{ color: 'var(--color-text-secondary)' }">
-          <div><span class="font-bold">Methode 1 – QR-Code:</span> QR-Code mit der App scannen. Die App meldet sich automatisch an.</div>
-          <div><span class="font-bold">Methode 2 – URL:</span> API-URL in der App als Server-URL eingeben und mit Benutzername + Passwort einloggen.</div>
-        </div>
+        </form>
       </div>
 
-      <button @click="generateQR" :disabled="qrLoading" class="w-full py-2 px-4 rounded font-semibold text-white disabled:opacity-50" :style="{ backgroundColor: 'var(--color-primary)' }">
-        {{ qrData ? 'Neu generieren' : 'QR-Code generieren' }}
-      </button>
+      <!-- App-Login QR -->
+      <div class="rounded-lg shadow p-6" :style="cardStyle">
+        <h2 class="text-lg font-semibold mb-2" :style="{ color: 'var(--color-text-primary)' }">App-Anmeldung</h2>
+        <p class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
+          Scanne den QR-Code mit der LogBot Android-App oder gib die API-URL manuell ein.
+        </p>
 
-      <p class="mt-3 text-xs" :style="{ color: 'var(--color-text-muted)' }">
-        Der QR-Code ist 15 Minuten gültig und kann nur einmal verwendet werden. Nach dem Scannen wird er sofort ungültig.
-      </p>
-    </div>
+        <div v-if="qrError" class="px-4 py-3 rounded mb-4 text-sm" :style="{ backgroundColor: 'var(--color-surface-elevated)', border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }">
+          {{ qrError }}
+        </div>
 
-    <!-- Passwort ändern -->
-    <div v-if="activeTab === 'password'" class="rounded-lg shadow p-6 mt-6" :style="cardStyle">
-      <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Passwort ändern</h2>
-      
-      <form @submit.prevent="changePassword" class="max-w-md space-y-4">
-        <div>
-          <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Neues Passwort</label>
-          <input
-            v-model="newPassword"
-            type="password"
-            required
-            minlength="6"
-            class="w-full rounded px-3 py-2"
-            :style="inputStyle"
-          >
+        <div v-if="qrLoading" class="flex items-center justify-center py-8">
+          <span :style="{ color: 'var(--color-text-muted)' }">QR-Code wird generiert...</span>
         </div>
-        <div>
-          <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Passwort bestätigen</label>
-          <input
-            v-model="confirmPassword"
-            type="password"
-            required
-            minlength="6"
-            class="w-full rounded px-3 py-2"
-            :style="inputStyle"
-          >
+
+        <div v-else-if="qrData" class="text-center">
+          <img :src="qrData.qr_image" alt="App-Login QR-Code" class="mx-auto rounded mb-4" style="max-width: 240px; image-rendering: pixelated;" />
+
+          <div class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
+            <span v-if="qrSecondsLeft > 0">
+              Gültig noch <strong :style="{ color: qrSecondsLeft < 60 ? 'var(--color-danger)' : 'var(--color-text-primary)' }">{{ formatQrCountdown(qrSecondsLeft) }}</strong>
+            </span>
+            <span v-else class="font-semibold" :style="{ color: 'var(--color-danger)' }">
+              Abgelaufen – bitte neu generieren
+            </span>
+          </div>
+
+          <div class="p-3 rounded text-left mb-4" :style="{ backgroundColor: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)' }">
+            <p class="text-xs font-semibold mb-1" :style="{ color: 'var(--color-text-muted)' }">API-URL (für manuelle Eingabe in der App)</p>
+            <code class="text-sm break-all" :style="{ color: 'var(--color-text-primary)' }">{{ qrData.api_url }}</code>
+            <button @click="copyQrUrl" class="mt-2 text-xs px-2 py-1 rounded block" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }">
+              {{ qrCopied ? 'Kopiert!' : 'Kopieren' }}
+            </button>
+          </div>
+
+          <div class="text-left text-sm space-y-2 mb-4" :style="{ color: 'var(--color-text-secondary)' }">
+            <div><span class="font-bold">Methode 1 – QR-Code:</span> QR-Code mit der App scannen. Die App meldet sich automatisch an.</div>
+            <div><span class="font-bold">Methode 2 – URL:</span> API-URL in der App als Server-URL eingeben und mit Benutzername + Passwort einloggen.</div>
+          </div>
         </div>
-        <button
-          type="submit"
-          class="text-white px-4 py-2 rounded hover:opacity-90"
-          :style="{ backgroundColor: 'var(--color-primary)' }"
-        >
-          Passwort ändern
+
+        <button @click="generateQR" :disabled="qrLoading" class="w-full py-2 px-4 rounded font-semibold text-white disabled:opacity-50" :style="{ backgroundColor: 'var(--color-primary)' }">
+          {{ qrData ? 'Neu generieren' : 'QR-Code generieren' }}
         </button>
-      </form>
+
+        <p class="mt-3 text-xs" :style="{ color: 'var(--color-text-muted)' }">
+          Der QR-Code ist 15 Minuten gültig und kann nur einmal verwendet werden. Nach dem Scannen wird er sofort ungültig.
+        </p>
+      </div>
+
     </div>
   </div>
 </template>
@@ -446,11 +432,10 @@ const tabs = [
   { id: 'general', label: 'Allgemein' },
   { id: 'retention', label: 'Retention' },
   { id: 'agents', label: 'Agent Token' },
-  { id: 'app', label: '📱 App-Login' },
   { id: 'caddy', label: 'Reverse Proxy', adminOnly: true },
   { id: 'database', label: 'Datenbank', adminOnly: true },
   { id: 'system', label: 'System', adminOnly: true },
-  { id: 'password', label: 'Passwort' }
+  { id: 'account', label: 'Konto' }
 ]
 const activeTab = ref('general')
 const tabLoaded = ref({ caddy: false, database: false, app: false })
@@ -636,7 +621,7 @@ async function setTab(id) {
     await loadCaddyConfig()
     tabLoaded.value.caddy = true
   }
-  if (id === 'app' && !tabLoaded.value.app) {
+  if (id === 'account' && !tabLoaded.value.app) {
     await generateQR()
     tabLoaded.value.app = true
   }
