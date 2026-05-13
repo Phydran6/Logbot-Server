@@ -1,7 +1,9 @@
 # LogBot v2026.04.17.15.17.18
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
-Entwickelt von Phydran6 
+Entwickelt von Phydran6
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 
 ## Features
@@ -225,3 +227,7 @@ docker compose exec -T postgres psql -U logbot logbot < backup.sql
 - Initiale Version
 - Basis Syslog-Empfang
 - Web-Interface
+
+## Lizenz
+
+Dieses Projekt steht unter der [MIT-Lizenz](LICENSE).
