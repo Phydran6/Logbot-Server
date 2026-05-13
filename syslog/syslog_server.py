@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.04.17.15.17.18
+# Version:     2026.05.13.20.58.33
 # Beschreibung: LogBot - Syslog Server mit erweitertem Parsing
 #               Unterstützt: RFC 5424, RFC 3164 (BSD), UniFi Netconsole,
 #               UniFi MAC/Model, Cisco IOS, Fortinet key=value,
@@ -491,7 +491,7 @@ async def handle_tcp(reader, writer, parser: SyslogParser, db: DatabaseManager):
 
 async def main():
     logger.info("=" * 60)
-    logger.info("LogBot Syslog Server v2026.04.11")
+    logger.info("LogBot Syslog Server v2026.05.13")
     logger.info("Unterstützte Formate: RFC5424, BSD/RFC3164, UniFi, Cisco IOS, Fortinet kv, JSON")
     logger.info("=" * 60)
 

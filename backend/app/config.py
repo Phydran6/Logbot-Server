@@ -1,7 +1,7 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.04.17.15.17.18
+# Version:     2026.05.13.20.58.33
 # Beschreibung: LogBot - Backend Konfiguration
 # ==============================================================================
 
@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
-    app_version: str = "2026.04.17.15.17.18"
+    app_version: str = "2026.05.13.20.58.33"
     caddy_admin_url: str = "http://caddy:2019"
     caddy_certs_dir: str = "/caddy-certs"
     # CORS: Komma-getrennte Liste erlaubter Origins, z.B. "https://logbot.example.com"

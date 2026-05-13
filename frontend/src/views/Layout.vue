@@ -1,7 +1,7 @@
-<!-- ==============================================================================
+﻿<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.04.17.15.17.18
+     Version:     2026.05.13.20.58.33
      Beschreibung: LogBot - Hauptlayout mit Sidebar/Navigation
      ============================================================================== -->
 
@@ -22,7 +22,7 @@
     >
       <div class="p-4 border-b" :style="{ borderColor: 'var(--color-border, #374151)' }">
         <h1 class="text-xl font-bold">📄 {{ companyName }}</h1>
-        <p class="text-sm" :style="{ color: 'var(--color-text-muted, #9ca3af)' }">v2026.04.17.15.17.18</p>
+        <p class="text-sm" :style="{ color: 'var(--color-text-muted, #9ca3af)' }">v2026.05.13.20.58.33</p>
       </div>
 
       <nav class="flex-1 p-4">

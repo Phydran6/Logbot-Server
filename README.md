@@ -1,4 +1,4 @@
-# LogBot v2026.04.17.15.17.18
+﻿# LogBot v2026.05.13.20.58.33
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -39,8 +39,8 @@ sudo bash install.sh
 
 **Oder manuell aus Archiv:**
 ```bash
-tar -xzf logbot-v2026.04.17.15.17.18.tar.gz
-cd logbot-v2026.04.17.15.17.18
+tar -xzf logbot-v2026.05.13.20.58.33.tar.gz
+cd logbot-v2026.05.13.20.58.33
 sudo bash install.sh
 ```
 
@@ -167,6 +167,10 @@ docker compose exec -T postgres psql -U logbot logbot < backup.sql
 ```
 
 ## Changelog
+### v2026.05.13.20.58.33 (2026-05-13)
+- NEU: MIT-Lizenz hinzugefügt
+- DOCS: GitHub Badges in README (Stars, Forks, Issues, letzter Commit, Release)
+
 ### v2026.04.17.15.17.18 (2026-04-17)
 - FIX: QR-Code App-Login Timezone-Bug (Countdown zeigte sofort "Abgelaufen")
 - FIX: SITE_URL wird jetzt korrekt an Backend-Container weitergegeben (docker-compose)
