@@ -4,6 +4,11 @@ Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 Entwickelt von Phydran6
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/Phydran6/Logbot-Server?style=social)](https://github.com/Phydran6/Logbot-Server/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/Phydran6/Logbot-Server?style=social)](https://github.com/Phydran6/Logbot-Server/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/Phydran6/Logbot-Server)](https://github.com/Phydran6/Logbot-Server/issues)
+[![GitHub last commit](https://img.shields.io/github/last-commit/Phydran6/Logbot-Server)](https://github.com/Phydran6/Logbot-Server/commits/main)
+[![GitHub release](https://img.shields.io/github/v/release/Phydran6/Logbot-Server?include_prereleases)](https://github.com/Phydran6/Logbot-Server/releases)
 
 
 ## Features
