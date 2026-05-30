@@ -1,7 +1,7 @@
 ﻿<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.05.30.17.22.26
+     Version:     2026.05.30.18.02.35
      Beschreibung: LogBot - Benutzer-Verwaltung (inkl. MFA-Status & Admin-Reset)
      ============================================================================== -->
 
@@ -89,13 +89,14 @@
       class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
       @click.self="closeModal"
     >
-      <div class="rounded-lg shadow-xl w-full max-w-md" :style="cardStyle">
-        <div class="p-4 border-b" :style="{ borderColor: 'var(--color-border)' }">
+      <div class="rounded-lg shadow-xl w-full max-w-md flex flex-col" :style="modalContainerStyle">
+        <div class="p-4 border-b flex-shrink-0" :style="{ borderColor: 'var(--color-border)' }">
           <h2 class="text-lg font-semibold" :style="{ color: 'var(--color-text-primary)' }">
             {{ editingUser ? 'Benutzer bearbeiten' : 'Neuer Benutzer' }}
           </h2>
         </div>
-        <form @submit.prevent="saveUser" class="p-4 space-y-4">
+        <form @submit.prevent="saveUser" class="flex flex-col flex-1 min-h-0">
+          <div class="p-4 space-y-4 overflow-y-auto flex-1">
           <div>
             <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Benutzername</label>
             <input
@@ -185,8 +186,9 @@
             </button>
             <p class="text-xs mt-1" :style="{ color: 'var(--color-text-muted)' }">15 Min. gültig, Einmalverwendung</p>
           </div>
+          </div>
 
-          <div class="flex justify-end gap-2 pt-4 border-t" :style="{ borderColor: 'var(--color-border)' }">
+          <div class="flex justify-end gap-2 p-4 border-t flex-shrink-0" :style="{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }">
             <button
               type="button"
               @click="closeModal"
@@ -238,6 +240,13 @@ const form = ref({
 const cardStyle = computed(() => ({
   backgroundColor: 'var(--color-surface)',
   borderColor: 'var(--color-border)'
+}))
+
+// Modal-Container mit Höhenbegrenzung, damit langer Inhalt (MFA + QR) scrollbar bleibt
+const modalContainerStyle = computed(() => ({
+  backgroundColor: 'var(--color-surface)',
+  borderColor: 'var(--color-border)',
+  maxHeight: '90vh',
 }))
 
 const inputStyle = computed(() => ({

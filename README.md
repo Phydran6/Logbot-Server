@@ -1,4 +1,4 @@
-﻿# LogBot v2026.05.30.17.22.26
+﻿# LogBot v2026.05.30.18.02.35
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -39,8 +39,8 @@ sudo bash install.sh
 
 **Oder manuell aus Archiv:**
 ```bash
-tar -xzf logbot-v2026.05.30.17.22.26.tar.gz
-cd logbot-v2026.05.30.17.22.26
+tar -xzf logbot-v2026.05.30.18.02.35.tar.gz
+cd logbot-v2026.05.30.18.02.35
 sudo bash install.sh
 ```
 
@@ -167,6 +167,9 @@ docker compose exec -T postgres psql -U logbot logbot < backup.sql
 ```
 
 ## Changelog
+### v2026.05.30.18.02.35 (2026-05-30)
+- UI: Benutzer-Bearbeiten-Modal scrollbar mit fixiertem Header & Footer (max. 90 % Viewport-Höhe) – verhindert dass MFA + App-QR den Bildschirm sprengen.
+
 ### v2026.05.30.17.22.26 (2026-05-30)
 - NEU: MFA / 2FA via TOTP (Backend-Teil) – kompatibel mit allen gängigen Authenticator-Apps (Google Authenticator, Authy, 1Password, Aegis, Bitwarden, …)
   - Endpoints `/api/auth/mfa/setup`, `/verify`, `/disable`, `/status`, `/backup-codes/regenerate`
