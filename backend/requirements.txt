@@ -11,3 +11,4 @@ psutil==5.9.8
 httpx==0.26.0
 slowapi==0.1.9
 qrcode[pil]==7.4.2
+pyotp==2.9.0

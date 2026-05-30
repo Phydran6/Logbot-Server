@@ -1,18 +1,67 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.13.20.58.33
+# Version:     2026.05.30.17.22.26
 # Beschreibung: LogBot - Pydantic Schemas
 # ==============================================================================
 
 import re
 from datetime import datetime
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Union, Literal
 from pydantic import BaseModel, Field, field_validator
 
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+# -----------------------------------------------------------------------------
+# MFA / TOTP
+# -----------------------------------------------------------------------------
+class LoginMFARequired(BaseModel):
+    """Antwort auf /api/auth/login wenn der User MFA aktiviert hat."""
+    mfa_required: Literal[True] = True
+    mfa_token: str
+    expires_in_seconds: int
+
+
+class MFALoginRequest(BaseModel):
+    mfa_token: str = Field(..., min_length=10)
+    code: str = Field(..., min_length=6, max_length=16)  # 6-stellig TOTP oder 10-stelliger Backup-Code
+
+
+class MFASetupResponse(BaseModel):
+    secret: str               # Base32 zum manuellen Eintippen
+    otpauth_uri: str          # otpauth://totp/...
+    qr_image: str             # data:image/png;base64,...
+
+
+class MFAVerifyRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=8)  # frisch eingerichteter TOTP
+
+
+class MFAVerifyResponse(BaseModel):
+    enabled: bool = True
+    backup_codes: List[str]   # Klartext, EINMALIG nach Setup zurückgegeben
+
+
+class MFADisableRequest(BaseModel):
+    password: str = Field(..., min_length=1)
+    code: str = Field(..., min_length=6, max_length=16)
+
+
+class MFARegenerateRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=16)
+
+
+class MFARegenerateResponse(BaseModel):
+    backup_codes: List[str]
+
+
+class MFAStatusResponse(BaseModel):
+    enabled: bool
+    backup_codes_remaining: int = 0
+    locked_until: Optional[datetime] = None
 
 class TokenData(BaseModel):
     username: Optional[str] = None

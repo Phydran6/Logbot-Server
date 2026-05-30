@@ -1,16 +1,16 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.13.20.58.33
-# Beschreibung: LogBot v2026.01.30.13.30.00 - Users API Endpoints
+# Version:     2026.05.30.17.22.26
+# Beschreibung: LogBot - Users API Endpoints (inkl. Admin-MFA-Reset)
 # ==============================================================================
 
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
-from ..models import User
+from ..models import User, MFABackupCode
 from ..schemas import UserCreate, UserUpdate, UserResponse
 from ..auth import get_current_user, get_current_admin, get_password_hash
 
@@ -67,4 +67,26 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), current_
     if not user:
         raise HTTPException(status_code=404, detail="User nicht gefunden")
     await db.delete(user)
+    await db.commit()
+
+
+@router.post("/{user_id}/mfa/reset", status_code=204)
+async def admin_reset_mfa(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """Notfall-Reset: Admin kann MFA für andere User deaktivieren (z. B. bei verlorenem Handy).
+    Eigenen Account aus Sicherheitsgründen NICHT über diesen Endpoint resetbar."""
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="Eigenes MFA bitte über /api/auth/mfa/disable deaktivieren")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User nicht gefunden")
+    user.mfa_enabled = False
+    user.mfa_secret = None
+    user.mfa_failed_count = 0
+    user.mfa_locked_until = None
+    await db.execute(delete(MFABackupCode).where(MFABackupCode.user_id == user_id))
     await db.commit()

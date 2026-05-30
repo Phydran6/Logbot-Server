@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.13.20.58.33
+# Version:     2026.05.30.17.22.26
 # Beschreibung: LogBot - FastAPI Hauptanwendung
 # ==============================================================================
 
@@ -26,7 +26,7 @@ from .limiter import limiter
 from .models import Webhook, Log, Agent, AgentToken
 from sqlalchemy import func
 from .schemas import LogResponse, LogDetailResponse, LogIngestRequest, LogIngestResponse
-from .routes import auth_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, caddy as caddy_router
+from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, caddy as caddy_router
 from .branding import branding_router
 
 # =============================================================================
@@ -80,6 +80,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 # Routes registrieren
 # =============================================================================
 app.include_router(auth_router)
+app.include_router(mfa_router)
 app.include_router(health_router)
 app.include_router(users_router)
 app.include_router(agents_router)
@@ -144,6 +145,42 @@ async def ensure_agent_retention_columns():
         logger.info("agents retention columns ready")
     except Exception as exc:
         logger.warning("agents retention migration skipped: %s", exc)
+
+
+@app.on_event("startup")
+async def ensure_mfa_schema():
+    """Fügt MFA-Spalten zu users hinzu und legt mfa_backup_codes-Tabelle an (Migration)."""
+    logger = logging.getLogger("logbot.startup")
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret VARCHAR(64)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_failed_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_locked_until TIMESTAMP"
+            )
+            await conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS mfa_backup_codes (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    code_hash VARCHAR(255) NOT NULL,
+                    used_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_mfa_backup_codes_user_id ON mfa_backup_codes(user_id)"
+            )
+        logger.info("MFA schema ready")
+    except Exception as exc:
+        logger.warning("MFA schema migration skipped: %s", exc)
 
 
 @app.on_event("startup")

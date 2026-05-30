@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.13.20.58.33
+# Version:     2026.05.30.17.22.26
 # Beschreibung: LogBot - SQLAlchemy Models
 # ==============================================================================
 
@@ -20,7 +20,24 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # MFA / TOTP
+    mfa_enabled = Column(Boolean, default=False, nullable=False)
+    mfa_secret = Column(String(64), nullable=True)                # Base32, erst nach erfolgreichem Verify gesetzt
+    mfa_failed_count = Column(Integer, default=0, nullable=False)
+    mfa_locked_until = Column(DateTime, nullable=True)
     app_login_tokens = relationship("AppLoginToken", back_populates="user", passive_deletes=True)
+    mfa_backup_codes = relationship("MFABackupCode", back_populates="user", passive_deletes=True)
+
+
+class MFABackupCode(Base):
+    """Einmal-Backup-Code für TOTP-Recovery. code_hash = bcrypt."""
+    __tablename__ = "mfa_backup_codes"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    code_hash = Column(String(255), nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    user = relationship("User", back_populates="mfa_backup_codes")
 
 class Agent(Base):
     __tablename__ = "agents"
@@ -86,6 +103,7 @@ class Setting(Base):
     value = Column(JSON, nullable=False)
     description = Column(Text)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 
 class AppLoginToken(Base):
     """Kurzlebiger Einmal-Token für die App-Authentifizierung via QR-Code."""

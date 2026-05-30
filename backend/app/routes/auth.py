@@ -1,8 +1,8 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.13.20.58.33
-# Beschreibung: LogBot - Auth API Endpoints + App-Login (QR-Code)
+# Version:     2026.05.30.17.22.26
+# Beschreibung: LogBot - Auth API Endpoints + App-Login (QR-Code) + MFA-Login
 # ==============================================================================
 
 import io
@@ -10,6 +10,7 @@ import json
 import base64
 import secrets
 from datetime import datetime, timedelta
+from typing import Union
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, delete
@@ -19,22 +20,41 @@ import qrcode
 from ..database import get_db
 from ..limiter import limiter
 from ..models import User, AppLoginToken
-from ..schemas import Token, UserResponse, AppTokenResponse, AppTokenExchangeRequest, AppQRResponse
-from ..auth import verify_password, create_access_token, get_current_user
+from ..schemas import (
+    Token,
+    UserResponse,
+    AppTokenResponse,
+    AppTokenExchangeRequest,
+    AppQRResponse,
+    LoginMFARequired,
+    MFALoginRequest,
+)
+from ..auth import (
+    verify_password,
+    create_access_token,
+    create_mfa_pending_token,
+    decode_mfa_pending_token,
+    is_user_mfa_locked,
+    register_mfa_failure,
+    clear_mfa_failures,
+    get_current_user,
+    MFA_PENDING_TOKEN_MINUTES,
+)
 from ..config import settings
+from .mfa import consume_totp_or_backup
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
 _APP_TOKEN_TTL_MINUTES = 15
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=None)
 @limiter.limit("10/minute")
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
-):
+) -> Union[Token, LoginMFARequired]:
     result = await db.execute(select(User).where(User.username == form_data.username))
     user = result.scalar_one_or_none()
     # Gleiche Fehlermeldung für "User existiert nicht" und "Passwort falsch"
@@ -43,6 +63,49 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Falsche Anmeldedaten")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Benutzer deaktiviert")
+
+    # MFA aktiv → kein Vollzugriffs-Token, sondern Pending-Token zurückgeben
+    if user.mfa_enabled:
+        if is_user_mfa_locked(user):
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"MFA gesperrt bis {user.mfa_locked_until.isoformat()}Z",
+            )
+        return LoginMFARequired(
+            mfa_token=create_mfa_pending_token(user.username),
+            expires_in_seconds=MFA_PENDING_TOKEN_MINUTES * 60,
+        )
+
+    return Token(access_token=create_access_token(data={"sub": user.username}))
+
+
+@router.post("/login/mfa", response_model=Token)
+@limiter.limit("10/minute")
+async def login_mfa(
+    request: Request,
+    data: MFALoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Zweiter Login-Schritt: Pending-Token + TOTP/Backup-Code → Access-Token."""
+    username = decode_mfa_pending_token(data.mfa_token)
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active or not user.mfa_enabled:
+        raise HTTPException(status_code=401, detail="MFA-Token ungültig")
+
+    if is_user_mfa_locked(user):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=f"MFA gesperrt bis {user.mfa_locked_until.isoformat()}Z",
+        )
+
+    if not await consume_totp_or_backup(db, user, data.code):
+        register_mfa_failure(user)
+        await db.commit()
+        raise HTTPException(status_code=401, detail="Code ungültig")
+
+    clear_mfa_failures(user)
+    await db.commit()
     return Token(access_token=create_access_token(data={"sub": user.username}))
 
 

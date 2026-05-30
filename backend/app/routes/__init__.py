@@ -1,11 +1,12 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.13.20.58.33
-# Beschreibung: LogBot v2026.03.31.17.26.46 - Routes Package
+# Version:     2026.05.30.17.22.26
+# Beschreibung: LogBot - Routes Package
 # ==============================================================================
 
 from .auth import router as auth_router
+from .mfa import router as mfa_router
 from .health import router as health_router
 from .users import router as users_router
 from .agents import router as agents_router, token_router as agent_tokens_router
@@ -14,5 +15,5 @@ from .webhooks import router as webhooks_router
 from .settings import router as settings_router
 from . import caddy
 
-__all__ = ["auth_router", "health_router", "users_router", "agents_router",
+__all__ = ["auth_router", "mfa_router", "health_router", "users_router", "agents_router",
            "agent_tokens_router", "logs_router", "webhooks_router", "settings_router", "caddy"]

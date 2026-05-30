@@ -1,4 +1,4 @@
-﻿# LogBot v2026.05.13.20.58.33
+﻿# LogBot v2026.05.30.17.22.26
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -39,8 +39,8 @@ sudo bash install.sh
 
 **Oder manuell aus Archiv:**
 ```bash
-tar -xzf logbot-v2026.05.13.20.58.33.tar.gz
-cd logbot-v2026.05.13.20.58.33
+tar -xzf logbot-v2026.05.30.17.22.26.tar.gz
+cd logbot-v2026.05.30.17.22.26
 sudo bash install.sh
 ```
 
@@ -167,6 +167,15 @@ docker compose exec -T postgres psql -U logbot logbot < backup.sql
 ```
 
 ## Changelog
+### v2026.05.30.17.22.26 (2026-05-30)
+- NEU: MFA / 2FA via TOTP (Backend-Teil) – kompatibel mit allen gängigen Authenticator-Apps (Google Authenticator, Authy, 1Password, Aegis, Bitwarden, …)
+  - Endpoints `/api/auth/mfa/setup`, `/verify`, `/disable`, `/status`, `/backup-codes/regenerate`
+  - 10 Einmal-Backup-Codes (bcrypt-gehasht)
+  - Zwei-Stufen-Login: `/api/auth/login` liefert bei aktivem MFA ein `mfa_token`, `POST /api/auth/login/mfa` tauscht es gegen Access-Token
+  - Lockout: 10 Falschversuche → 15 Min Sperre
+  - Admin-Notfall-Reset: `POST /api/users/{id}/mfa/reset`
+  - Schema-Migrationen laufen automatisch beim Start
+
 ### v2026.05.13.20.58.33 (2026-05-13)
 - NEU: MIT-Lizenz hinzugefügt
 - DOCS: GitHub Badges in README (Stars, Forks, Issues, letzter Commit, Release)
