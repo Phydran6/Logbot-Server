@@ -1,8 +1,8 @@
 ﻿<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.05.13.20.58.33
-     Beschreibung: LogBot - Benutzer-Verwaltung mit Theme-Support
+     Version:     2026.05.30.17.22.26
+     Beschreibung: LogBot - Benutzer-Verwaltung (inkl. MFA-Status & Admin-Reset)
      ============================================================================== -->
 
 <template>
@@ -59,6 +59,15 @@
                 :style="{ color: 'var(--color-primary)' }"
               >
                 Bearbeiten
+              </button>
+              <button
+                v-if="authStore.isAdmin && user.id !== authStore.user?.id"
+                @click="resetUserMfa(user)"
+                class="hover:underline mr-4"
+                :style="{ color: 'var(--color-text-secondary)' }"
+                title="MFA für diesen User zurücksetzen (Notfall)"
+              >
+                MFA-Reset
               </button>
               <button
                 v-if="user.id !== authStore.user?.id"
@@ -137,6 +146,11 @@
             <label for="is_active" :style="{ color: 'var(--color-text-secondary)' }">Benutzer aktiv</label>
           </div>
           
+          <!-- MFA-Verwaltung (nur für eigenen User) -->
+          <div v-if="editingUser?.id === authStore.user?.id" class="pt-4 border-t" :style="{ borderColor: 'var(--color-border)' }">
+            <MfaSettings />
+          </div>
+
           <!-- App-Login QR (nur für eigenen User) -->
           <div v-if="editingUser?.id === authStore.user?.id" class="pt-4 border-t" :style="{ borderColor: 'var(--color-border)' }">
             <h3 class="text-sm font-semibold mb-3" :style="{ color: 'var(--color-text-primary)' }">📱 App-Anmeldung</h3>
@@ -198,6 +212,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import MfaSettings from '../components/MfaSettings.vue'
 
 const authStore = useAuthStore()
 
@@ -355,10 +370,20 @@ async function saveUser() {
 
 async function deleteUser(user) {
   if (!confirm(`Benutzer "${user.username}" wirklich löschen?`)) return
-  
+
   try {
     await authStore.api(`/api/users/${user.id}`, { method: 'DELETE' })
     loadUsers()
+  } catch (e) {
+    alert('Fehler: ' + e.message)
+  }
+}
+
+async function resetUserMfa(user) {
+  if (!confirm(`MFA für "${user.username}" wirklich zurücksetzen? Backup-Codes und TOTP werden gelöscht.`)) return
+  try {
+    await authStore.api(`/api/users/${user.id}/mfa/reset`, { method: 'POST', body: {} })
+    alert(`MFA für ${user.username} zurückgesetzt.`)
   } catch (e) {
     alert('Fehler: ' + e.message)
   }

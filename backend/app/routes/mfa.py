@@ -177,10 +177,10 @@ async def mfa_disable(
     if not current_user.mfa_enabled:
         raise HTTPException(status_code=400, detail="MFA ist nicht aktiv.")
     if not verify_password(data.password, current_user.password_hash):
-        raise HTTPException(status_code=401, detail="Passwort falsch")
+        raise HTTPException(status_code=400, detail="Passwort falsch")
 
     if not await consume_totp_or_backup(db, current_user, data.code):
-        raise HTTPException(status_code=401, detail="Code ungültig")
+        raise HTTPException(status_code=400, detail="Code ungültig")
 
     current_user.mfa_enabled = False
     current_user.mfa_secret = None
@@ -204,7 +204,7 @@ async def mfa_regenerate(
     if not current_user.mfa_enabled:
         raise HTTPException(status_code=400, detail="MFA ist nicht aktiv.")
     if not await consume_totp_or_backup(db, current_user, data.code):
-        raise HTTPException(status_code=401, detail="Code ungültig")
+        raise HTTPException(status_code=400, detail="Code ungültig")
 
     await db.execute(delete(MFABackupCode).where(MFABackupCode.user_id == current_user.id))
     plain_codes = _generate_backup_codes()
