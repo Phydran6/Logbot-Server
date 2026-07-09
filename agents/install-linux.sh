@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.04.17.15.17.18
+# Version:     2026.07.09.19.55.08
 # Beschreibung: Linux Installer
 #               Konfiguriert rsyslog zum Weiterleiten an LogBot Server
 #               Keine zusätzlichen Abhängigkeiten erforderlich!
@@ -17,7 +17,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-AGENT_VERSION="2026.04.17.15.17.18"
+AGENT_VERSION="2026.07.09.19.55.08"
 CONFIG_FILE="/etc/rsyslog.d/99-logbot.conf"
 QUEUE_PREFIX="/var/spool/rsyslog/logbot_queue"
 
@@ -124,56 +124,81 @@ handle_existing_installation() {
 }
 
 # ==============================================================================
-# FQDN bevorzugen / Validierung
+# Server-Adresse: DNS-Aufloesung + Erreichbarkeit pruefen
+# FQDN (z.B. logbot.phytech.de) und IP werden gleichermassen unterstuetzt.
 # ==============================================================================
 
-ensure_fqdn_preferred() {
-    local input="$SERVER_HOST"
-    
-    if ! command -v getent >/dev/null 2>&1; then
-        log_warn "getent nicht verfuegbar, FQDN-Check uebersprungen."
-        return
+# Prueft, ob ein Host (FQDN oder IP) aufloesbar ist. Nutzt mehrere Methoden,
+# damit nicht eine einzelne getent-Eigenheit zum Abbruch fuehrt.
+resolve_host() {
+    local host="$1"
+
+    # Reine IPv4-Adresse gilt immer als aufloesbar
+    if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        return 0
     fi
-    
-    # Nichts zu tun ohne Eingabe
-    [[ -z "$input" ]] && return
-    
-    # IPv4: versuche PTR -> FQDN
-    if [[ "$input" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        local fqdn
-        fqdn=$(getent hosts "$input" 2>/dev/null | awk '{print $2}' | grep -m1 '\.' || true)
-        if [[ -n "$fqdn" ]]; then
-            read -p "Gefundener FQDN fuer IP \"$input\": $fqdn verwenden? [J/n] " ans
-            if [[ ! "$ans" =~ ^[Nn]$ ]]; then
-                SERVER_HOST="$fqdn"
-                log_info "FQDN gesetzt: $SERVER_HOST"
-            fi
-        else
-            log_warn "Kein FQDN fuer IP $input aufloesbar (DNS PTR)."
+
+    # 1) getent ahosts - respektiert nsswitch inkl. DNS (A + AAAA)
+    if command -v getent >/dev/null 2>&1; then
+        getent ahosts "$host" >/dev/null 2>&1 && return 0
+    fi
+
+    # 2) python3 socket.getaddrinfo (falls vorhanden)
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import socket,sys; socket.getaddrinfo(sys.argv[1], None)' "$host" >/dev/null 2>&1 && return 0
+    fi
+
+    # 3) dig / host als weitere Fallbacks (verlaessliche Exit-Codes).
+    #    nslookup wird bewusst NICHT genutzt: liefert auf vielen Systemen
+    #    auch bei NXDOMAIN rc=0 und wuerde falsch-positiv "aufloesbar" melden.
+    if command -v dig >/dev/null 2>&1; then
+        [[ -n "$(dig +short "$host" 2>/dev/null)" ]] && return 0
+    fi
+    if command -v host >/dev/null 2>&1; then
+        host "$host" >/dev/null 2>&1 && return 0
+    fi
+
+    return 1
+}
+
+# Testet TCP-Erreichbarkeit host:port - dependency-frei via /dev/tcp, sonst nc.
+check_tcp_reachable() {
+    local host="$1" port="$2" tmo="${3:-3}"
+
+    if timeout "$tmo" bash -c "exec 3<>/dev/tcp/${host}/${port}" 2>/dev/null; then
+        return 0
+    fi
+    if command -v nc >/dev/null 2>&1; then
+        nc -z -w "$tmo" "$host" "$port" >/dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
+# Prueft die eingegebene Server-Adresse. Bricht NICHT hart ab - der Nutzer
+# entscheidet, denn rsyslog loest den Namen zur Laufzeit ohnehin erneut auf.
+verify_server_address() {
+    local host="$SERVER_HOST" port="$SERVER_PORT"
+    [[ -z "$host" ]] && return
+
+    if resolve_host "$host"; then
+        log_success "Adresse aufloesbar: $host"
+    else
+        log_warn "\"$host\" konnte aktuell nicht per DNS aufgeloest werden."
+        log_info "Ursachen: DNS/hosts-Eintrag fehlt, Tippfehler, oder Name nur intern gueltig."
+        read -p "Trotzdem verwenden? rsyslog versucht die Aufloesung zur Laufzeit erneut. [J/n] " ans
+        if [[ "$ans" =~ ^[Nn]$ ]]; then
+            log_error "Abgebrochen. Bitte Adresse/DNS pruefen."
+            exit 1
         fi
-        return
     fi
-    
-    # Host ohne Punkt: versuche FQDN aufloesen
-    if [[ "$input" != *.* ]]; then
-        local fqdn
-        fqdn=$(getent hosts "$input" 2>/dev/null | awk '{print $2}' | grep -m1 '\.' || true)
-        if [[ -n "$fqdn" ]]; then
-            read -p "FQDN \"$fqdn\" verwenden? [J/n] " ans
-            if [[ ! "$ans" =~ ^[Nn]$ ]]; then
-                SERVER_HOST="$fqdn"
-                log_info "FQDN gesetzt: $SERVER_HOST"
-            fi
+
+    # Erreichbarkeit nur bei TCP sinnvoll testbar (UDP ist verbindungslos)
+    if [[ "${PROTO_NAME:-UDP}" == "TCP" ]]; then
+        if check_tcp_reachable "$host" "$port"; then
+            log_success "TCP ${host}:${port} erreichbar"
         else
-            log_warn "Kein FQDN fuer Host $input gefunden. Bitte DNS/Hosts pruefen."
+            log_warn "TCP ${host}:${port} derzeit nicht erreichbar (Firewall/Server?). Konfiguration wird dennoch geschrieben."
         fi
-        return
-    fi
-    
-    # Host enthaelt Punkt: sicherstellen, dass er aufloesbar ist
-    if ! getent hosts "$input" >/dev/null 2>&1; then
-        log_error "FQDN $input kann nicht aufgeloest werden. Bitte DNS/Hosts pruefen."
-        exit 1
     fi
 }
 
@@ -190,15 +215,13 @@ configure_rsyslog() {
     
     read -p "LogBot Server Port [514]: " SERVER_PORT
     SERVER_PORT=${SERVER_PORT:-514}
-    
-    ensure_fqdn_preferred
-    
+
     echo ""
     echo "Protokoll:"
     echo "  1) UDP (Standard, schneller)"
     echo "  2) TCP (zuverlässiger)"
     read -p "Auswahl [1]: " PROTO_CHOICE
-    
+
     if [[ "$PROTO_CHOICE" == "2" ]]; then
         PROTOCOL="@@"  # @@ = TCP in rsyslog
         PROTO_NAME="TCP"
@@ -207,6 +230,9 @@ configure_rsyslog() {
         PROTO_NAME="UDP"
     fi
     PROTOCOL_LOWER=$(echo "$PROTO_NAME" | tr 'A-Z' 'a-z')
+
+    # Server-Adresse pruefen (DNS + Erreichbarkeit) - bricht nicht hart ab
+    verify_server_address
     
     # Welche Logs weiterleiten?
     echo ""
