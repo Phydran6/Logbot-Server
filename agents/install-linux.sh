@@ -3,6 +3,7 @@
 # Name:        Phydran6
 # Kontakt:     Phydran6
 # Version:     2026.07.09.19.55.08
+# Changelog:   ../CHANGELOG/agents.md
 # Beschreibung: Linux Installer
 #               Konfiguriert rsyslog zum Weiterleiten an LogBot Server
 #               Keine zusätzlichen Abhängigkeiten erforderlich!

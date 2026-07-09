@@ -2,6 +2,7 @@
 # Name:        Phydran6
 # Kontakt:     Phydran6
 # Version:     2026.05.30.17.22.26
+# Changelog:   ../../CHANGELOG/backend.md
 # Beschreibung: LogBot - FastAPI Hauptanwendung
 # ==============================================================================
 

@@ -5,6 +5,8 @@ Log-Forwarder für Linux und Windows – keine zusätzlichen Abhängigkeiten.
 Entwickelt von Phydran6  
 Kontakt: Phydran6
 
+📓 Changelog: [../CHANGELOG/agents.md](../CHANGELOG/agents.md)
+
 ## Features
 - Linux: nutzt vorhandenes rsyslog – kein Python nötig
 - Windows: reines PowerShell – kein Python nötig
