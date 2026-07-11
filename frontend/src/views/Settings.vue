@@ -1,8 +1,9 @@
 ﻿<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.05.13.20.58.33
-     Beschreibung: LogBot - Einstellungen mit Theme-Support
+     Version:     2026.07.11.13.03.42
+     Changelog:   ../../../CHANGELOG/frontend.md
+     Beschreibung: LogBot - Einstellungen mit Theme-Support (inkl. Netzwerk-Tab: Reverse Proxy + DNS)
      ============================================================================== -->
 
 <template>
@@ -156,8 +157,23 @@
         </div>
       </div>
     </div>
-    <!-- Reverse Proxy & TLS (Caddy, nur Admin) -->
-    <div v-if="authStore.isAdmin && activeTab === 'caddy'" class="rounded-lg shadow p-6 mt-6" :style="cardStyle">
+    <!-- Netzwerk (Reverse Proxy + DNS, nur Admin) -->
+    <div v-if="authStore.isAdmin && activeTab === 'network'" class="mt-6 space-y-4">
+      <!-- Unter-Navigation -->
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="sub in networkSubTabs"
+          :key="sub.id"
+          class="px-3 py-2 rounded text-sm"
+          :style="subTabButtonStyle(sub.id)"
+          @click="networkSubTab = sub.id"
+        >
+          {{ sub.label }}
+        </button>
+      </div>
+
+    <!-- Reverse Proxy & TLS (Caddy) -->
+    <div v-if="networkSubTab === 'caddy'" class="rounded-lg shadow p-6" :style="cardStyle">
       <h2 class="text-lg font-semibold mb-2" :style="{ color: 'var(--color-text-primary)' }">Reverse Proxy & TLS (Caddy)</h2>
       <p class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
         Caddyfile im Browser anpassen und sicher anwenden. Ungültige Config wird von Caddy abgelehnt – bei Fehler bleibt die alte aktiv.
@@ -273,6 +289,85 @@
         </div>
       </div>
 
+      <!-- DNS -->
+      <div v-if="networkSubTab === 'dns'" class="rounded-lg shadow p-6" :style="cardStyle">
+        <h2 class="text-lg font-semibold mb-2" :style="{ color: 'var(--color-text-primary)' }">DNS</h2>
+        <p class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
+          Standardmäßig wird der im Netzwerk per DHCP vergebene DNS verwendet. Alternativ kannst du eigene DNS-Server hinterlegen.
+        </p>
+
+        <div v-if="dnsError" class="text-sm mb-2" :style="{ color: 'var(--color-danger)' }">{{ dnsError }}</div>
+        <div v-if="dnsMessage" class="text-sm mb-2" :style="{ color: 'var(--color-success)' }">{{ dnsMessage }}</div>
+
+        <div class="space-y-2 text-sm" :style="{ color: 'var(--color-text-secondary)' }">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" value="dhcp" v-model="dnsMode">
+            <span>Automatisch (per DHCP vergebener DNS)</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" value="manual" v-model="dnsMode">
+            <span>Manuell (eigene DNS-Server)</span>
+          </label>
+        </div>
+
+        <div class="mt-4">
+          <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Erkannte System-DNS (DHCP)</label>
+          <p class="text-sm font-mono" :style="{ color: 'var(--color-text-primary)' }">
+            {{ dnsDetected.length ? dnsDetected.join(', ') : 'Keine erkannt' }}
+          </p>
+        </div>
+
+        <div v-if="dnsMode === 'manual'" class="mt-4">
+          <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">DNS-Server</label>
+          <div v-for="(srv, idx) in dnsServers" :key="idx" class="flex items-center gap-2 mb-2">
+            <input v-model="dnsServers[idx]" type="text" class="flex-1 rounded px-3 py-2" :style="inputStyle" placeholder="z.B. 192.168.179.30">
+            <button class="px-3 py-2 rounded hover:opacity-80" :style="buttonSecondaryStyle" @click="dnsServers.splice(idx, 1)">Entfernen</button>
+          </div>
+          <button class="px-3 py-2 rounded hover:opacity-80" :style="buttonSecondaryStyle" @click="dnsServers.push('')">+ Server hinzufügen</button>
+
+          <label class="block text-sm font-medium mt-4 mb-1" :style="{ color: 'var(--color-text-secondary)' }">Such-Domains (optional)</label>
+          <input v-model="dnsSearchInput" type="text" class="w-full rounded px-3 py-2" :style="inputStyle" placeholder="z.B. phytech.de intern.lan (Leerzeichen-getrennt)">
+        </div>
+
+        <div class="mt-4">
+          <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Aktuell aktive Nameserver (Container)</label>
+          <p class="text-sm font-mono" :style="{ color: 'var(--color-text-primary)' }">
+            {{ dnsActive.length ? dnsActive.join(', ') : '-' }}
+          </p>
+        </div>
+
+        <div class="flex flex-col md:flex-row gap-3 mt-4">
+          <button
+            class="px-3 py-2 rounded text-white hover:opacity-90 disabled:opacity-50"
+            :style="{ backgroundColor: 'var(--color-primary)' }"
+            @click="applyDns"
+            :disabled="dnsLoading"
+          >
+            {{ dnsLoading ? 'Wird angewendet...' : 'Anwenden' }}
+          </button>
+        </div>
+
+        <div class="mt-6 pt-4 border-t" :style="{ borderColor: 'var(--color-border)' }">
+          <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Auflösung testen</label>
+          <div class="flex items-center gap-2">
+            <input v-model="dnsTestHost" type="text" class="flex-1 rounded px-3 py-2" :style="inputStyle" placeholder="logbot.example.com">
+            <button
+              class="px-3 py-2 rounded hover:opacity-80 disabled:opacity-50"
+              :style="buttonSecondaryStyle"
+              @click="testDns"
+              :disabled="dnsTesting"
+            >
+              {{ dnsTesting ? 'Teste…' : 'Testen' }}
+            </button>
+          </div>
+          <p v-if="dnsTestResult" class="text-sm mt-2" :style="{ color: dnsTestResult.resolved ? 'var(--color-success)' : 'var(--color-danger)' }">
+            {{ dnsTestResult.resolved ? ('OK: ' + (dnsTestResult.addresses || []).join(', ')) : ('Fehler: ' + (dnsTestResult.error || 'nicht auflösbar')) }}
+          </p>
+        </div>
+      </div>
+    </div>
+    <!-- /Netzwerk -->
+
     <!-- Datenbank (nur Admin) -->
     <div v-if="authStore.isAdmin && activeTab === 'database'" class="rounded-lg shadow p-6 mt-6" :style="cardStyle">
       <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Datenbank</h2>
@@ -377,13 +472,18 @@ const tabs = [
   { id: 'general', label: 'Allgemein' },
   { id: 'retention', label: 'Retention' },
   { id: 'agents', label: 'Agent Token' },
-  { id: 'caddy', label: 'Reverse Proxy', adminOnly: true },
+  { id: 'network', label: 'Netzwerk', adminOnly: true },
   { id: 'database', label: 'Datenbank', adminOnly: true },
   { id: 'system', label: 'System', adminOnly: true },
   { id: 'password', label: 'Passwort' }
 ]
 const activeTab = ref('general')
-const tabLoaded = ref({ caddy: false, database: false })
+const tabLoaded = ref({ network: false, database: false })
+const networkSubTabs = [
+  { id: 'caddy', label: 'Reverse Proxy' },
+  { id: 'dns', label: 'DNS' }
+]
+const networkSubTab = ref('caddy')
 
 const settings = ref({
   app_name: 'LogBot',
@@ -430,6 +530,18 @@ const caddyCertPresent = ref(false)
 const showHttpHint = ref(false)
 const httpLink = ref('')
 const httpCopyMessage = ref('')
+// DNS
+const dnsMode = ref('dhcp')
+const dnsServers = ref([''])
+const dnsSearchInput = ref('')
+const dnsDetected = ref([])
+const dnsActive = ref([])
+const dnsLoading = ref(false)
+const dnsMessage = ref('')
+const dnsError = ref('')
+const dnsTestHost = ref('')
+const dnsTesting = ref(false)
+const dnsTestResult = ref(null)
 let certUpload = { cert: null, key: null }
 const httpTemplate = `{
     admin 0.0.0.0:2019
@@ -547,15 +659,25 @@ function tabButtonStyle(id) {
   }
 }
 
+function subTabButtonStyle(id) {
+  const isActive = networkSubTab.value === id
+  return {
+    backgroundColor: isActive ? 'var(--color-primary)' : 'var(--color-surface-elevated)',
+    color: isActive ? '#fff' : 'var(--color-text-primary)',
+    border: '1px solid var(--color-border)'
+  }
+}
+
 async function setTab(id) {
   activeTab.value = id
   if (id === 'database' && authStore.isAdmin && !tabLoaded.value.database) {
     await loadDatabaseSettings()
     tabLoaded.value.database = true
   }
-  if (id === 'caddy' && authStore.isAdmin && !tabLoaded.value.caddy) {
+  if (id === 'network' && authStore.isAdmin && !tabLoaded.value.network) {
     await loadCaddyConfig()
-    tabLoaded.value.caddy = true
+    await loadDnsConfig()
+    tabLoaded.value.network = true
   }
 }
 
@@ -605,6 +727,60 @@ async function loadCaddyConfig() {
     caddyError.value = e.message || 'Caddy-Konfiguration konnte nicht geladen werden'
   } finally {
     caddyLoading.value = false
+  }
+}
+
+async function loadDnsConfig() {
+  dnsError.value = ''
+  try {
+    const res = await authStore.api('/api/network/dns')
+    dnsMode.value = res.mode || 'dhcp'
+    dnsServers.value = (res.configured && res.configured.length) ? [...res.configured] : ['']
+    dnsSearchInput.value = (res.search_domains || []).join(' ')
+    dnsDetected.value = res.detected || []
+    dnsActive.value = res.active || []
+    if (!dnsTestHost.value) dnsTestHost.value = caddyDomain.value || ''
+  } catch (e) {
+    dnsError.value = e.message || 'DNS-Konfiguration konnte nicht geladen werden'
+  }
+}
+
+async function applyDns() {
+  dnsLoading.value = true
+  dnsError.value = ''
+  dnsMessage.value = ''
+  try {
+    const servers = dnsMode.value === 'manual'
+      ? dnsServers.value.map(s => s.trim()).filter(Boolean)
+      : []
+    const search = dnsSearchInput.value.split(/\s+/).map(s => s.trim()).filter(Boolean)
+    const res = await authStore.api('/api/network/dns', {
+      method: 'PUT',
+      body: { mode: dnsMode.value, servers, search_domains: search }
+    })
+    dnsDetected.value = res.detected || []
+    dnsActive.value = res.active || []
+    dnsMessage.value = 'DNS angewendet.'
+  } catch (e) {
+    dnsError.value = e.message || 'DNS konnte nicht angewendet werden'
+  } finally {
+    dnsLoading.value = false
+  }
+}
+
+async function testDns() {
+  if (!dnsTestHost.value) return
+  dnsTesting.value = true
+  dnsTestResult.value = null
+  try {
+    dnsTestResult.value = await authStore.api('/api/network/dns/test', {
+      method: 'POST',
+      body: { host: dnsTestHost.value.trim() }
+    })
+  } catch (e) {
+    dnsTestResult.value = { resolved: false, error: e.message }
+  } finally {
+    dnsTesting.value = false
   }
 }
 

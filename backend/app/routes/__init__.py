@@ -14,6 +14,7 @@ from .logs import router as logs_router
 from .webhooks import router as webhooks_router
 from .settings import router as settings_router
 from . import caddy
+from . import network
 
 __all__ = ["auth_router", "mfa_router", "health_router", "users_router", "agents_router",
-           "agent_tokens_router", "logs_router", "webhooks_router", "settings_router", "caddy"]
+           "agent_tokens_router", "logs_router", "webhooks_router", "settings_router", "caddy", "network"]

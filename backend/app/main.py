@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.30.17.22.26
+# Version:     2026.07.11.13.03.42
 # Changelog:   ../../CHANGELOG/backend.md
 # Beschreibung: LogBot - FastAPI Hauptanwendung
 # ==============================================================================
@@ -27,7 +27,7 @@ from .limiter import limiter
 from .models import Webhook, Log, Agent, AgentToken
 from sqlalchemy import func
 from .schemas import LogResponse, LogDetailResponse, LogIngestRequest, LogIngestResponse
-from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, caddy as caddy_router
+from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, caddy as caddy_router, network as network_router
 from .branding import branding_router
 
 # =============================================================================
@@ -91,6 +91,7 @@ app.include_router(webhooks_router)
 app.include_router(branding_router)
 app.include_router(settings_router)
 app.include_router(caddy_router.router)
+app.include_router(network_router.router)
 
 
 # =============================================================================
@@ -219,6 +220,15 @@ async def apply_saved_caddy_config():
         await caddy_router.ensure_caddy_config_on_startup()
     except Exception as exc:
         logging.getLogger("logbot.startup").warning("Caddy-Config beim Start nicht geladen: %s", exc)
+
+
+@app.on_event("startup")
+async def apply_saved_dns_config():
+    """Wendet eine gespeicherte DNS-Konfiguration (falls vorhanden) nach dem Start erneut an."""
+    try:
+        await network_router.ensure_dns_config_on_startup()
+    except Exception as exc:
+        logging.getLogger("logbot.startup").warning("DNS-Config beim Start nicht geladen: %s", exc)
 
 
 # =============================================================================

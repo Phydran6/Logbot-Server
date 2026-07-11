@@ -1,8 +1,8 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.30.18.02.35
-# Beschreibung: LogBot v2026.05.30.18.02.35 - Docker Compose Konfiguration
+# Version:     2026.07.11.13.03.42
+# Beschreibung: LogBot - Docker Compose Konfiguration
 # ==============================================================================
 
 services:
@@ -56,12 +56,9 @@ services:
       - seccomp=unconfined
     cap_add:
       - SYS_BOOT
-    # Interner FQDN (via NPM/pi.hole): der Backend-Container kennt den Namen
-    # sonst nicht, weil Docker-DNS nicht den internen Resolver nutzt. LogBot
-    # prueft die Domain-Aufloesung im Backend-Container (siehe routes/caddy.py),
-    # daher hier fest hinterlegen. Alternativ: dns: [192.168.179.30].
-    extra_hosts:
-      - "logbot.phytech.de:192.168.179.20"
+    # DNS wird zur Laufzeit ueber "Einstellungen -> Netzwerk -> DNS" verwaltet
+    # (schreibt /etc/resolv.conf im Container). Standard: per DHCP vergebener
+    # System-DNS des Hosts; optional eigene Server. Siehe backend routes/network.py.
     environment:
       DB_HOST: postgres
       DB_PORT: 5432

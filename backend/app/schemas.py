@@ -285,6 +285,41 @@ class CaddyTemplateRequest(BaseModel):
     mode: str = Field(..., pattern="^(http|letsencrypt|custom)$")
     letsencrypt_email: Optional[str] = None
 
+# Netzwerk / DNS
+class DnsConfigUpdate(BaseModel):
+    mode: Literal["dhcp", "manual"] = "dhcp"
+    servers: List[str] = []
+    search_domains: List[str] = []
+
+    @field_validator("servers")
+    @classmethod
+    def validate_servers(cls, v: List[str]) -> List[str]:
+        import ipaddress
+        cleaned = []
+        for s in v:
+            s = s.strip()
+            if not s:
+                continue
+            ipaddress.ip_address(s)  # ValueError bei ungültiger IP
+            cleaned.append(s)
+        return cleaned
+
+class DnsConfigResponse(BaseModel):
+    mode: str = "dhcp"
+    detected: List[str] = []       # per DHCP/System vergebener DNS des Hosts
+    configured: List[str] = []     # manuell gespeicherte Server
+    active: List[str] = []         # aktuell in /etc/resolv.conf des Containers
+    search_domains: List[str] = []
+
+class DnsTestRequest(BaseModel):
+    host: str = Field(..., min_length=1, max_length=253)
+
+class DnsTestResponse(BaseModel):
+    host: str
+    resolved: bool
+    addresses: List[str] = []
+    error: Optional[str] = None
+
 # App-Login (QR-Code / Token-Exchange für Android-App)
 class AppTokenResponse(BaseModel):
     token: str
