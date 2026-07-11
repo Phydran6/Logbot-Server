@@ -56,6 +56,12 @@ services:
       - seccomp=unconfined
     cap_add:
       - SYS_BOOT
+    # Interner FQDN (via NPM/pi.hole): der Backend-Container kennt den Namen
+    # sonst nicht, weil Docker-DNS nicht den internen Resolver nutzt. LogBot
+    # prueft die Domain-Aufloesung im Backend-Container (siehe routes/caddy.py),
+    # daher hier fest hinterlegen. Alternativ: dns: [192.168.179.30].
+    extra_hosts:
+      - "logbot.phytech.de:192.168.179.20"
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
