@@ -1,4 +1,4 @@
-# LogBot Agent v2026.03.31.17.26.46
+# LogBot Agent v2026.07.11.14.08.15
 
 Log-Forwarder für Linux und Windows – keine zusätzlichen Abhängigkeiten.
 

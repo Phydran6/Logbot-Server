@@ -1,4 +1,4 @@
-﻿# LogBot v2026.05.30.18.02.35
+﻿# LogBot v2026.07.11.14.08.15
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6

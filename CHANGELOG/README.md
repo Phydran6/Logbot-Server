@@ -2,6 +2,8 @@
 
 Änderungen werden **pro Bereich** dokumentiert. Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+**Aktuelle Projekt-/Release-Version:** `2026.07.11.14.08.15` (Root-README, Agents-README, `backend/app/config.py` → `app_version`, `frontend/package.json`). Die Tabelle unten führt die Stände der einzelnen Bereiche.
+
 | Bereich | Changelog | Aktuelle Version |
 |---------|-----------|------------------|
 | Agents (Linux/Windows Installer & Forwarder) | [agents.md](agents.md) | 2026.07.11.13.35.01 |
