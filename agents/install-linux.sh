@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.09.19.55.08
+# Version:     2026.07.11.13.35.01
 # Changelog:   ../CHANGELOG/agents.md
 # Beschreibung: Linux Installer
 #               Konfiguriert rsyslog zum Weiterleiten an LogBot Server
@@ -18,7 +18,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-AGENT_VERSION="2026.07.09.19.55.08"
+AGENT_VERSION="2026.07.11.13.35.01"
 CONFIG_FILE="/etc/rsyslog.d/99-logbot.conf"
 QUEUE_PREFIX="/var/spool/rsyslog/logbot_queue"
 
@@ -272,7 +272,7 @@ action(
   target="${SERVER_HOST}"
   port="${SERVER_PORT}"
   protocol="${PROTOCOL_LOWER}"
-  Template="RSYSLOG_TraditionalFileFormat"
+  Template="RSYSLOG_TraditionalForwardFormat"
   action.resumeRetryCount="-1"
   queue.type="LinkedList"
   queue.filename="logbot_queue"
