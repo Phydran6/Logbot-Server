@@ -1,7 +1,7 @@
 ﻿<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.05.13.20.58.33
+     Version:     2026.07.18.16.00.00
      Beschreibung: LogBot - Agents/Geräte Übersicht mit Theme-Support
      ============================================================================== -->
 
@@ -27,6 +27,7 @@
           <option value="windows">Windows</option>
           <option value="syslog">Syslog</option>
           <option value="windows_agent">Windows-Agent</option>
+          <option value="linux_agent">Linux-Agent</option>
           <option value="unknown">Unbekannt</option>
         </select>
         <button
@@ -298,6 +299,7 @@ function typeLabel(t) {
   const map = {
     syslog: 'Syslog',
     windows_agent: 'Windows-Agent',
+    linux_agent: 'Linux-Agent',
     unifi_ap: 'UniFi AP',
     linux: 'Linux',
     windows: 'Windows',

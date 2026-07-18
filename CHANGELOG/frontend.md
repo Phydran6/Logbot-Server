@@ -2,6 +2,10 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.07.18.16.00.00
+### Added
+- **Agents:** Gerätetyp **Linux-Agent** (`linux_agent`) im Typ-Filter und in der Typ-Beschriftung ergänzt – passend zum neuen Linux-HTTPS-Agent.
+
 ## 2026.07.11.13.03.42
 ### Changed
 - Einstellungen: Reiter **Reverse Proxy** ersetzt durch **Netzwerk** mit zwei Bereichen — **Reverse Proxy** (unverändert) und **DNS** (neu).

@@ -1,4 +1,4 @@
-﻿# LogBot v2026.07.11.14.08.15
+﻿# LogBot v2026.07.18.16.00.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -66,7 +66,20 @@ sudo docker compose up -d --build
 - Login: admin / admin (bitte direkt ändern)
 
 ## Syslog-Quellen konfigurieren
-### Linux (rsyslog)
+### Linux-Agent (empfohlen, One-Liner)
+Teilautomatischer Installer – **Standard = HTTPS** (verschlüsselt + Token, DNS/FQDN, funktioniert auch übers Internet). Details: [agents/README.md](agents/README.md).
+
+```bash
+# Voll automatisch (FQDN + Token mitgeben):
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh \
+  | sudo bash -s -- --fqdn logbot.example.com --token DEIN-AGENT-TOKEN
+
+# Interaktiv (fragt FQDN/Token, je Abfrage 5 s Timeout, sonst Default):
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash
+```
+Deinstallieren: `sudo bash install-linux.sh uninstall` · Testen: `sudo bash install-linux.sh test`
+
+### Linux (rsyslog, manuell)
 ```
 # /etc/rsyslog.d/logbot.conf
 *.* @LOGBOT-IP:514
@@ -169,6 +182,11 @@ docker compose exec -T postgres psql -U logbot logbot < backup.sql
 ```
 
 ## Changelog
+### v2026.07.18.16.00.00 (2026-07-18)
+- NEU: **Linux-Agent One-Liner-Installation** (`curl … | sudo bash`), teilautomatisch (5 s-Timeout je Abfrage), **Standard = HTTPS** (verschlüsselt + Token, DNS/FQDN, auch übers Internet). FQDN/Token via Parameter, Env-Variable oder Platzhalter. Alle Agent-Daten unter `/opt/logbot-agent/*`. Details: [agents/README.md](agents/README.md).
+- FIX: Linux-Installer Deinstallation/Menü (fehlerhafte Umlaut-Ausgaben, kaputte awk-MAC-Regex); Uninstall räumt Syslog- **und** HTTPS-Modus auf.
+- BACKEND: Ingest setzt `device_type` dynamisch aus dem Agent-Token (`linux` → Linux-Agent). UI: Gerätetyp „Linux-Agent" ergänzt.
+
 ### v2026.05.30.18.02.35 (2026-05-30)
 - UI: Benutzer-Bearbeiten-Modal scrollbar mit fixiertem Header & Footer (max. 90 % Viewport-Höhe) – verhindert dass MFA + App-QR den Bildschirm sprengen.
 

@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.11.13.03.42
+# Version:     2026.07.18.16.00.00
 # Changelog:   ../../CHANGELOG/backend.md
 # Beschreibung: LogBot - FastAPI Hauptanwendung
 # ==============================================================================
@@ -300,9 +300,11 @@ async def ingest_logs(
     if agent:
         agent.last_seen = datetime.utcnow()
     else:
+        # device_type aus dem Token ableiten (linux/windows), sonst Bestandsverhalten
+        _dt_map = {"linux": "linux_agent", "windows": "windows_agent"}
         agent = Agent(
             hostname=data.hostname, ip_address=client_ip,
-            device_type="windows_agent",
+            device_type=_dt_map.get(agent_token.device_type, "windows_agent"),
             extra_data={"auth": "token", "token_name": agent_token.name})
         db.add(agent)
         await db.flush()
