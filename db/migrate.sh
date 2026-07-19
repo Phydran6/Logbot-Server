@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.19.15.00.00
+# Version:     2026.07.19.16.00.00
 # Beschreibung: PostgreSQL Major-Upgrade fuer LogBot MIT Datenerhalt.
 #               (z. B. 16-alpine -> 17-alpine)
 #
@@ -18,6 +18,10 @@
 #       sudo bash db/migrate.sh            # Ziel = POSTGRES_VERSION aus .env (Default 17)
 #       sudo bash db/migrate.sh 18         # Ziel-Major explizit angeben
 #       sudo bash db/migrate.sh 17 -y      # ohne Rueckfrage
+#
+#   One-Liner direkt von GitHub (findet /opt/logbot automatisch):
+#       curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/db/migrate.sh | sudo bash
+#       curl -sSL .../db/migrate.sh | sudo bash -s -- 18 -y   # Ziel + ohne Rueckfrage
 # ==============================================================================
 
 set -euo pipefail
@@ -28,13 +32,21 @@ ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 err()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# --- ins Projektverzeichnis wechseln (Skript liegt in db/) -------------------
-cd "$(dirname "$0")/.."
-
-if [[ ! -f docker-compose.yml ]]; then
-    err "docker-compose.yml nicht gefunden. Skript im Projektverzeichnis ausfuehren."
+# --- Projektverzeichnis finden (auch fuer 'curl ... | sudo bash') ------------
+# Reihenfolge: 1) aktuelles Verzeichnis  2) relativ zum Skript (db/..)
+#              3) Standard-Installationsort /opt/logbot
+if [[ -f docker-compose.yml ]]; then
+    :
+elif [[ -f "$(dirname "$0")/../docker-compose.yml" ]]; then
+    cd "$(dirname "$0")/.."
+elif [[ -f /opt/logbot/docker-compose.yml ]]; then
+    cd /opt/logbot
+else
+    err "docker-compose.yml nicht gefunden."
+    err "Bitte ins Projektverzeichnis wechseln, z. B.: cd /opt/logbot"
     exit 1
 fi
+info "Projektverzeichnis: $(pwd)"
 
 # --- .env laden --------------------------------------------------------------
 if [[ -f .env ]]; then
@@ -43,10 +55,17 @@ fi
 DB_USER="${DB_USER:-logbot}"
 DB_NAME="${DB_NAME:-logbot}"
 
-# --- Parameter ---------------------------------------------------------------
-TARGET="${1:-${POSTGRES_VERSION:-17}}"
+# --- Parameter ( [Ziel-Major] [-y] , Reihenfolge egal ) ----------------------
+TARGET=""
 AUTO="no"
-[[ "${2:-}" == "-y" || "${1:-}" == "-y" || "${YES:-}" == "1" ]] && AUTO="yes"
+for a in "$@"; do
+    case "$a" in
+        -y|--yes) AUTO="yes" ;;
+        [0-9]*)   TARGET="$a" ;;
+    esac
+done
+TARGET="${TARGET:-${POSTGRES_VERSION:-17}}"
+[[ "${YES:-}" == "1" ]] && AUTO="yes"
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP="logbot-db-backup-${STAMP}.dump"
@@ -90,7 +109,14 @@ ok "Sicherung erstellt ($(du -h "$BACKUP" | cut -f1))."
 if [[ "$AUTO" != "yes" ]]; then
     warn "Das Volume '${PG_VOL}' wird GELOESCHT und mit PostgreSQL ${TARGET} neu aufgebaut."
     warn "Wiederherstellung erfolgt aus '${BACKUP}'."
-    read -r -p "Fortfahren? [j/N] " c
+    # /dev/tty, damit die Abfrage auch bei 'curl ... | sudo bash' funktioniert
+    if [[ -r /dev/tty ]]; then
+        read -r -p "Fortfahren? [j/N] " c < /dev/tty
+    else
+        err "Keine interaktive Eingabe moeglich (Pipe). Fuer automatischen Lauf '-y' anhaengen."
+        warn "Sicherung bleibt: ${BACKUP}"
+        exit 1
+    fi
     [[ "$c" == "j" || "$c" == "J" ]] || { warn "Abgebrochen. Sicherung bleibt: ${BACKUP}"; exit 1; }
 fi
 

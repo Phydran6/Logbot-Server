@@ -3,6 +3,13 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.07.19.16.00.00
+### Added
+- `db/migrate.sh` **curl-fest**: findet das Projektverzeichnis selbst
+  (aktuelles Verzeichnis → skriptrelativ → `/opt/logbot`), Rückfrage über `/dev/tty`.
+  One-Liner: `curl -sSL .../db/migrate.sh | sudo bash` (bzw. `| sudo bash -s -- 18 -y`).
+- Robustere Parameter (`[Ziel-Major] [-y]`, Reihenfolge egal).
+
 ## 2026.07.19.15.00.00
 ### Changed
 - **PostgreSQL-Image von `16-alpine` auf `17-alpine` (neu + stabil) angehoben.**

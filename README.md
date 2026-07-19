@@ -205,9 +205,16 @@ Danach in Ruhe migrieren (Weg 1).
 Automatisch per Skript: sichert die DB, baut das Volume mit der neuen Version neu auf und spielt
 die Daten wieder ein. Die Sicherung bleibt danach als `.dump` liegen.
 ```bash
+# im Projektverzeichnis (z. B. /opt/logbot):
 git pull
 sudo bash db/migrate.sh          # Ziel = POSTGRES_VERSION aus .env (Default 17)
 # optional andere Version:  sudo bash db/migrate.sh 18
+```
+**Oder als One-Liner direkt von GitHub** (findet `/opt/logbot` automatisch, kein `git pull` nötig):
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/db/migrate.sh | sudo bash
+# Zielversion + ohne Rückfrage:
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/db/migrate.sh | sudo bash -s -- 18 -y
 ```
 
 ### Weg 2 – Bestehende Instanz, Daten NICHT nötig (frische DB)
