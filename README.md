@@ -171,6 +171,9 @@ docker compose up -d
 docker compose pull
 docker compose up -d --build
 ```
+> ⚠️ **PostgreSQL-Major-Upgrade (z. B. 16 → 17)?** Ein reiner Image-Tausch reicht **nicht** –
+> die alte 16er-Datenbank ist nicht mit einem 17er-Server kompatibel. Vorgehen: siehe
+> [Update / PostgreSQL-Major-Upgrade](#update--postgresql-major-upgrade).
 
 ## Datenbank-Backup
 ```bash
@@ -179,6 +182,48 @@ docker compose exec postgres pg_dump -U logbot logbot > backup.sql
 
 # Backup einspielen
 docker compose exec -T postgres psql -U logbot logbot < backup.sql
+```
+
+## Update / PostgreSQL-Major-Upgrade
+Ab v2026.07.19 nutzt LogBot standardmäßig **PostgreSQL 17-alpine** (vorher 16-alpine).
+Die Version ist über `POSTGRES_VERSION` in der `.env` steuerbar (`postgres:${POSTGRES_VERSION:-17}-alpine`).
+
+**Wichtig:** PostgreSQL-Datenverzeichnisse sind zwischen Major-Versionen **nicht** kompatibel.
+Ein bestehendes 16er-Volume startet unter einem 17er-Image **nicht** – deshalb gibt es drei
+klare Wege statt eines blinden Tausches:
+
+### 🟢 Notbremse (falls schon aktualisiert und die DB nicht mehr startet)
+Läuft dein Container nach `git pull` in eine Fehlerschleife, kommst du mit **einer Zeile** sofort
+wieder online – ganz ohne Datenverlust:
+```bash
+echo "POSTGRES_VERSION=16" >> .env    # oder in .env auf 16 setzen
+docker compose up -d
+```
+Danach in Ruhe migrieren (Weg 1).
+
+### Weg 1 – Bestehende Instanz, Daten behalten (Migration)
+Automatisch per Skript: sichert die DB, baut das Volume mit der neuen Version neu auf und spielt
+die Daten wieder ein. Die Sicherung bleibt danach als `.dump` liegen.
+```bash
+git pull
+sudo bash db/migrate.sh          # Ziel = POSTGRES_VERSION aus .env (Default 17)
+# optional andere Version:  sudo bash db/migrate.sh 18
+```
+
+### Weg 2 – Bestehende Instanz, Daten NICHT nötig (frische DB)
+Alte DB verwerfen und mit der neuen Version frisch aufsetzen (Login wieder `admin`/`admin`):
+```bash
+git pull
+docker compose down -v           # löscht die Volumes inkl. alter DB
+docker compose up -d --build     # frische DB auf PostgreSQL 17 (init.sql läuft neu)
+```
+
+### Weg 3 – Neuinstallation
+Nichts zu migrieren – der Installer zieht direkt die neue Version (17-alpine), kein 16 mehr:
+```bash
+git clone https://github.com/Phydran6/Logbot-Server.git
+cd Logbot-Server
+sudo bash install.sh
 ```
 
 ## Changelog

@@ -12,7 +12,7 @@
 #
 # Autor:        Phydran6
 # Kontakt:      Phydran6
-# Version:      2026.04.17.15.17.18
+# Version:      2026.07.19.15.00.00
 # Erstellt:     Januar 2026
 #
 # Beschreibung:
@@ -150,6 +150,9 @@ install_logbot() {
 DB_USER=logbot
 DB_PASSWORD=${DB_PASSWORD}
 DB_NAME=logbot
+
+# PostgreSQL-Major-Version (Docker-Tag). Standard: 17 (neu + stabil).
+POSTGRES_VERSION=17
 
 # JWT Secret für API Authentifizierung
 JWT_SECRET=${JWT_SECRET}

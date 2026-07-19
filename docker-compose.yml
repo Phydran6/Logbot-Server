@@ -1,13 +1,18 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.11.13.03.42
+# Version:     2026.07.19.15.00.00
 # Beschreibung: LogBot - Docker Compose Konfiguration
 # ==============================================================================
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # PostgreSQL-Major-Version ueber POSTGRES_VERSION in .env steuerbar.
+    # Standard: 17 (neu + stabil). Neuinstallationen bekommen direkt 17-alpine.
+    # NOTBREMSE bei bestehender 16er-DB: POSTGRES_VERSION=16 in .env setzen,
+    # dann laeuft alles sofort weiter. Datenerhaltendes Upgrade: db/migrate.sh.
+    # Details: README -> "Update / PostgreSQL-Major-Upgrade".
+    image: postgres:${POSTGRES_VERSION:-17}-alpine
     container_name: logbot-postgres
     restart: unless-stopped
     environment:

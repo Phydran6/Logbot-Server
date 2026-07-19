@@ -23,6 +23,11 @@ dist/
 # Logs
 *.log
 
+# DB-Migrations-/Backups
+logbot-db-backup-*.dump
+*.dump
+backup.sql
+
 # OS
 .DS_Store
 Thumbs.db

@@ -1,0 +1,141 @@
+#!/bin/bash
+# ==============================================================================
+# Name:        Phydran6
+# Kontakt:     Phydran6
+# Version:     2026.07.19.15.00.00
+# Beschreibung: PostgreSQL Major-Upgrade fuer LogBot MIT Datenerhalt.
+#               (z. B. 16-alpine -> 17-alpine)
+#
+#   Ablauf: 1) logische Sicherung der laufenden DB (pg_dump -Fc)
+#           2) Stack stoppen + altes Postgres-Volume loeschen
+#           3) neue Postgres-Version frisch starten
+#           4) DB aus der Sicherung wiederherstellen
+#           5) restlichen Stack starten
+#
+#   Die Sicherungsdatei bleibt danach als Backup liegen.
+#
+#   Verwendung (im Projektverzeichnis, wo docker-compose.yml liegt):
+#       sudo bash db/migrate.sh            # Ziel = POSTGRES_VERSION aus .env (Default 17)
+#       sudo bash db/migrate.sh 18         # Ziel-Major explizit angeben
+#       sudo bash db/migrate.sh 17 -y      # ohne Rueckfrage
+# ==============================================================================
+
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
+ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
+err()   { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# --- ins Projektverzeichnis wechseln (Skript liegt in db/) -------------------
+cd "$(dirname "$0")/.."
+
+if [[ ! -f docker-compose.yml ]]; then
+    err "docker-compose.yml nicht gefunden. Skript im Projektverzeichnis ausfuehren."
+    exit 1
+fi
+
+# --- .env laden --------------------------------------------------------------
+if [[ -f .env ]]; then
+    set -a; . ./.env; set +a
+fi
+DB_USER="${DB_USER:-logbot}"
+DB_NAME="${DB_NAME:-logbot}"
+
+# --- Parameter ---------------------------------------------------------------
+TARGET="${1:-${POSTGRES_VERSION:-17}}"
+AUTO="no"
+[[ "${2:-}" == "-y" || "${1:-}" == "-y" || "${YES:-}" == "1" ]] && AUTO="yes"
+
+STAMP="$(date +%Y%m%d_%H%M%S)"
+BACKUP="logbot-db-backup-${STAMP}.dump"
+
+# --- Vorbedingungen ----------------------------------------------------------
+command -v docker >/dev/null 2>&1 || { err "docker nicht gefunden."; exit 1; }
+docker compose version >/dev/null 2>&1 || { err "docker compose nicht verfuegbar."; exit 1; }
+
+if ! docker inspect logbot-postgres >/dev/null 2>&1; then
+    err "Container 'logbot-postgres' laeuft nicht. Bitte zuerst 'docker compose up -d postgres'."
+    exit 1
+fi
+
+# Volume des laufenden Containers exakt ermitteln
+PG_VOL="$(docker inspect logbot-postgres \
+    --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}')"
+if [[ -z "$PG_VOL" ]]; then
+    err "Konnte das Postgres-Daten-Volume nicht ermitteln. Abbruch."
+    exit 1
+fi
+
+echo ""
+info "Aktuelle DB-Version:"
+docker compose exec -T postgres postgres --version 2>/dev/null || true
+info "Ziel-Version:      PostgreSQL ${TARGET}-alpine"
+info "Daten-Volume:      ${PG_VOL}"
+info "Sicherung nach:    ${BACKUP}"
+echo ""
+
+# --- 1) Sicherung ------------------------------------------------------------
+info "Erstelle logische Sicherung (pg_dump -Fc)..."
+docker compose exec -T postgres pg_dump -U "$DB_USER" -Fc "$DB_NAME" > "$BACKUP"
+if [[ ! -s "$BACKUP" ]]; then
+    err "Sicherung ist leer -> Abbruch. Es wurde nichts veraendert."
+    rm -f "$BACKUP"
+    exit 1
+fi
+ok "Sicherung erstellt ($(du -h "$BACKUP" | cut -f1))."
+
+# --- Bestaetigung ------------------------------------------------------------
+if [[ "$AUTO" != "yes" ]]; then
+    warn "Das Volume '${PG_VOL}' wird GELOESCHT und mit PostgreSQL ${TARGET} neu aufgebaut."
+    warn "Wiederherstellung erfolgt aus '${BACKUP}'."
+    read -r -p "Fortfahren? [j/N] " c
+    [[ "$c" == "j" || "$c" == "J" ]] || { warn "Abgebrochen. Sicherung bleibt: ${BACKUP}"; exit 1; }
+fi
+
+# --- POSTGRES_VERSION in .env festschreiben ----------------------------------
+if [[ -f .env ]] && grep -q '^POSTGRES_VERSION=' .env; then
+    sed -i "s/^POSTGRES_VERSION=.*/POSTGRES_VERSION=${TARGET}/" .env
+else
+    echo "POSTGRES_VERSION=${TARGET}" >> .env
+fi
+export POSTGRES_VERSION="$TARGET"
+ok "POSTGRES_VERSION=${TARGET} in .env gesetzt."
+
+# --- 2) Stack stoppen, altes Volume entfernen --------------------------------
+info "Stoppe Stack..."
+docker compose down
+info "Entferne altes Daten-Volume ${PG_VOL}..."
+docker volume rm "$PG_VOL"
+
+# --- 3) Neue Postgres-Version starten ----------------------------------------
+info "Starte PostgreSQL ${TARGET} (frisch)..."
+docker compose up -d postgres
+info "Warte, bis die DB bereit ist..."
+for i in $(seq 1 60); do
+    if docker compose exec -T postgres pg_isready -U "$DB_USER" >/dev/null 2>&1; then break; fi
+    sleep 2
+    [[ "$i" == "60" ]] && { err "DB wurde nicht rechtzeitig bereit."; exit 1; }
+done
+ok "PostgreSQL ${TARGET} laeuft."
+
+# --- 4) Wiederherstellung ----------------------------------------------------
+# Das init.sql hat beim Erststart ein leeres Schema angelegt. Wir verwerfen es
+# und stellen die Original-DB sauber (ohne Konflikte) aus der Sicherung wieder her.
+info "Setze frisches Schema zurueck und stelle Sicherung wieder her..."
+docker compose exec -T postgres dropdb   -U "$DB_USER" --if-exists --force "$DB_NAME"
+docker compose exec -T postgres createdb -U "$DB_USER" "$DB_NAME"
+docker compose exec -T postgres pg_restore -U "$DB_USER" -d "$DB_NAME" --no-owner < "$BACKUP"
+ok "Daten wiederhergestellt."
+
+# --- 5) Restlichen Stack starten ---------------------------------------------
+info "Starte restlichen Stack..."
+docker compose up -d
+
+echo ""
+ok "Upgrade auf PostgreSQL ${TARGET} abgeschlossen."
+info "Neue DB-Version:"
+docker compose exec -T postgres postgres --version 2>/dev/null || true
+warn "Sicherung bleibt vorsichtshalber liegen: ${BACKUP}"
+warn "Wenn LogBot laeuft und die Logs vollstaendig sind, kannst du sie loeschen."

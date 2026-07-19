@@ -10,6 +10,7 @@
 | Backend (FastAPI API) | [backend.md](backend.md) | 2026.07.18.16.00.00 |
 | Frontend (Vue UI) | [frontend.md](frontend.md) | 2026.07.18.16.00.00 |
 | Syslog-Server | [syslog.md](syslog.md) | 2026.05.13.20.58.33 |
+| Datenbank / Deployment (Postgres-Image, Compose, install.sh) | [database.md](database.md) | 2026.07.19.15.00.00 |
 
 ## Konventionen
 - Neueste Version steht oben.
