@@ -1,4 +1,4 @@
-﻿# LogBot v2026.07.18.16.00.00
+﻿# LogBot v2026.07.18.18.30.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -234,6 +234,9 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.07.18.18.30.00 (2026-07-18)
+- FIX: **Linux-Installer ignorierte Tastatureingabe beim One-Liner.** Statt 5-s-Timeout pro Abfrage jetzt **ein** Countdown am Start: Taste drücken = manueller Modus (alle Werte werden blockierend abgefragt), sonst automatischer Ablauf. Details: [CHANGELOG/agents.md](CHANGELOG/agents.md).
+
 ### v2026.07.18.16.00.00 (2026-07-18)
 - NEU: **Linux-Agent One-Liner-Installation** (`curl … | sudo bash`), teilautomatisch (5 s-Timeout je Abfrage), **Standard = HTTPS** (verschlüsselt + Token, DNS/FQDN, auch übers Internet). FQDN/Token via Parameter, Env-Variable oder Platzhalter. Alle Agent-Daten unter `/opt/logbot-agent/*`. Details: [agents/README.md](agents/README.md).
 - FIX: Linux-Installer Deinstallation/Menü (fehlerhafte Umlaut-Ausgaben, kaputte awk-MAC-Regex); Uninstall räumt Syslog- **und** HTTPS-Modus auf.

@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.18.16.00.00
+# Version:     2026.07.18.18.30.00
 # Changelog:   ../CHANGELOG/agents.md
 # Beschreibung: LogBot Linux Agent - Installer (teilautomatisch)
 #
@@ -10,8 +10,10 @@
 #   (journald) verschluesselt + Token an  https://<FQDN>/api/agents/ingest
 #   Alternativ Syslog (rsyslog -> UDP/TCP). Keine externen Abhaengigkeiten.
 #
-#   TEILAUTOMATISCH: Jede Abfrage wartet max. 5 s, sonst laeuft der Default.
-#   Ohne Terminal (z.B. via Pipe/cron) laeuft alles automatisch mit Defaults.
+#   TEILAUTOMATISCH: Am Anfang laeuft ein 5s-Countdown. Wird eine Taste gedrueckt,
+#   schaltet der Installer auf MANUELL und fragt ab da alle Werte blockierend ab
+#   (kein Timeout). Ohne Tastendruck / ohne Terminal (Pipe/cron) laeuft alles
+#   automatisch mit Standardwerten durch.
 #
 #   One-Liner (GitHub Raw), Werte per Umgebungsvariable:
 #     curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh \
@@ -46,7 +48,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-AGENT_VERSION="2026.07.18.16.00.00"
+AGENT_VERSION="2026.07.18.18.30.00"
 
 # --- Pfade: Syslog-Modus (rsyslog) ---
 CONFIG_FILE="/etc/rsyslog.d/99-logbot.conf"
@@ -61,8 +63,10 @@ SERVICE_NAME="logbot-agent"
 SYSTEMD_UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
 
 # --- Defaults / Verhalten ---
-PROMPT_TIMEOUT="${LOGBOT_TIMEOUT:-5}"   # Sekunden je Abfrage
+PROMPT_TIMEOUT="${LOGBOT_TIMEOUT:-5}"   # Sekunden Countdown bis Auto-Start
 ASSUME_YES="false"                      # true => nie fragen, immer Default
+MANUAL="false"                          # true => alle Werte werden abgefragt (kein Timeout)
+GATE_DONE="false"                       # interactive_gate nur einmal ausfuehren
 ACTION="install"
 
 # --- Konfiguration (Vorrang: Parameter > Umgebungsvariable > Platzhalter) ---
@@ -96,16 +100,43 @@ require_root() {
 # Sonst wuerde 'read </dev/tty' bei Pipe ohne Terminal eine Fehlermeldung werfen.
 have_tty() { true 2>/dev/null </dev/tty; }
 
-# Timeout-Abfrage: nutzt Default nach PROMPT_TIMEOUT Sekunden oder ohne Terminal.
+# Fragt einen Wert ab. Nur im MANUELLEN Modus (nach Tastendruck im Gate) wird
+# tatsächlich gefragt - dann BLOCKIEREND ohne Timeout, jede Eingabe wird abgewartet.
+# Im automatischen Modus wird still der Default genommen (keine Abfrage).
 # ask VARNAME "Frage" "default"
 ask() {
     local __name="$1" prompt="$2" def="$3" ans=""
-    if [[ "$ASSUME_YES" != "true" ]] && have_tty; then
-        read -t "$PROMPT_TIMEOUT" -r -p "$prompt [${def:-leer}] (${PROMPT_TIMEOUT}s Timeout, Enter=Default): " ans </dev/tty || true
+    if [[ "$MANUAL" == "true" ]]; then
+        read -r -p "$prompt [${def:-leer}] (Enter = Default): " ans </dev/tty || true
         echo ""
     fi
     [[ -z "$ans" ]] && ans="$def"
     printf -v "$__name" '%s' "$ans"
+}
+
+# Einmaliges "Gate" am Anfang: kurzer Countdown. Wird EINE Taste gedrückt, schaltet
+# der Installer auf MANUELL (alle folgenden Abfragen blockieren, kein Timeout mehr).
+# Keine Eingabe / kein Terminal / --yes => automatischer Ablauf mit Standardwerten.
+interactive_gate() {
+    [[ "$GATE_DONE" == "true" ]] && return 0
+    GATE_DONE="true"
+    [[ "$ASSUME_YES" == "true" ]] && return 0
+    have_tty || return 0
+    echo ""
+    log_info "Automatischer Start in ${PROMPT_TIMEOUT}s. Für MANUELLE Eingabe jetzt eine Taste drücken..."
+    local _k=""
+    if read -rsN1 -t "$PROMPT_TIMEOUT" _k </dev/tty; then
+        MANUAL="true"
+        # Restliche gepufferte Zeichen (z.B. Enter nach dem Aufweck-Tastendruck)
+        # verwerfen, damit die erste echte Abfrage nicht sofort den Default nimmt.
+        while read -rsN1 -t 0.05 _k </dev/tty 2>/dev/null; do :; done
+        echo ""
+        log_success "Manueller Modus aktiv - alle Werte werden abgefragt (kein Timeout)."
+    else
+        echo ""
+        log_info "Keine Eingabe - automatischer Ablauf mit Standardwerten."
+    fi
+    return 0
 }
 
 show_help() {
@@ -124,7 +155,8 @@ Optionen (auch als Umgebungsvariable LOGBOT_*):
   --min-level <info|warning|error>            (LOGBOT_MINLEVEL)
   --insecure          Selbstsignierte TLS-Zerts akzeptieren  (LOGBOT_INSECURE=true)
   --yes, --unattended Keine Rueckfragen, alles Default        (ASSUME_YES)
-  --timeout <sek>     Wartezeit je Abfrage (Standard 5)      (LOGBOT_TIMEOUT)
+  --timeout <sek>     Countdown bis Auto-Start (Standard 5)  (LOGBOT_TIMEOUT)
+                      Taste druecken => manueller Modus (alle Werte, kein Timeout)
 
 Beispiel (One-Liner):
   curl -sSL <URL> | sudo bash -s -- --fqdn logbot.example.com --token xxxx
@@ -780,6 +812,7 @@ handle_existing_installation() {
 
 do_install() {
     require_root
+    interactive_gate
     handle_existing_installation
 
     # Modus (Standard: https)
@@ -806,6 +839,7 @@ do_install() {
 uninstall() {
     local mode="${1:-}"
     local do_purge_server=false
+    interactive_gate
     log_info "Deinstalliere LogBot Agent..."
 
     if [[ "$mode" == "purge" ]]; then
@@ -933,7 +967,7 @@ main() {
     echo ""
     echo "=============================================="
     echo "  LogBot Agent v${AGENT_VERSION} - Linux"
-    echo "  Modus: ${MODE} (teilautomatisch, ${PROMPT_TIMEOUT}s/Abfrage)"
+    echo "  Modus: ${MODE}  |  Auto-Start in ${PROMPT_TIMEOUT}s (Taste = manuell)"
     echo "=============================================="
 
     case "$ACTION" in

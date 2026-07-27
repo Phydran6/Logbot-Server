@@ -2,11 +2,11 @@
 
 Änderungen werden **pro Bereich** dokumentiert. Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
-**Aktuelle Projekt-/Release-Version:** `2026.07.18.16.00.00` (Root-README, Agents-README, `backend/app/config.py` → `app_version`, `frontend/package.json`). Die Tabelle unten führt die Stände der einzelnen Bereiche.
+**Aktuelle Projekt-/Release-Version:** `2026.07.18.18.30.00` (Root-README, Agents-README, `backend/app/config.py` → `app_version`, `frontend/package.json`). Die Tabelle unten führt die Stände der einzelnen Bereiche.
 
 | Bereich | Changelog | Aktuelle Version |
 |---------|-----------|------------------|
-| Agents (Linux/Windows Installer & Forwarder) | [agents.md](agents.md) | 2026.07.18.16.00.00 |
+| Agents (Linux/Windows Installer & Forwarder) | [agents.md](agents.md) | 2026.07.18.18.30.00 |
 | Backend (FastAPI API) | [backend.md](backend.md) | 2026.07.18.16.00.00 |
 | Frontend (Vue UI) | [frontend.md](frontend.md) | 2026.07.18.16.00.00 |
 | Syslog-Server | [syslog.md](syslog.md) | 2026.05.13.20.58.33 |

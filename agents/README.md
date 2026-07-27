@@ -1,8 +1,8 @@
-# LogBot Agent v2026.07.18.16.00.00
+# LogBot Agent v2026.07.18.18.30.00
 
 Log-Forwarder für Linux und Windows – keine zusätzlichen Abhängigkeiten.
 Zwei Modi je Plattform: **Syslog** (rsyslog/UDP-TCP) oder **HTTPS** (verschlüsselt + Token, DNS/FQDN).
-Der Linux-Installer ist **teilautomatisch**: Standard = HTTPS, jede Abfrage hat 5 s Timeout und läuft sonst auf Default – ohne Terminal (Pipe/cron) läuft alles ohne Rückfrage.
+Der Linux-Installer ist **teilautomatisch**: Standard = HTTPS. Beim Start läuft ein 5-s-Countdown – **Taste drücken = manueller Modus** (alle Werte werden abgefragt), sonst läuft alles automatisch mit Standardwerten (auch headless via Pipe/cron).
 
 Entwickelt von Phydran6  
 Kontakt: Phydran6
@@ -41,7 +41,7 @@ curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/i
 
 #### Ablauf & Verhalten
 - **Standard = HTTPS**: ein schlanker **Python-systemd-Dienst** (`logbot-agent`, nur Python-Standardbibliothek) liest **alle** Logs aus journald und sendet sie verschlüsselt + Token als JSON-Batches (max. 50) an `https://<FQDN>/api/agents/ingest`. DNS-basiert (FQDN Pflicht, IP nur optionaler Laufzeit-Fallback).
-- **Teilautomatisch**: jede Rückfrage wartet max. 5 s und nimmt sonst den Default. Über eine SSH-Sitzung fragt auch der `curl | bash`-Weg dank `/dev/tty` nach; ganz ohne Terminal (cron) läuft alles ohne Eingabe.
+- **Teilautomatisch (ein Countdown):** Beim Start läuft ein 5-s-Countdown. **Drückst du eine Taste, schaltet der Installer auf manuell** und fragt ab da **alle** Werte blockierend ab (kein Timeout – deine Eingabe wird abgewartet). Ohne Tastendruck bzw. ohne Terminal (cron) läuft alles automatisch mit Standardwerten. Über eine SSH-Sitzung funktioniert der Tastendruck auch beim `curl | bash`-Weg (via `/dev/tty`). Countdown-Dauer via `--timeout` / `LOGBOT_TIMEOUT`.
 - **Zwingend nötig** sind bei HTTPS nur **FQDN** und **Token** – per Parameter, Env-Variable oder Platzhalter im Skript (siehe unten). Fehlen sie komplett, bricht der Installer mit klarer Meldung ab.
 - **Syslog-Alternative**: `--mode syslog` (rsyslog → UDP/TCP, Standard-Port 514) statt HTTPS.
 

@@ -2,6 +2,11 @@
 
 Installer & Log-Forwarder für Linux/Windows (`agents/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.07.18.18.30.00
+### Fixed
+- **Linux-Installer: Tastatureingabe wurde beim One-Liner ignoriert.** Vorher hatte jede Abfrage einen eigenen 5-s-Timeout – bei `curl … | bash` rauschten die Abfragen durch und eine Eingabe innerhalb der 5 s lief ins Leere. Jetzt gibt es **einen** Countdown am Anfang (`interactive_gate`): Wird eine Taste gedrückt, schaltet der Installer auf **manuell** und fragt ab da **alle** Werte blockierend ab (kein Timeout, Eingabe wird abgewartet). Ohne Tastendruck / ohne Terminal (Pipe/cron) läuft alles automatisch mit Standardwerten. Der Tastaturpuffer wird nach dem Aufweck-Tastendruck geleert, damit die erste echte Abfrage nicht sofort den Default nimmt.
+- Robustheit: `interactive_gate` liefert im Kein-Terminal-Fall sauber `return 0` – kein `set -e`-Abbruch mehr im vollautomatischen Lauf.
+
 ## 2026.07.18.16.00.00
 ### Added
 - **Linux-Agent: One-Liner-Installation (`curl … | bash`).** Der Installer ist jetzt **teilautomatisch** und pipe-tauglich: `curl -sSL <URL> | sudo bash -s -- --fqdn logbot.example.com --token xxxx`. Werte kommen aus **Parametern**, **Umgebungsvariablen** (`LOGBOT_FQDN`, `LOGBOT_TOKEN`, `LOGBOT_MODE`, …) oder auskommentierten **Platzhaltern** im Skript. Vorrang: Parameter > Env > Platzhalter > Abfrage > Default.
