@@ -6,7 +6,9 @@
 # Beschreibung: LogBot - FastAPI Hauptanwendung
 # ==============================================================================
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+import hashlib
 import secrets
 import logging
 import asyncio
@@ -20,7 +22,9 @@ from starlette.responses import Response
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select, desc, delete, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from . import fritzbox
 from .config import settings, validate_security_settings
 from .database import get_db, async_session, engine
 from .limiter import limiter
@@ -233,6 +237,30 @@ async def ensure_log_indexes():
 
 
 @app.on_event("startup")
+async def ensure_log_dedup_key():
+    """Spalte + Unique-Index fuer die Duplikat-Erkennung beim HTTPS-Ingest.
+
+    Der Index ist partiell (nur WHERE dedup_key IS NOT NULL), damit die bestehenden
+    Millionen Syslog-Zeilen ohne Schluessel unberuehrt bleiben. CONCURRENTLY, damit
+    der Aufbau keine Schreibzugriffe blockiert.
+    """
+    logger = logging.getLogger("logbot.startup")
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.exec_driver_sql(
+                "ALTER TABLE logs ADD COLUMN IF NOT EXISTS dedup_key VARCHAR(64)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_logs_dedup_key "
+                "ON logs(dedup_key) WHERE dedup_key IS NOT NULL"
+            )
+        logger.info("logs dedup_key ready")
+    except Exception as exc:
+        logger.warning("logs dedup_key migration skipped: %s", exc)
+
+
+@app.on_event("startup")
 async def apply_saved_caddy_config():
     """Laedt eine gespeicherte Caddyfile (falls vorhanden) nach dem Start."""
     try:
@@ -292,6 +320,21 @@ async def call_webhook(webhook_id: int, token: str = Query(...), db: AsyncSessio
 # =============================================================================
 # Agent Ingest Endpoint
 # =============================================================================
+def _to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Zeitstempel mit Zeitzone auf UTC ohne tzinfo bringen (die DB speichert naiv/UTC)."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _dedup_key(hostname: str, timestamp: datetime, event_id: Optional[int], message: str) -> str:
+    """Fingerabdruck eines Ereignisses. Gleiche Box + Zeit + Ereignis + Text = gleicher Eintrag."""
+    raw = f"{hostname}|{timestamp.isoformat()}|{'' if event_id is None else event_id}|{message}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 @app.post("/api/agents/ingest", response_model=LogIngestResponse, tags=["Agent Ingest"])
 async def ingest_logs(
     data: LogIngestRequest,
@@ -299,7 +342,16 @@ async def ingest_logs(
     authorization: str = Header(...),
     db: AsyncSession = Depends(get_db)
 ):
-    """Empfängt Logs von authentifizierten Agents via HTTPS."""
+    """Empfängt Logs von authentifizierten Agents via HTTPS.
+
+    Sammler (z.B. n8n, das die FRITZ!Box abfragt) duerfen hostname, ip_address und
+    device_type des gemeldeten Geraets mitschicken - dann taucht die Box mit eigener
+    IP und eigenem Hostnamen auf und nicht mit der IP des Sammlers.
+
+    Eintraege mit eigenem Zeitstempel bekommen einen dedup_key: wiederholte Lieferungen
+    derselben Ereignisse (die FRITZ!Box liefert immer ihren kompletten Puffer) werden
+    von der Datenbank verworfen statt doppelt gespeichert.
+    """
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer Token erforderlich")
     token_value = authorization[7:]
@@ -312,32 +364,82 @@ async def ingest_logs(
         raise HTTPException(status_code=401, detail="Ungültiger Agent-Token")
 
     client_ip = request.client.host if request.client else "unknown"
+    device_ip = (data.ip_address or "").strip() or client_ip
+
     result = await db.execute(
-        select(Agent).where(Agent.hostname == data.hostname, Agent.ip_address == client_ip)
+        select(Agent).where(Agent.hostname == data.hostname, Agent.ip_address == device_ip)
     )
     agent = result.scalar_one_or_none()
     if agent:
         agent.last_seen = datetime.utcnow()
+        if data.device_type and agent.device_type in (None, "unknown"):
+            agent.device_type = data.device_type
     else:
-        # device_type aus dem Token ableiten (linux/windows), sonst Bestandsverhalten
+        # device_type aus dem Payload, sonst aus dem Token (linux/windows) ableiten
         _dt_map = {"linux": "linux_agent", "windows": "windows_agent"}
         agent = Agent(
-            hostname=data.hostname, ip_address=client_ip,
-            device_type=_dt_map.get(agent_token.device_type, "windows_agent"),
+            hostname=data.hostname, ip_address=device_ip,
+            device_type=data.device_type or _dt_map.get(agent_token.device_type, "windows_agent"),
             extra_data={"auth": "token", "token_name": agent_token.name})
         db.add(agent)
         await db.flush()
 
+    is_fritzbox = (data.device_type or "").lower() == "fritzbox"
+    now = datetime.utcnow()
+    unique_rows = {}   # dedup_key -> Zeile, entfernt Doppelte schon innerhalb einer Lieferung
+    plain_rows = []    # ohne Zeitstempel: keine Duplikatpruefung moeglich
+
     for event in data.events:
-        log = Log(
-            agent_id=agent.id, hostname=data.hostname, ip_address=client_ip,
-            facility=1, level=event.level, source=event.source,
-            message=event.message, raw_message=event.message,
-            extra_data={"ingested_via": "https"})
-        db.add(log)
+        level = (event.level or "").strip().lower() or None
+        source = (event.source or "").strip() or None
+        if is_fritzbox and (level is None or source is None):
+            mapped_level, mapped_source = fritzbox.classify(event.event_id, event.group, event.message)
+            level = level or mapped_level
+            source = source or mapped_source
+
+        extra = {"ingested_via": "https"}
+        if event.event_id is not None:
+            extra["event_id"] = event.event_id
+        if event.group:
+            extra["group"] = event.group
+
+        ts = _to_naive_utc(event.timestamp)
+        row = {
+            "agent_id": agent.id,
+            "hostname": data.hostname,
+            "ip_address": device_ip,
+            "timestamp": ts or now,
+            "facility": 1 if event.facility is None else event.facility,
+            "level": level or "info",
+            "source": source or "unknown",
+            "message": event.message,
+            "raw_message": event.message,
+            "extra_data": extra,
+            "created_at": now,
+            "dedup_key": None,
+        }
+        if ts is None:
+            plain_rows.append(row)
+        else:
+            key = _dedup_key(data.hostname, ts, event.event_id, event.message)
+            row["dedup_key"] = key
+            unique_rows[key] = row
+
+    rows = plain_rows + list(unique_rows.values())
+    inserted = 0
+    if rows:
+        stmt = (
+            pg_insert(Log).values(rows)
+            .on_conflict_do_nothing(
+                index_elements=[Log.dedup_key],
+                index_where=Log.dedup_key.isnot(None),
+            )
+            .returning(Log.id)
+        )
+        inserted = len((await db.execute(stmt)).scalars().all())
 
     await db.commit()
-    return LogIngestResponse(accepted=len(data.events))
+    return LogIngestResponse(accepted=inserted, duplicates=len(data.events) - inserted)
 
 
 @app.get("/api")

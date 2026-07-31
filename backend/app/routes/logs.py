@@ -97,7 +97,8 @@ LOG_CATEGORIES = {
         "label": "Anmeldung & Rechte",
         "facilities": [4, 10],
         "sources": ["sshd", "sshd-session", "sudo", "su", "login", "polkit", "polkitd",
-                    "systemd-logind", "pam_unix", "gdm-password", "security"],
+                    "systemd-logind", "pam_unix", "gdm-password", "security",
+                    "fritzbox-auth"],
     },
     "kernel": {
         "label": "Kernel",
@@ -108,7 +109,8 @@ LOG_CATEGORIES = {
         "label": "Netzwerk",
         "facilities": [12],
         "sources": ["networkmanager", "dhclient", "dhcpcd", "dhcpd", "systemd-networkd",
-                    "systemd-resolved", "wpa_supplicant", "netplan", "named", "chronyd", "ntpd"],
+                    "systemd-resolved", "wpa_supplicant", "netplan", "named", "chronyd", "ntpd",
+                    "fritzbox-net", "fritzbox-wlan"],
     },
     "firewall": {
         "label": "Firewall & Abwehr",
@@ -133,12 +135,13 @@ LOG_CATEGORIES = {
     "system": {
         "label": "System & Dienste",
         "facilities": [3, 5],
-        "sources": ["systemd", "init", "rsyslogd", "syslog-ng", "systemd-journald", "journald"],
+        "sources": ["systemd", "init", "rsyslogd", "syslog-ng", "systemd-journald", "journald",
+                    "fritzbox-sys"],
     },
     "audit": {
         "label": "Audit",
         "facilities": [13],
-        "sources": ["auditd", "audit"],
+        "sources": ["auditd", "audit", "fritzbox-audit"],
     },
 }
 

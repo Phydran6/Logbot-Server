@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS logs (
     message TEXT,
     raw_message TEXT,
     extra_data JSONB DEFAULT '{}',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- Duplikat-Erkennung beim HTTPS-Ingest, NULL = keine Pruefung (z.B. Syslog)
+    dedup_key VARCHAR(64)
 );
 
 CREATE INDEX IF NOT EXISTS idx_logs_agent_id ON logs(agent_id);
@@ -63,6 +65,9 @@ CREATE INDEX IF NOT EXISTS idx_logs_message_trgm ON logs USING gin (message gin_
 CREATE INDEX IF NOT EXISTS idx_logs_level_lower ON logs ((lower(level)));
 -- Fuer den Logtyp-Filter nach Syslog-Facility
 CREATE INDEX IF NOT EXISTS idx_logs_facility ON logs(facility);
+-- Duplikat-Erkennung beim HTTPS-Ingest (nur Zeilen mit Schluessel)
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS dedup_key VARCHAR(64);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_dedup_key ON logs(dedup_key) WHERE dedup_key IS NOT NULL;
 
 -- Webhooks-Tabelle
 CREATE TABLE IF NOT EXISTS webhooks (
