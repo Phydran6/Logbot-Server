@@ -42,11 +42,14 @@
     
     <!-- Agents Grid -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <div 
+      <!-- Klick auf die Karte oeffnet die Log-Ansicht dieses Geraets -->
+      <div
         v-for="agent in agents"
         :key="agent.id"
-        class="rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+        class="rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer"
         :style="cardStyle"
+        :title="`Logs von ${agent.hostname} anzeigen`"
+        @click="openDevice(agent)"
       >
         <div class="flex justify-between items-start mb-4">
           <div>
@@ -101,21 +104,22 @@
         <!-- Actions -->
         <div class="mt-4 pt-4 border-t flex justify-between items-center" :style="{ borderColor: 'var(--color-border)' }">
           <router-link
-            :to="`/logs?hostname=${agent.hostname}`"
+            :to="{ name: 'DeviceLogs', params: { hostname: agent.hostname } }"
             class="hover:underline text-sm"
             :style="{ color: 'var(--color-primary)' }"
+            @click.stop
           >
             Logs anzeigen →
           </router-link>
           <div class="flex gap-3">
             <button
-              @click="openRetention(agent)"
+              @click.stop="openRetention(agent)"
               class="text-xs hover:opacity-70"
               :style="{ color: 'var(--color-text-muted)' }"
               title="Retention-Policy einstellen"
             >⚙ Retention</button>
             <button
-              @click="deleteAgent(agent)"
+              @click.stop="deleteAgent(agent)"
               class="text-sm hover:opacity-70"
               :style="{ color: 'var(--color-danger)' }"
             >Löschen</button>
@@ -207,9 +211,11 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
+const router = useRouter()
 
 const agents = ref([])
 const total = ref(0)
@@ -293,6 +299,11 @@ async function loadAgents() {
   } catch (e) {
     alert('Fehler: ' + e.message)
   }
+}
+
+function openDevice(agent) {
+  if (!agent?.hostname) return
+  router.push({ name: 'DeviceLogs', params: { hostname: agent.hostname } })
 }
 
 function typeLabel(t) {

@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.18.18.30.00
+# Version:     2026.07.31.23.00.00
 # Beschreibung: LogBot - Backend Konfiguration
 # ==============================================================================
 
@@ -19,9 +19,13 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
-    app_version: str = "2026.07.18.18.30.00"
+    app_version: str = "2026.07.31.23.00.00"
     caddy_admin_url: str = "http://caddy:2019"
     caddy_certs_dir: str = "/caddy-certs"
+    # Notausstieg ohne Web-UI: CADDY_FORCE_HTTP=true startet mit reinem HTTP auf
+    # Port 80 und verwirft die gespeicherte Reverse-Proxy-Konfiguration.
+    # Gedacht fuer den Fall "TLS kaputt, komme nicht mehr ins UI".
+    caddy_force_http: bool = False
     # CORS: Komma-getrennte Liste erlaubter Origins, z.B. "https://logbot.example.com"
     # Leer lassen = nur same-origin (empfohlen für Caddy-Deployments)
     cors_origins: str = ""

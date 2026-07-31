@@ -214,6 +214,25 @@ async def ensure_app_login_tokens_table():
 
 
 @app.on_event("startup")
+async def ensure_log_indexes():
+    """Index fuer den Facility-Filter der Log-Ansicht (Migration fuer Bestands-DBs).
+
+    CONCURRENTLY, damit der Aufbau auf einer grossen logs-Tabelle keine Schreib-
+    zugriffe blockiert. Faellt der Aufbau aus, bleibt nur der Filter langsamer.
+    """
+    logger = logging.getLogger("logbot.startup")
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.exec_driver_sql(
+                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_logs_facility ON logs(facility)"
+            )
+        logger.info("logs indexes ready")
+    except Exception as exc:
+        logger.warning("logs index migration skipped: %s", exc)
+
+
+@app.on_event("startup")
 async def apply_saved_caddy_config():
     """Laedt eine gespeicherte Caddyfile (falls vorhanden) nach dem Start."""
     try:

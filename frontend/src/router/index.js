@@ -68,10 +68,17 @@ const routes = [
       },
       
       // Agenten-Verwaltung
-      { 
-        path: 'agents', 
-        name: 'Agents', 
-        component: () => import('../views/Agents.vue') 
+      {
+        path: 'agents',
+        name: 'Agents',
+        component: () => import('../views/Agents.vue')
+      },
+
+      // Log-Ansicht fuer ein einzelnes Geraet
+      {
+        path: 'devices/:hostname',
+        name: 'DeviceLogs',
+        component: () => import('../views/DeviceLogs.vue')
       },
 
       // Benutzer-Verwaltung

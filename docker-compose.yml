@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.19.15.00.00
+# Version:     2026.07.31.20.06.53
 # Beschreibung: LogBot - Docker Compose Konfiguration
 # ==============================================================================
 
@@ -73,6 +73,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET muss gesetzt sein}
       CADDY_ADMIN_URL: ${CADDY_ADMIN_URL:-http://caddy:2019}
       CADDY_CERTS_DIR: ${CADDY_CERTS_DIR:-/caddy-certs}
+      # Notausstieg: CADDY_FORCE_HTTP=true in der .env setzen, Backend neu starten
+      # -> zurueck auf reines HTTP (Port 80), gespeicherte TLS-Config wird verworfen.
+      CADDY_FORCE_HTTP: ${CADDY_FORCE_HTTP:-false}
       SITE_URL: ${SITE_URL:-}
     expose:
       - "8000"
@@ -113,17 +116,11 @@ services:
     networks:
       - logbot
 
-  portainer-agent:
-    image: portainer/agent:latest
-    container_name: logbot-portainer-agent
-    restart: unless-stopped
-    ports:
-      - "9001:9001"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /var/lib/docker/volumes:/var/lib/docker/volumes
-    networks:
-      - logbot
+# HINWEIS: Bewusst KEINE Fremd-/Management-Systeme (z. B. Portainer-Agent) in
+# diesem Stack. LogBot bleibt eigenstaendig; Verwaltungswerkzeuge werden – falls
+# gewuenscht – getrennt vom Nutzer betrieben. Der frueher hier enthaltene
+# portainer-agent (Port 9001, mountete /var/run/docker.sock) wurde entfernt:
+# der Docker-Socket im Stack ist faktisch Root-Zugriff auf den Host.
 
 volumes:
   postgres_data:

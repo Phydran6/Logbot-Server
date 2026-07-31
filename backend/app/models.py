@@ -69,6 +69,9 @@ class Log(Base):
     raw_message = Column(Text)
     extra_data = Column(JSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Duplikat-Erkennung beim HTTPS-Ingest (SHA256 aus Host/Zeit/Ereignis/Text).
+    # NULL = keine Pruefung (z.B. Syslog), Unique-Index greift nur auf NOT NULL.
+    dedup_key = Column(String(64), nullable=True)
     agent = relationship("Agent", back_populates="logs")
 
 class Webhook(Base):

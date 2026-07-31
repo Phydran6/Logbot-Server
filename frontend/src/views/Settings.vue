@@ -1,7 +1,7 @@
 ﻿<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.07.11.13.03.42
+     Version:     2026.07.31.23.00.00
      Changelog:   ../../../CHANGELOG/frontend.md
      Beschreibung: LogBot - Einstellungen mit Theme-Support (inkl. Netzwerk-Tab: Reverse Proxy + DNS)
      ============================================================================== -->
@@ -176,7 +176,9 @@
     <div v-if="networkSubTab === 'caddy'" class="rounded-lg shadow p-6" :style="cardStyle">
       <h2 class="text-lg font-semibold mb-2" :style="{ color: 'var(--color-text-primary)' }">Reverse Proxy & TLS (Caddy)</h2>
       <p class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
-        Caddyfile im Browser anpassen und sicher anwenden. Ungültige Config wird von Caddy abgelehnt – bei Fehler bleibt die alte aktiv.
+        Angewendet wird <strong>genau das, was unten im Editor steht</strong>. Die Konfiguration wird vorher
+        von Caddy geprüft; schlägt das Laden fehl, wird automatisch die vorherige zurückgeholt.
+        Port 80 bleibt in jeder Vorlage erreichbar – damit sperrt man sich nicht aus.
       </p>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -205,10 +207,32 @@
               <input type="radio" value="custom" v-model="caddyMode">
               <span>HTTPS mit eigenem Zertifikat</span>
             </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" value="internal" v-model="caddyMode">
+              <span>HTTPS selbstsigniert (Caddy-eigene CA, ohne Internet)</span>
+            </label>
           </div>
           <div v-if="caddyMode === 'letsencrypt'" class="mt-3">
             <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">E-Mail für Let's Encrypt</label>
             <input v-model="caddyEmail" type="email" class="w-full rounded px-3 py-2" :style="inputStyle" placeholder="admin@example.com">
+          </div>
+
+          <div v-if="caddyMode !== 'http'" class="mt-3">
+            <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">
+              Zusätzliche Adressen für HTTPS (IP oder Name, Leerzeichen-getrennt)
+            </label>
+            <input
+              v-model="caddyExtraHostsInput"
+              type="text"
+              class="w-full rounded px-3 py-2"
+              :style="inputStyle"
+              placeholder="192.168.1.10 logbot.intern"
+            >
+            <p class="text-xs mt-1" :style="{ color: 'var(--color-text-muted)' }">
+              Diese Adressen bekommen ein selbstsigniertes Zertifikat (für IPs gibt es keine öffentlichen).
+              Der Zugriff über Port 80 funktioniert unabhängig davon immer.
+              <button class="underline ml-1" @click="useCurrentAddress">Aktuelle Adresse übernehmen</button>
+            </p>
           </div>
         </div>
         <div>
@@ -253,6 +277,15 @@
         >
           {{ caddyLoading ? 'Wird angewendet...' : 'Apply & Reload' }}
         </button>
+        <button
+          class="px-3 py-2 rounded hover:opacity-90 disabled:opacity-50"
+          :style="dangerButtonStyle"
+          @click="resetCaddy"
+          :disabled="caddyLoading"
+          title="Setzt den Reverse Proxy auf reines HTTP zurück"
+        >
+          Zurück auf HTTP
+        </button>
       </div>
 
       <textarea
@@ -265,6 +298,14 @@
 
       <p v-if="caddyMessage" class="text-sm mt-2" :style="{ color: 'var(--color-success)' }">{{ caddyMessage }}</p>
         <p v-if="caddyError" class="text-sm mt-2" :style="{ color: 'var(--color-danger)' }">{{ caddyError }}</p>
+        <ul v-if="caddyWarnings.length" class="mt-2 space-y-1">
+          <li
+            v-for="(w, i) in caddyWarnings"
+            :key="i"
+            class="text-sm p-2 rounded"
+            :style="warningBoxStyle"
+          >{{ w }}</li>
+        </ul>
         <div v-if="showHttpHint" class="mt-3 p-3 rounded" :style="warningBoxStyle">
           <p class="text-sm" :style="{ color: 'var(--color-text-primary)' }">
             HTTP-Modus aktiv. Öffne&nbsp;
@@ -284,7 +325,7 @@
             </span>
           </div>
           <p class="text-xs mt-2" :style="{ color: 'var(--color-text-muted)' }">
-            Hinweis: Stelle sicher, dass Port 80 erreichbar ist. Wenn nicht, bleibt HTTPS bis zum nächsten Apply aktiv.
+            Die Seite bleibt über HTTPS geöffnet, bis du wechselst – deine Sitzung geht dabei nicht verloren.
           </p>
         </div>
       </div>
@@ -543,30 +584,20 @@ const dnsTestHost = ref('')
 const dnsTesting = ref(false)
 const dnsTestResult = ref(null)
 let certUpload = { cert: null, key: null }
-const httpTemplate = `{
-    admin 0.0.0.0:2019
-}
+// Zusaetzliche HTTPS-Adressen (IPs/Namen) als Eingabefeld, Leerzeichen-getrennt
+const caddyExtraHostsInput = ref('')
+const caddyWarnings = ref([])
 
-:80 {
-    handle /api/* {
-        reverse_proxy backend:8000
-    }
-
-    handle {
-        reverse_proxy frontend:80
-    }
-
-    log {
-        output stdout
-    }
-}
-`
+const caddyExtraHosts = computed(() =>
+  caddyExtraHostsInput.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
+)
 
 const availableTabs = computed(() => tabs.filter(t => !t.adminOnly || authStore.isAdmin))
 
 const tlsHint = computed(() => {
   if (caddyMode.value === 'http') return 'Nur HTTP (Port 80). Kein Zertifikat nötig.'
   if (caddyMode.value === 'letsencrypt') return 'Let’s Encrypt besorgt das Zertifikat automatisch (FQDN + 80/443 öffentlich erreichbar, E-Mail erforderlich).'
+  if (caddyMode.value === 'internal') return 'Caddy stellt ein eigenes Zertifikat aus. Funktioniert ohne Internet, der Browser warnt einmalig.'
   return caddyCertPresent.value
     ? 'Eigenes Zertifikat gefunden. Wird für HTTPS genutzt.'
     : 'Eigenes Zertifikat wählen und speichern, dann Apply.'
@@ -587,21 +618,26 @@ watch(caddyMode, async (mode) => {
     showHttpHint.value = false
     httpLink.value = ''
     httpCopyMessage.value = ''
-    // Lokales HTTP-Template setzen, damit kein alter FQDN bleibt
-    caddyfile.value = httpTemplate
-  } else {
-    // falls noch keine Caddyfile geladen wurde, baue eine erste Vorlage
-    if (!caddyfile.value) {
-      await buildCaddyTemplate()
-    }
   }
+  await buildCaddyTemplate()
 })
 
-// Wenn im HTTPS-Modus der FQDN geändert wird, Template automatisch aktualisieren
-watch(caddyDomain, async (val) => {
-  if (caddyMode.value !== 'http' && val) {
-    await buildCaddyTemplate()
-  }
+// Aendert sich FQDN, E-Mail oder eine Zusatzadresse, wird die Vorlage neu gebaut -
+// verzoegert, damit nicht bei jedem Tastendruck eine Anfrage rausgeht.
+let templateTimer = null
+function scheduleTemplateRebuild() {
+  clearTimeout(templateTimer)
+  templateTimer = setTimeout(() => { buildCaddyTemplate() }, 400)
+}
+
+watch(caddyDomain, (val) => {
+  if (caddyMode.value !== 'http' && val) scheduleTemplateRebuild()
+})
+watch(caddyEmail, () => {
+  if (caddyMode.value === 'letsencrypt') scheduleTemplateRebuild()
+})
+watch(caddyExtraHostsInput, () => {
+  if (caddyMode.value !== 'http') scheduleTemplateRebuild()
 })
 
 // Computed Styles
@@ -786,30 +822,54 @@ async function testDns() {
 
 async function buildCaddyTemplate() {
   caddyError.value = ''
+  caddyWarnings.value = []
   if (caddyMode.value !== 'http' && !isFqdnValid.value) {
-    caddyError.value = 'FQDN ist ungültig (z.B. logbot.example.com).'
-    return
-  }
-  // HTTP-Modus: kein API-Call nötig, lokales Template einsetzen
-  if (caddyMode.value === 'http') {
-    caddyfile.value = httpTemplate
-    caddyMessage.value = 'HTTP-Template geladen (nur :80, kein Redirect).'
+    // Beim Tippen im FQDN-Feld ist das der Normalzustand - nicht als Fehler anzeigen.
     return
   }
   try {
-    const domainToSend = caddyMode.value === 'http' ? null : caddyDomain.value
+    // Die Vorlage kommt immer vom Backend, damit UI und Server nicht auseinanderlaufen.
     const res = await authStore.api('/api/caddy/template', {
       method: 'POST',
       body: {
-        domain: domainToSend,
+        domain: caddyMode.value === 'http' ? null : caddyDomain.value,
         mode: caddyMode.value,
-        letsencrypt_email: caddyMode.value === 'letsencrypt' ? caddyEmail.value : null
+        letsencrypt_email: caddyMode.value === 'letsencrypt' ? caddyEmail.value : null,
+        extra_hosts: caddyMode.value === 'http' ? [] : caddyExtraHosts.value,
       }
     })
     caddyfile.value = res.caddyfile
-    caddyMessage.value = 'Template eingefügt. Prüfe & passe nach Bedarf an.'
+    caddyWarnings.value = res.warnings || []
+    caddyMessage.value = 'Vorlage eingefügt. Angewendet wird genau dieser Text.'
   } catch (e) {
     caddyError.value = e.message
+  }
+}
+
+/** Uebernimmt die Adresse, ueber die gerade zugegriffen wird (praktisch bei IP-Zugriff). */
+function useCurrentAddress() {
+  const current = window.location.hostname
+  if (!current) return
+  if (!caddyExtraHosts.value.includes(current)) {
+    caddyExtraHostsInput.value = [...caddyExtraHosts.value, current].join(' ')
+  }
+}
+
+async function resetCaddy() {
+  if (!confirm('Reverse Proxy auf reines HTTP (Port 80) zurücksetzen?')) return
+  caddyLoading.value = true
+  caddyError.value = ''
+  caddyMessage.value = ''
+  caddyWarnings.value = []
+  try {
+    const res = await authStore.api('/api/caddy/reset', { method: 'POST' })
+    caddyfile.value = res.caddyfile || ''
+    caddyMode.value = 'http'
+    caddyMessage.value = 'Zurückgesetzt: Oberfläche ist über http://<Adresse> erreichbar.'
+  } catch (e) {
+    caddyError.value = e.message
+  } finally {
+    caddyLoading.value = false
   }
 }
 
@@ -852,50 +912,41 @@ async function applyCaddy() {
     caddyError.value = 'Custom-Zertifikat hochladen, bevor du es aktivierst.'
     return
   }
-  // Stelle sicher, dass im HTTP-Modus die Caddyfile keine alten FQDNs enthält
-  if (caddyMode.value === 'http') {
-    caddyfile.value = httpTemplate
+  // Ohne Editor-Inhalt zuerst eine Vorlage bauen, sonst gäbe es nichts anzuwenden.
+  if (!caddyfile.value.trim()) {
+    await buildCaddyTemplate()
+  }
+  if (!caddyfile.value.trim()) {
+    caddyError.value = 'Es gibt keine Konfiguration zum Anwenden.'
+    return
   }
   if (!confirm('Apply & Reload Caddy jetzt ausführen?')) return
 
   caddyLoading.value = true
   caddyError.value = ''
   caddyMessage.value = ''
+  caddyWarnings.value = []
   try {
-    await authStore.api('/api/caddy/apply', {
+    // Bewusst OHNE mode/domain: angewendet wird exakt der Editor-Inhalt.
+    // Sonst hätte der Server aus dem Modus eine neue Datei gebaut und
+    // manuelle Änderungen im Editor stillschweigend verworfen.
+    const res = await authStore.api('/api/caddy/apply', {
       method: 'POST',
       body: {
         caddyfile: caddyfile.value,
         save: true,
-        mode: caddyMode.value,
-        domain: caddyMode.value === 'http' ? null : caddyDomain.value,
-        letsencrypt_email: caddyMode.value === 'letsencrypt' ? caddyEmail.value : null
       }
     })
-    caddyMessage.value = 'Caddy neu geladen. Bei Fehler bleibt die alte Konfiguration aktiv.'
-    if (caddyMode.value === 'http') {
-      // Im HTTP-Modus muss der Benutzer wirklich auf HTTP landen, sonst schlagen alle API-Calls über HTTPS fehl.
-      const currentPort = window.location.port
-      const targetPort = !currentPort || currentPort === '443' ? '80' : currentPort
-      const target = `http://${window.location.hostname}${targetPort === '80' ? '' : ':' + targetPort}/settings`
-
-      httpLink.value = target
+    caddyWarnings.value = res.warnings || []
+    caddyMessage.value = 'Caddy neu geladen. Port 80 bleibt als Zugang erhalten.'
+    if (caddyMode.value === 'http' && window.location.protocol === 'https:') {
+      // Wer gerade per HTTPS verbunden ist, verliert diesen Weg - Link anbieten,
+      // aber nicht mehr automatisch umleiten (das riss frueher die Sitzung mitten
+      // im Speichern ab).
+      httpLink.value = `http://${window.location.hostname}/settings`
       showHttpHint.value = true
-      // Versuch, URL zu kopieren – hilfreich, wenn Popups unterbunden sind
-      try {
-        await navigator.clipboard.writeText(target)
-        caddyMessage.value = `HTTP-Modus aktiv. Öffne ${target} in einem neuen Tab (URL kopiert).`
-        httpCopyMessage.value = 'Link kopiert'
-      } catch (copyErr) {
-        console.warn('Kopieren HTTP-Link fehlgeschlagen:', copyErr)
-        caddyMessage.value = `HTTP-Modus aktiv. Bitte öffne ${target} manuell in einem neuen Tab.`
-        httpCopyMessage.value = ''
-      }
-      // Öffne zusätzlich in neuem Tab (falls geblockt, bleibt die aktuelle Seite, Redirect folgt darunter)
-      window.open(target, '_blank')
-      // Harte Weiterleitung nach kurzem Delay, damit der User nicht im toten HTTPS-Kontext bleibt
-      setTimeout(() => { window.location.href = target }, 500)
-      return
+      httpCopyMessage.value = ''
+      caddyMessage.value = 'HTTP-Modus aktiv. Diese Seite läuft noch über HTTPS – bitte über den Link unten wechseln.'
     }
   } catch (e) {
     caddyError.value = e.message

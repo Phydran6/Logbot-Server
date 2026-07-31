@@ -1,4 +1,4 @@
-﻿# LogBot v2026.07.18.18.30.00
+﻿# LogBot v2026.07.31.23.00.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -30,6 +30,18 @@ Entwickelt von Phydran6
 - Root-Zugriff
 
 ## Installation
+
+**One-Liner direkt von GitHub** (holt sich die Quellen selbst, installiert nach `/opt/logbot`):
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash
+```
+Der Installer wartet 5 Sekunden: **eine Taste drücken** → Rückfragen werden gestellt, sonst
+läuft er automatisch durch. Ganz ohne Rückfragen:
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- -y
+```
+
+**Oder aus dem geklonten Repository:**
 ```bash
 # Repository klonen
 git clone https://github.com/Phydran6/Logbot-Server.git
@@ -38,6 +50,20 @@ cd Logbot-Server
 # Installer ausführen (erstellt .env automatisch)
 sudo bash install.sh
 ```
+
+**Weitere Aktionen** (`sudo bash install.sh <aktion>` bzw. `| sudo bash -s -- <aktion>`):
+
+| Aktion | Wirkung |
+|--------|---------|
+| `install` (Standard) | Installiert; bestehende Installation wird auf Wunsch aktualisiert |
+| `update` | Aktualisiert Quellen (`git pull`) und startet neu gebaute Container |
+| `uninstall` | Stoppt und entfernt die Container – **Daten bleiben** |
+| `uninstall-purge` | Löscht zusätzlich Volumes **und alle Logs** sowie `/opt/logbot` |
+
+Optionen: `--dir <pfad>`, `--repo <url>`, `--branch <name>`, `--no-build`, `--yes`, `--timeout <s>`
+(auch als `LOGBOT_DIR`, `LOGBOT_REPO`, `LOGBOT_BRANCH`, `LOGBOT_YES`, `LOGBOT_TIMEOUT`).
+Eine vorhandene `.env` wird nie überschrieben – das Datenbank-Passwort bleibt zum bestehenden
+Postgres-Volume passend.
 
 **Oder manuell aus Archiv:**
 ```bash
@@ -234,6 +260,15 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.07.31.23.00.00 (2026-07-31)
+- **Reverse Proxy:** Port 80 bleibt in jeder Konfiguration ein vollwertiger Zugang (kein Zwangs-Redirect mehr) – IP und FQDN funktionieren parallel auf 80 und 443. Konfiguration wird vor dem Anwenden geprüft, bei Fehler automatischer Rollback. Neu: selbstsigniertes HTTPS (interne CA), zusätzliche HTTPS-Adressen, „Zurück auf HTTP" und Notausstieg `CADDY_FORCE_HTTP=true`. FIX: manuelle Änderungen im Caddyfile-Editor wurden verworfen.
+- **Logs:** Filter nach **Logtypen** – Schweregrad-Gruppen, Kategorie (Auth, Kernel, Netzwerk, Firewall, Container, Cron, Mail, System, Audit), Syslog-Facility und Geräteart. Filter stehen in der URL und gelten auch für den Export.
+- **Log-Ansicht pro Gerät** unter `/devices/<hostname>` mit Steckbrief; erreichbar per Klick auf Agent-Karte, Dashboard- oder Listen-Hostname.
+- **UI:** Seitenmenü lässt sich zur Icon-Leiste einklappen (Zustand wird gemerkt); Hinweisbalken bei unverschlüsselter Verbindung.
+- **Installation:** `install.sh` als One-Liner (`curl … | sudo bash`) mit `install`/`update`/`uninstall`/`uninstall-purge`. FIX: bestehende `.env` wird nicht mehr überschrieben (das neue DB-Passwort passte nicht zum vorhandenen Postgres-Volume).
+- **Aufräumen:** `portainer-agent` ist nicht mehr Teil des Stacks (mountete den Docker-Socket = Root-Zugriff auf den Host).
+- FIX: CSV-/JSON-Export der Logs funktionierte nicht – der Endpoint `/api/logs/export` fehlte im Backend.
+
 ### v2026.07.18.18.30.00 (2026-07-18)
 - FIX: **Linux-Installer ignorierte Tastatureingabe beim One-Liner.** Statt 5-s-Timeout pro Abfrage jetzt **ein** Countdown am Start: Taste drücken = manueller Modus (alle Werte werden blockierend abgefragt), sonst automatischer Ablauf. Details: [CHANGELOG/agents.md](CHANGELOG/agents.md).
 

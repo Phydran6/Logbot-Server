@@ -61,6 +61,8 @@ CREATE INDEX IF NOT EXISTS idx_logs_hostname_trgm ON logs USING gin (hostname gi
 CREATE INDEX IF NOT EXISTS idx_logs_source_trgm ON logs USING gin (source gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_logs_message_trgm ON logs USING gin (message gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_logs_level_lower ON logs ((lower(level)));
+-- Fuer den Logtyp-Filter nach Syslog-Facility
+CREATE INDEX IF NOT EXISTS idx_logs_facility ON logs(facility);
 
 -- Webhooks-Tabelle
 CREATE TABLE IF NOT EXISTS webhooks (

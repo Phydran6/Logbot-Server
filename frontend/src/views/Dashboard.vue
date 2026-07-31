@@ -1,3 +1,11 @@
+<!-- ==============================================================================
+     Name:        Phydran6
+     Kontakt:     Phydran6
+     Version:     2026.07.31.21.10.00
+     Beschreibung: LogBot - Dashboard/Uebersicht (Kennzahlen + neueste Logs).
+                   Hostnamen fuehren in die Log-Ansicht des jeweiligen Geraets.
+     ============================================================================== -->
+
 <template>
   <div class="p-6">
     <h1 class="text-2xl font-bold mb-6" :style="{ color: 'var(--color-text-primary)' }">Dashboard</h1>
@@ -6,10 +14,10 @@
         <div class="text-sm" :style="{ color: 'var(--color-text-muted)' }">Gesamt Logs</div>
         <div class="text-3xl font-bold mt-2" :style="{ color: 'var(--color-text-primary)' }">{{ stats?.total_logs?.toLocaleString() || 0 }}</div>
       </div>
-      <div class="rounded-lg shadow p-6" :style="cardStyle">
+      <router-link to="/agents" class="rounded-lg shadow p-6 block hover:shadow-lg transition-shadow" :style="cardStyle" title="Zur Geräte-Übersicht">
         <div class="text-sm" :style="{ color: 'var(--color-text-muted)' }">Hosts</div>
         <div class="text-3xl font-bold mt-2" :style="{ color: 'var(--color-text-primary)' }">{{ stats?.unique_hosts || 0 }}</div>
-      </div>
+      </router-link>
       <div class="rounded-lg shadow p-6" :style="cardStyle">
         <div class="text-sm" :style="{ color: 'var(--color-text-muted)' }">Fehler</div>
         <div class="text-3xl font-bold mt-2" :style="{ color: 'var(--color-danger, #ef4444)' }">{{ (stats?.logs_by_level?.error || 0) + (stats?.logs_by_level?.critical || 0) }}</div>
@@ -37,7 +45,16 @@
         <tbody class="divide-y" :style="{ borderColor: 'var(--color-border)' }">
           <tr v-for="log in logs" :key="log.id" class="hover-row">
             <td class="px-4 py-3 text-sm whitespace-nowrap" :style="{ color: 'var(--color-text-secondary)' }">{{ formatTime(log.timestamp) }}</td>
-            <td class="px-4 py-3 text-sm" :style="{ color: 'var(--color-text-primary)' }">{{ log.hostname }}</td>
+            <td class="px-4 py-3 text-sm" :style="{ color: 'var(--color-text-primary)' }">
+              <router-link
+                v-if="log.hostname"
+                :to="{ name: 'DeviceLogs', params: { hostname: log.hostname } }"
+                class="hover:underline"
+                :style="{ color: 'var(--color-primary)' }"
+                title="Logs dieses Geräts anzeigen"
+              >{{ log.hostname }}</router-link>
+              <span v-else>–</span>
+            </td>
             <td class="px-4 py-3"><span class="px-2 py-1 text-xs rounded-full" :class="levelClass(log.level)">{{ log.level }}</span></td>
             <td class="px-4 py-3 text-sm" :style="{ color: 'var(--color-text-secondary)' }">{{ log.source }}</td>
             <td class="px-4 py-3 text-sm truncate max-w-md" :style="{ color: 'var(--color-text-secondary)' }">{{ log.message }}</td>

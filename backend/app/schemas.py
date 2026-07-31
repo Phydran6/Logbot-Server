@@ -215,16 +215,32 @@ class AgentTokenResponse(BaseModel):
         from_attributes = True
 
 class LogIngestEntry(BaseModel):
-    level: str = Field(default="info")
-    source: str = Field(default="unknown")
+    """Ein Log-Eintrag beim HTTPS-Ingest.
+
+    level/source duerfen leer bleiben: bei device_type="fritzbox" leitet der
+    Server sie aus event_id/group ab, sonst gilt "info"/"unknown".
+    timestamp = Zeitpunkt des Ereignisses auf dem Geraet. Nur Eintraege mit
+    timestamp werden dedupliziert (sonst waeren sie ohnehin immer neu).
+    """
+    level: Optional[str] = Field(default=None, max_length=20)
+    source: Optional[str] = Field(default=None, max_length=100)
     message: str
+    timestamp: Optional[datetime] = None
+    event_id: Optional[int] = None
+    group: Optional[str] = Field(default=None, max_length=32)
+    facility: Optional[int] = Field(default=None, ge=0, le=23)
 
 class LogIngestRequest(BaseModel):
-    hostname: str
-    events: List[LogIngestEntry] = Field(..., max_length=50)
+    hostname: str = Field(..., min_length=1, max_length=255)
+    # Gemeldete Geraete-IP; ohne Angabe gilt die IP des Absenders. Wird gebraucht,
+    # wenn ein Sammler (z.B. n8n) die Logs fuer ein anderes Geraet liefert.
+    ip_address: Optional[str] = Field(default=None, max_length=45)
+    device_type: Optional[str] = Field(default=None, pattern="^[a-z0-9_-]{1,50}$")
+    events: List[LogIngestEntry] = Field(..., max_length=500)
 
 class LogIngestResponse(BaseModel):
     accepted: int
+    duplicates: int = 0
     message: str = "ok"
 
 class AgentDecommissionRequest(BaseModel):
@@ -275,16 +291,19 @@ class CaddyConfigResponse(BaseModel):
     last_error: Optional[str] = None
 
 class CaddyApplyRequest(BaseModel):
-    caddyfile: str
+    caddyfile: str = ""
     save: bool = True
-    mode: Optional[str] = Field(default=None, pattern="^(http|letsencrypt|custom)$")
+    mode: Optional[str] = Field(default=None, pattern="^(http|letsencrypt|custom|internal)$")
     domain: Optional[str] = None
     letsencrypt_email: Optional[str] = None
+    # Zusaetzliche Adressen (IPs/Namen), die per HTTPS erreichbar sein sollen
+    extra_hosts: List[str] = []
 
 class CaddyTemplateRequest(BaseModel):
     domain: Optional[str] = None
-    mode: str = Field(..., pattern="^(http|letsencrypt|custom)$")
+    mode: str = Field(..., pattern="^(http|letsencrypt|custom|internal)$")
     letsencrypt_email: Optional[str] = None
+    extra_hosts: List[str] = []
 
 # Netzwerk / DNS
 class DnsConfigUpdate(BaseModel):
