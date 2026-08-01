@@ -1,4 +1,4 @@
-﻿# LogBot v2026.07.31.23.00.00
+﻿# LogBot v2026.07.31.23.30.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -260,6 +260,12 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.07.31.23.30.00 (2026-07-31)
+- **FRITZ!Box-Logs anbindbar:** `POST /api/agents/ingest` nimmt jetzt Lieferungen von Sammlern (z. B. n8n) an — `ip_address`, `device_type` und pro Eintrag `timestamp`/`event_id`/`group`/`facility`. Das gemeldete Gerät erscheint mit eigener IP und eigenem Namen in der Geräteliste statt unter der IP des Sammlers. Paketgröße 50 → 1000.
+- **Keine doppelten Logs mehr:** Einträge mit eigenem Zeitstempel bekommen einen `dedup_key`; wiederholte Lieferungen derselben Ereignisse werden verworfen (`ON CONFLICT DO NOTHING`). Die Antwort meldet `accepted` und `duplicates`. Bestands-Datenbanken bekommen Spalte + Index beim Start automatisch.
+- **Einstufung von FRITZ!Box-Ereignissen** (`backend/app/fritzbox.py`): die Box liefert keinen Schweregrad — bekannte Ereignis-IDs werden über eine Tabelle eingestuft, unbekannte über Stichwörter. Die Dienstnamen (`fritzbox-net`, `-wlan`, `-sys`, `-auth`, `-audit`) zählen zu den vorhandenen Logtyp-Kategorien.
+- **UI:** Geräteart „FRITZ!Box" mit Klarnamen in Geräteliste, Geräte-Ansicht und Log-Filter.
+
 ### v2026.07.31.23.00.00 (2026-07-31)
 - **Reverse Proxy:** Port 80 bleibt in jeder Konfiguration ein vollwertiger Zugang (kein Zwangs-Redirect mehr) – IP und FQDN funktionieren parallel auf 80 und 443. Konfiguration wird vor dem Anwenden geprüft, bei Fehler automatischer Rollback. Neu: selbstsigniertes HTTPS (interne CA), zusätzliche HTTPS-Adressen, „Zurück auf HTTP" und Notausstieg `CADDY_FORCE_HTTP=true`. FIX: manuelle Änderungen im Caddyfile-Editor wurden verworfen.
 - **Logs:** Filter nach **Logtypen** – Schweregrad-Gruppen, Kategorie (Auth, Kernel, Netzwerk, Firewall, Container, Cron, Mail, System, Audit), Syslog-Facility und Geräteart. Filter stehen in der URL und gelten auch für den Export.

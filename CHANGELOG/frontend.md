@@ -2,6 +2,11 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.07.31.23.30.00
+### Added
+- Geräteart **FRITZ!Box** wird in Geräteliste, Geräte-Ansicht und Log-Filter mit Klarnamen
+  angezeigt (statt `fritzbox`) und ist im Typ-Filter der Geräteliste auswählbar.
+
 ## 2026.07.31.23.00.00
 ### Added
 - **Hinweis bei unverschlüsselter Verbindung** (`components/InsecureConnectionBanner.vue`):

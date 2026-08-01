@@ -133,6 +133,7 @@ function typeLabel(t) {
     windows_agent: 'Windows-Agent',
     linux_agent: 'Linux-Agent',
     unifi_ap: 'UniFi AP',
+    fritzbox: 'FRITZ!Box',
     linux: 'Linux',
     windows: 'Windows',
     unknown: 'Unbekannt',

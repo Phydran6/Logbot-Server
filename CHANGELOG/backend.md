@@ -2,6 +2,33 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.07.31.23.30.00
+### Added
+- **Ingest für Sammler erweitert** (`POST /api/agents/ingest`). Bisher konnte ein Agent nur
+  eigene Logs melden — Hostname kam aus dem Payload, die IP war die des Absenders, ein
+  Zeitstempel war nicht vorgesehen. Neu sind optional:
+  - `ip_address` / `device_type` im Request: ein Sammler (z. B. n8n) meldet die Logs eines
+    *anderen* Geräts, das dann mit **eigener IP, eigenem Hostnamen und eigener Geräteart**
+    in der Geräteliste steht statt unter der IP des Sammlers.
+  - pro Eintrag `timestamp`, `event_id`, `group`, `facility` sowie optionales `level`/`source`
+    (bisher Pflicht mit Default). Ohne `timestamp` gilt weiterhin die Empfangszeit.
+  - Paketgröße von 50 auf 1000 Einträge angehoben (die FRITZ!Box liefert ~500 auf einmal).
+- **Duplikate werden verworfen statt gespeichert.** Einträge mit eigenem `timestamp` bekommen
+  einen `dedup_key` (SHA256 aus Hostname, Zeit, Ereignis-ID und Text); der Insert läuft mit
+  `ON CONFLICT DO NOTHING` gegen einen partiellen Unique-Index. Damit darf dieselbe Quelle
+  beliebig oft ihren kompletten Puffer schicken — gespeichert wird nur, was neu ist. Die
+  Antwort enthält jetzt `accepted` **und** `duplicates`. Doppelte innerhalb einer Lieferung
+  werden schon vor dem Insert zusammengefasst.
+- **Einstufung von FRITZ!Box-Ereignissen** (`app/fritzbox.py`): die Box liefert keinen
+  Schweregrad, nur eine Ereignis-ID. Bekannte IDs werden über eine Tabelle eingestuft
+  (z. B. 503 „Anmeldung gescheitert" → `warning`, 122 „VPN-Fehler" → `error`, 121
+  „VPN getrennt" → `warning`), unbekannte über Stichwörter im Meldungstext. Zusätzlich
+  entsteht ein Dienstname aus der Gruppe (`fritzbox-net`, `fritzbox-wlan`, `fritzbox-sys`,
+  `fritzbox-auth`, `fritzbox-audit`). Greift nur bei `device_type: "fritzbox"`.
+- **Log-Kategorien erweitert** (`routes/logs.py`): die FRITZ!Box-Dienstnamen zählen zu
+  „Anmeldung & Rechte", „Netzwerk", „System & Dienste" und „Audit" — die vorhandenen
+  Logtyp-Filter greifen also ohne Zusatzarbeit.
+
 ## 2026.07.31.23.00.00
 ### Fixed
 - **Reverse Proxy sperrt sich nicht mehr aus.** Die erzeugte Caddyfile leitete Port 80

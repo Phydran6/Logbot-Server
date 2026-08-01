@@ -1,7 +1,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.31.23.00.00
+# Version:     2026.07.31.23.30.00
 # Beschreibung: LogBot - Einstufung von FRITZ!Box-Ereignissen (Level + Source)
 # ==============================================================================
 """Die FRITZ!Box liefert im Ereignisprotokoll keinen Schweregrad, sondern nur

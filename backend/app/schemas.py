@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.11.13.03.42
+# Version:     2026.07.31.23.30.00
 # Changelog:   ../../CHANGELOG/backend.md
 # Beschreibung: LogBot - Pydantic Schemas
 # ==============================================================================
@@ -236,7 +236,7 @@ class LogIngestRequest(BaseModel):
     # wenn ein Sammler (z.B. n8n) die Logs fuer ein anderes Geraet liefert.
     ip_address: Optional[str] = Field(default=None, max_length=45)
     device_type: Optional[str] = Field(default=None, pattern="^[a-z0-9_-]{1,50}$")
-    events: List[LogIngestEntry] = Field(..., max_length=500)
+    events: List[LogIngestEntry] = Field(..., max_length=1000)
 
 class LogIngestResponse(BaseModel):
     accepted: int

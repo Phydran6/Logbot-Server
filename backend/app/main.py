@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.18.16.00.00
+# Version:     2026.07.31.23.30.00
 # Changelog:   ../../CHANGELOG/backend.md
 # Beschreibung: LogBot - FastAPI Hauptanwendung
 # ==============================================================================
@@ -432,7 +432,7 @@ async def ingest_logs(
             pg_insert(Log).values(rows)
             .on_conflict_do_nothing(
                 index_elements=[Log.dedup_key],
-                index_where=Log.dedup_key.isnot(None),
+                index_where=Log.dedup_key.is_not(None),
             )
             .returning(Log.id)
         )

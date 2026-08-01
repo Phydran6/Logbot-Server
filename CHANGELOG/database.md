@@ -3,6 +3,14 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.07.31.23.30.00
+### Added
+- **`logs.dedup_key`** (`VARCHAR(64)`) plus partieller Unique-Index
+  `idx_logs_dedup_key ... WHERE dedup_key IS NOT NULL` für die Duplikat-Erkennung beim
+  HTTPS-Ingest. Partiell, damit die bestehenden Syslog-Zeilen (Schlüssel NULL) unberührt
+  bleiben. Bestands-Datenbanken bekommen beides beim Start über eine Migration in
+  `backend/app/main.py` (`CREATE INDEX CONCURRENTLY`, blockiert keine Schreibzugriffe).
+
 ## 2026.07.31.21.40.00
 ### Added
 - **`install.sh` als One-Liner nutzbar**: `curl -sSL .../install.sh | sudo bash`. Fehlt das

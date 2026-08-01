@@ -23,6 +23,7 @@
         <select v-model="deviceType" class="rounded px-3 py-2" :style="inputStyle">
           <option value="">Alle Typen</option>
           <option value="unifi_ap">UniFi AP</option>
+          <option value="fritzbox">FRITZ!Box</option>
           <option value="linux">Linux</option>
           <option value="windows">Windows</option>
           <option value="syslog">Syslog</option>
@@ -312,6 +313,7 @@ function typeLabel(t) {
     windows_agent: 'Windows-Agent',
     linux_agent: 'Linux-Agent',
     unifi_ap: 'UniFi AP',
+    fritzbox: 'FRITZ!Box',
     linux: 'Linux',
     windows: 'Windows',
     unknown: 'Unbekannt'
