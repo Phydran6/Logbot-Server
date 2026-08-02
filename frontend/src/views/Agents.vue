@@ -1,211 +1,209 @@
-﻿<!-- ==============================================================================
+<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.07.18.16.00.00
-     Beschreibung: LogBot - Agents/Geräte Übersicht mit Theme-Support
+     Version:     2026.08.02.14.00.00
+     Changelog:   ../../../CHANGELOG/frontend.md
+     Beschreibung: LogBot - Geräteübersicht. Klick auf eine Karte öffnet die
+                   Log-Ansicht des Geräts.
      ============================================================================== -->
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold mb-6" :style="{ color: 'var(--color-text-primary)' }">Agents / Geräte</h1>
-    
-    <!-- Suche -->
-    <div class="rounded-lg shadow p-4 mb-6" :style="cardStyle">
-      <div class="flex gap-4">
-        <input
-          v-model="search"
-          type="text"
-          placeholder="Suche nach Hostname, IP oder MAC..."
-          class="flex-1 rounded px-3 py-2"
-          :style="inputStyle"
-          @keyup.enter="loadAgents"
-        >
-        <select v-model="deviceType" class="rounded px-3 py-2" :style="inputStyle">
-          <option value="">Alle Typen</option>
-          <option value="unifi_ap">UniFi AP</option>
-          <option value="fritzbox">FRITZ!Box</option>
-          <option value="linux">Linux</option>
-          <option value="windows">Windows</option>
-          <option value="syslog">Syslog</option>
-          <option value="windows_agent">Windows-Agent</option>
-          <option value="linux_agent">Linux-Agent</option>
-          <option value="unknown">Unbekannt</option>
+  <div class="page">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Geräte</h2>
+        <p class="page-subtitle">
+          {{ total.toLocaleString('de-DE') }} erfasst · {{ onlineCount }} gerade online
+        </p>
+      </div>
+      <button class="btn btn-secondary btn-sm" :disabled="loading" @click="loadAgents">
+        <AppIcon name="refresh" :size="16" />
+        Aktualisieren
+      </button>
+    </div>
+
+    <!-- ================================================================
+         SUCHE & FILTER
+         ================================================================ -->
+    <div class="card mb-4">
+      <div class="card-body flex flex-col sm:flex-row gap-3">
+        <div class="search-wrap flex-1">
+          <AppIcon name="search" :size="16" class="search-icon" />
+          <input
+            v-model="search"
+            type="text"
+            placeholder="Hostname, IP oder MAC…"
+            class="input pl-9"
+            @keyup.enter="applySearch"
+          >
+        </div>
+        <select v-model="deviceType" class="select sm:w-56" @change="applySearch">
+          <option value="">Alle Gerätearten</option>
+          <option v-for="(label, key) in TYPE_LABELS" :key="key" :value="key">{{ label }}</option>
         </select>
-        <button
-          @click="loadAgents"
-          class="text-white rounded px-4 py-2 hover:opacity-90"
-          :style="{ backgroundColor: 'var(--color-primary)' }"
-        >
-          Suchen
-        </button>
+        <button class="btn btn-primary" @click="applySearch">Suchen</button>
       </div>
     </div>
-    
-    <!-- Agents Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <!-- Klick auf die Karte oeffnet die Log-Ansicht dieses Geraets -->
-      <div
+
+    <!-- ================================================================
+         GERÄTE
+         ================================================================ -->
+    <div v-if="loading && !agents.length" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div v-for="n in 6" :key="n" class="card p-5 space-y-3">
+        <div class="skeleton h-5 w-2/3" />
+        <div class="skeleton h-3 w-1/3" />
+        <div class="skeleton h-3 w-full" />
+        <div class="skeleton h-3 w-4/5" />
+      </div>
+    </div>
+
+    <div v-else-if="agents.length" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <article
         v-for="agent in agents"
         :key="agent.id"
-        class="rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer"
-        :style="cardStyle"
+        class="card card-hover device-card"
         :title="`Logs von ${agent.hostname} anzeigen`"
         @click="openDevice(agent)"
       >
-        <div class="flex justify-between items-start mb-4">
-          <div>
-            <h3 class="font-semibold text-lg" :style="{ color: 'var(--color-text-primary)' }">{{ agent.hostname }}</h3>
-            <p class="text-sm" :style="{ color: 'var(--color-text-muted)' }">{{ agent.ip_address }}</p>
+        <!-- Kopf -->
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div class="min-w-0">
+            <h3 class="device-name">{{ agent.hostname }}</h3>
+            <p class="device-ip font-mono">{{ agent.ip_address || 'keine IP' }}</p>
           </div>
-          <span 
-            class="px-2 py-1 text-xs rounded-full"
-            :class="isOnline(agent) ? 'bg-green-500 text-white' : 'bg-gray-500 text-white'"
-          >
+          <span class="badge" :class="isOnline(agent) ? 'badge-success' : 'badge-neutral'">
+            <span class="status-dot" :class="isOnline(agent) ? 'status-dot-online' : 'status-dot-offline'" />
             {{ isOnline(agent) ? 'Online' : 'Offline' }}
           </span>
         </div>
-        
-        <div class="space-y-2 text-sm">
-          <div class="flex justify-between">
-            <span :style="{ color: 'var(--color-text-muted)' }">Typ:</span>
-            <span :style="{ color: 'var(--color-text-primary)' }">{{ typeLabel(agent.device_type) }}</span>
-          </div>
-          <div v-if="agent.mac_address" class="flex justify-between">
-            <span :style="{ color: 'var(--color-text-muted)' }">MAC:</span>
-            <span class="font-mono" :style="{ color: 'var(--color-text-primary)' }">{{ agent.mac_address }}</span>
-          </div>
-          <div class="flex justify-between">
-            <span :style="{ color: 'var(--color-text-muted)' }">Zuletzt gesehen:</span>
-            <span :style="{ color: 'var(--color-text-primary)' }">{{ formatTime(agent.last_seen) }}</span>
-          </div>
-          <div class="flex justify-between">
-            <span :style="{ color: 'var(--color-text-muted)' }">Erstmals gesehen:</span>
-            <span :style="{ color: 'var(--color-text-primary)' }">{{ formatTime(agent.first_seen) }}</span>
-          </div>
-        </div>
-        
-        <!-- Metadata wenn vorhanden -->
-        <div v-if="agent.metadata && Object.keys(agent.metadata).length" class="mt-4 pt-4 border-t" :style="{ borderColor: 'var(--color-border)' }">
-          <p class="text-xs mb-2" :style="{ color: 'var(--color-text-muted)' }">Metadata:</p>
-          <div class="text-xs space-y-1">
-            <div v-for="(value, key) in agent.metadata" :key="key" class="flex justify-between">
-              <span :style="{ color: 'var(--color-text-muted)' }">{{ key }}:</span>
-              <span :style="{ color: 'var(--color-text-primary)' }">{{ value }}</span>
-            </div>
-          </div>
-        </div>
-        
-        <!-- Retention-Anzeige -->
-        <div v-if="agent.retention_max_logs || agent.retention_days" class="mt-3 pt-3 border-t text-xs" :style="{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }">
-          <span v-if="agent.retention_max_logs">Max {{ agent.retention_max_logs.toLocaleString('de-DE') }} Logs</span>
-          <span v-if="agent.retention_max_logs && agent.retention_days"> · </span>
-          <span v-if="agent.retention_days">{{ agent.retention_days }} Tage</span>
-        </div>
 
-        <!-- Actions -->
-        <div class="mt-4 pt-4 border-t flex justify-between items-center" :style="{ borderColor: 'var(--color-border)' }">
+        <!-- Eckdaten -->
+        <dl class="device-facts">
+          <div>
+            <dt>Art</dt>
+            <dd>{{ typeLabel(agent.device_type) }}</dd>
+          </div>
+          <div v-if="agent.mac_address">
+            <dt>MAC</dt>
+            <dd class="font-mono">{{ agent.mac_address }}</dd>
+          </div>
+          <div>
+            <dt>Zuletzt gesehen</dt>
+            <dd>{{ formatTime(agent.last_seen) }}</dd>
+          </div>
+          <div>
+            <dt>Erstmals gesehen</dt>
+            <dd>{{ formatTime(agent.first_seen) }}</dd>
+          </div>
+        </dl>
+
+        <!-- Aufbewahrung -->
+        <p
+          v-if="agent.retention_max_logs || agent.retention_days"
+          class="device-retention"
+        >
+          <AppIcon name="trash" :size="13" />
+          <span v-if="agent.retention_max_logs">max. {{ agent.retention_max_logs.toLocaleString('de-DE') }} Logs</span>
+          <span v-if="agent.retention_max_logs && agent.retention_days">·</span>
+          <span v-if="agent.retention_days">älter als {{ agent.retention_days }} Tage</span>
+        </p>
+
+        <!-- Aktionen -->
+        <div class="device-actions">
           <router-link
             :to="{ name: 'DeviceLogs', params: { hostname: agent.hostname } }"
-            class="hover:underline text-sm"
-            :style="{ color: 'var(--color-primary)' }"
+            class="link text-sm"
             @click.stop
-          >
-            Logs anzeigen →
-          </router-link>
-          <div class="flex gap-3">
+          >Logs anzeigen →</router-link>
+
+          <div class="flex items-center gap-1">
             <button
+              class="btn-icon"
+              title="Aufbewahrung einstellen"
+              aria-label="Aufbewahrung einstellen"
               @click.stop="openRetention(agent)"
-              class="text-xs hover:opacity-70"
-              :style="{ color: 'var(--color-text-muted)' }"
-              title="Retention-Policy einstellen"
-            >⚙ Retention</button>
+            >
+              <AppIcon name="settings" :size="16" />
+            </button>
             <button
+              class="btn-icon device-delete"
+              title="Gerät löschen"
+              aria-label="Gerät löschen"
               @click.stop="deleteAgent(agent)"
-              class="text-sm hover:opacity-70"
-              :style="{ color: 'var(--color-danger)' }"
-            >Löschen</button>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Leer-Zustand -->
-    <div v-if="!loading && !agents.length" class="rounded-lg shadow p-12 text-center" :style="cardStyle">
-       <p :style="{ color: 'var(--color-text-muted)' }">Keine Agents gefunden</p>
-       <p class="text-sm mt-2" :style="{ color: 'var(--color-text-muted)' }">Agents werden automatisch erstellt wenn Logs empfangen werden</p>
-    </div>
-    
-    <!-- Retention Modal -->
-    <div
-      v-if="retentionModal.open"
-      class="fixed inset-0 flex items-center justify-center p-4 z-50"
-      style="background: rgba(0,0,0,0.6)"
-      @click.self="retentionModal.open = false"
-    >
-      <div class="rounded-lg shadow-xl w-full max-w-md" :style="cardStyle">
-        <div class="px-5 py-4 border-b flex justify-between items-center" :style="{ borderColor: 'var(--color-border)' }">
-          <h2 class="font-semibold" :style="{ color: 'var(--color-text-primary)' }">
-            Retention – {{ retentionModal.hostname }}
-          </h2>
-          <button @click="retentionModal.open = false" :style="{ color: 'var(--color-text-muted)' }">✕</button>
-        </div>
-        <div class="p-5 space-y-4">
-          <p class="text-sm" :style="{ color: 'var(--color-text-muted)' }">
-            Leer lassen = kein Limit. Die Policy wird stündlich automatisch durchgesetzt.
-          </p>
-          <div class="flex flex-col gap-1">
-            <label class="text-sm font-medium" :style="{ color: 'var(--color-text-secondary)' }">Max. Logs gesamt</label>
-            <input
-              v-model.number="retentionModal.max_logs"
-              type="number"
-              min="1000"
-              placeholder="z.B. 50000"
-              class="rounded px-3 py-2"
-              :style="inputStyle"
             >
-          </div>
-          <div class="flex flex-col gap-1">
-            <label class="text-sm font-medium" :style="{ color: 'var(--color-text-secondary)' }">Logs älter als X Tage löschen</label>
-            <input
-              v-model.number="retentionModal.days"
-              type="number"
-              min="1"
-              placeholder="z.B. 30"
-              class="rounded px-3 py-2"
-              :style="inputStyle"
-            >
-          </div>
-          <div v-if="retentionModal.error" class="text-sm px-3 py-2 rounded" :style="{ backgroundColor: 'var(--color-surface-elevated)', color: 'var(--color-danger)', border: '1px solid var(--color-danger)' }">
-            {{ retentionModal.error }}
-          </div>
-          <div class="flex gap-2 justify-end pt-2 border-t" :style="{ borderColor: 'var(--color-border)' }">
-            <button @click="retentionModal.open = false" class="px-4 py-2 rounded text-sm" :style="buttonSecondaryStyle">Abbrechen</button>
-            <button @click="executeRetention" class="px-4 py-2 rounded text-sm text-white" :style="{ backgroundColor: 'var(--color-warning, #f59e0b)' }">Jetzt bereinigen</button>
-            <button @click="saveRetention" class="px-4 py-2 rounded text-sm text-white" :style="{ backgroundColor: 'var(--color-primary)' }">Speichern</button>
+              <AppIcon name="trash" :size="16" />
+            </button>
           </div>
         </div>
+      </article>
+    </div>
+
+    <!-- Leer -->
+    <div v-else class="card">
+      <div class="empty-state">
+        <AppIcon name="agents" :size="30" />
+        <p class="empty-state-title">Keine Geräte gefunden</p>
+        <p class="text-sm">
+          {{ search || deviceType
+            ? 'Für diese Suche gibt es keinen Treffer.'
+            : 'Geräte erscheinen automatisch, sobald sie Logs senden.' }}
+        </p>
       </div>
     </div>
 
-    <!-- Pagination -->
-    <div v-if="total > pageSize" class="mt-6 flex justify-center gap-2">
-      <button
-        @click="page--; loadAgents()"
-        :disabled="page <= 1"
-        class="px-4 py-2 rounded disabled:opacity-50"
-        :style="buttonSecondaryStyle"
-      >
-         <- Zurueck
+    <!-- ================================================================
+         PAGINATION
+         ================================================================ -->
+    <div v-if="total > pageSize" class="flex items-center justify-center gap-2 mt-5">
+      <button class="btn btn-secondary btn-sm" :disabled="page <= 1" @click="goToPage(page - 1)">
+        <AppIcon name="chevronLeft" :size="16" /> Zurück
       </button>
-      <span class="px-4 py-2" :style="{ color: 'var(--color-text-secondary)' }">Seite {{ page }} von {{ Math.ceil(total / pageSize) }}</span>
-      <button
-        @click="page++; loadAgents()"
-        :disabled="page * pageSize >= total"
-        class="px-4 py-2 rounded disabled:opacity-50"
-        :style="buttonSecondaryStyle"
-      >
-         Weiter ->
+      <span class="text-sm tabular" style="color: var(--color-text-muted)">
+        Seite {{ page }} von {{ pageCount }}
+      </span>
+      <button class="btn btn-secondary btn-sm" :disabled="page >= pageCount" @click="goToPage(page + 1)">
+        Weiter <AppIcon name="chevronRight" :size="16" />
       </button>
+    </div>
+
+    <!-- ================================================================
+         AUFBEWAHRUNG (MODAL)
+         ================================================================ -->
+    <div v-if="retentionModal.open" class="modal-backdrop" @click.self="retentionModal.open = false">
+      <div class="modal max-w-md">
+        <div class="card-header">
+          <span class="card-title">Aufbewahrung – {{ retentionModal.hostname }}</span>
+          <button class="btn-icon" aria-label="Schließen" @click="retentionModal.open = false">
+            <AppIcon name="close" :size="18" />
+          </button>
+        </div>
+
+        <div class="card-body space-y-4 overflow-y-auto">
+          <p class="text-sm" style="color: var(--color-text-muted)">
+            Leer lassen = kein Limit. Die Regel wird stündlich automatisch angewendet.
+          </p>
+
+          <div>
+            <label class="label">Höchstzahl gespeicherter Logs</label>
+            <input v-model.number="retentionModal.max_logs" type="number" min="1000" placeholder="z. B. 50000" class="input">
+          </div>
+
+          <div>
+            <label class="label">Logs löschen, die älter sind als (Tage)</label>
+            <input v-model.number="retentionModal.days" type="number" min="1" placeholder="z. B. 30" class="input">
+          </div>
+
+          <div v-if="retentionModal.error" class="login-error text-sm">
+            {{ retentionModal.error }}
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-ghost" @click="retentionModal.open = false">Abbrechen</button>
+          <button class="btn btn-secondary" @click="executeRetention">Jetzt bereinigen</button>
+          <button class="btn btn-primary" @click="saveRetention">Speichern</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -214,9 +212,21 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import AppIcon from '../components/AppIcon.vue'
 
 const authStore = useAuthStore()
 const router = useRouter()
+
+const TYPE_LABELS = {
+  syslog: 'Syslog',
+  windows_agent: 'Windows-Agent',
+  linux_agent: 'Linux-Agent',
+  fritzbox: 'FRITZ!Box',
+  unifi_ap: 'UniFi AP',
+  linux: 'Linux',
+  windows: 'Windows',
+  unknown: 'Unbekannt',
+}
 
 const agents = ref([])
 const total = ref(0)
@@ -236,24 +246,8 @@ const retentionModal = ref({
   error: '',
 })
 
-// Computed Styles
-const cardStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface)',
-  borderColor: 'var(--color-border)'
-}))
-
-const inputStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface-elevated)',
-  borderColor: 'var(--color-border)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border)'
-}))
-
-const buttonSecondaryStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface-elevated)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border)'
-}))
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const onlineCount = computed(() => agents.value.filter(isOnline).length)
 
 onMounted(async () => {
   await loadSettings()
@@ -276,7 +270,7 @@ async function loadAgents() {
   try {
     const params = new URLSearchParams({
       page: page.value,
-      page_size: pageSize
+      page_size: pageSize,
     })
     if (search.value) params.append('search', search.value)
     if (deviceType.value) params.append('device_type', deviceType.value)
@@ -291,8 +285,18 @@ async function loadAgents() {
   }
 }
 
-  async function deleteAgent(agent) {
-  if (!confirm(`Agent "${agent.hostname}" wirklich löschen?`)) return
+function applySearch() {
+  page.value = 1
+  loadAgents()
+}
+
+function goToPage(target) {
+  page.value = Math.min(Math.max(1, target), pageCount.value)
+  loadAgents()
+}
+
+async function deleteAgent(agent) {
+  if (!confirm(`Gerät "${agent.hostname}" wirklich löschen?`)) return
 
   try {
     await authStore.api(`/api/agents/${agent.id}`, { method: 'DELETE' })
@@ -308,41 +312,29 @@ function openDevice(agent) {
 }
 
 function typeLabel(t) {
-  const map = {
-    syslog: 'Syslog',
-    windows_agent: 'Windows-Agent',
-    linux_agent: 'Linux-Agent',
-    unifi_ap: 'UniFi AP',
-    fritzbox: 'FRITZ!Box',
-    linux: 'Linux',
-    windows: 'Windows',
-    unknown: 'Unbekannt'
-  }
-  return map[t] || t || 'Unbekannt'
+  return TYPE_LABELS[t] || t || 'Unbekannt'
 }
 
 function isOnline(agent) {
-  // Bevorzugt Server-Flag; wenn false, erlauben wir einen Client-Fallback (Toleranz bei Zeitdrift)
+  // Bevorzugt das Server-Flag; sonst selbst rechnen (Toleranz bei Zeitdrift).
   if (agent && agent.is_online === true) return true
   const lastSeen = agent?.last_seen
   if (!lastSeen) return false
-  const timeoutMs = offlineTimeout.value * 1000
-  const cutoff = Date.now() - timeoutMs
+  const cutoff = Date.now() - offlineTimeout.value * 1000
 
   let ts = String(lastSeen).trim()
-  // SQLAlchemy liefert oft 'YYYY-MM-DD HH:MM:SS' (ohne 'T' / TZ)
+  // SQLAlchemy liefert oft 'YYYY-MM-DD HH:MM:SS' (ohne 'T' / Zeitzone)
   if (ts.includes(' ')) ts = ts.replace(' ', 'T')
   const hasTZ = /[zZ]|[+-]\d{2}:?\d{2}$/.test(ts)
   if (!hasTZ) ts = `${ts}Z`
 
   const time = Date.parse(ts)
   if (!Number.isFinite(time)) return false
-  const computedOnline = time > cutoff
-  return agent?.is_online === false ? computedOnline : computedOnline
+  return time > cutoff
 }
 
 function formatTime(timestamp) {
-  if (!timestamp) return '-'
+  if (!timestamp) return '–'
   return new Date(timestamp).toLocaleString('de-DE')
 }
 
@@ -398,5 +390,99 @@ async function executeRetention() {
 }
 </script>
 
+<style scoped>
+.search-wrap {
+  position: relative;
+}
 
+.search-icon {
+  position: absolute;
+  top: 50%;
+  left: 0.75rem;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
 
+.device-card {
+  padding: 1.25rem;
+  cursor: pointer;
+}
+
+.device-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-ip {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.device-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+  font-size: 0.8125rem;
+}
+
+.device-facts dt {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin-bottom: 0.125rem;
+}
+
+.device-facts dd {
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-retention {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.875rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.device-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.device-delete:hover {
+  background-color: var(--danger-soft);
+  color: var(--color-danger);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.875rem 1.25rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.login-error {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius);
+  background-color: var(--danger-soft);
+  color: var(--color-danger);
+}
+</style>

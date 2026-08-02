@@ -269,9 +269,7 @@
                 <span v-else>–</span>
               </td>
               <td class="px-4 py-2.5">
-                <span class="px-2 py-0.5 text-xs rounded-full font-medium" :class="levelBadge(log.level)">
-                  {{ log.level || '–' }}
-                </span>
+                <span :class="levelBadge(log.level)">{{ log.level || '–' }}</span>
               </td>
               <td class="px-4 py-2.5 text-xs" :style="{ color: 'var(--color-text-secondary)' }">
                 {{ log.source || '–' }}
@@ -321,7 +319,7 @@
       <div class="rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] overflow-auto" :style="cardStyle">
         <div class="sticky top-0 px-5 py-4 border-b flex items-center justify-between" :style="{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }">
           <div class="flex items-center gap-3">
-            <span class="px-2 py-0.5 text-xs rounded-full font-medium" :class="levelBadge(selectedLog.level)">{{ selectedLog.level }}</span>
+            <span :class="levelBadge(selectedLog.level)">{{ selectedLog.level }}</span>
             <span class="font-semibold" :style="{ color: 'var(--color-text-primary)' }">{{ selectedLog.source }}</span>
             <span class="text-sm" :style="{ color: 'var(--color-text-muted)' }">@ {{ selectedLog.hostname }}</span>
           </div>
@@ -755,18 +753,17 @@ function severityButtonStyle(key) {
   return buttonSecondaryStyle.value
 }
 
+// Farben kommen aus dem Design-System (main.css), damit sie sich mit dem
+// Branding aendern und in beiden Themes lesbar bleiben.
 function levelBadge(level) {
-  const map = {
-    emergency: 'bg-red-700 text-white',
-    alert:     'bg-red-600 text-white',
-    critical:  'bg-red-500 text-white',
-    error:     'bg-orange-500 text-white',
-    warning:   'bg-yellow-500 text-black',
-    notice:    'bg-cyan-500 text-white',
-    info:      'bg-blue-500 text-white',
-    debug:     'bg-gray-500 text-white',
+  const key = (level || '').toLowerCase()
+  if (['emergency', 'emerg', 'panic', 'alert', 'critical', 'crit', 'error', 'err'].includes(key)) {
+    return 'badge badge-danger'
   }
-  return map[(level || '').toLowerCase()] || 'bg-gray-400 text-white'
+  if (['warning', 'warn'].includes(key)) return 'badge badge-warning'
+  if (key === 'notice') return 'badge badge-success'
+  if (['info', 'information', 'informational'].includes(key)) return 'badge badge-primary'
+  return 'badge badge-neutral'
 }
 </script>
 

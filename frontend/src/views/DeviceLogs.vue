@@ -1,84 +1,57 @@
 <!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.07.31.21.10.00
-     Beschreibung: LogBot - Log-Ansicht fuer EIN Geraet (Kopfdaten + Logliste).
-                   Aufruf ueber /devices/<hostname> aus Agents-Uebersicht,
-                   Dashboard oder der allgemeinen Logliste.
+     Version:     2026.08.02.14.00.00
+     Changelog:   ../../../CHANGELOG/frontend.md
+     Beschreibung: LogBot - Log-Ansicht fuer EIN Geraet (Steckbrief + Logliste).
+                   Aufruf ueber /devices/<hostname> aus der Geräteliste,
+                   dem Dashboard oder der allgemeinen Logliste.
      ============================================================================== -->
 
 <template>
-  <div class="p-6">
+  <div class="page">
     <!-- Kopfzeile -->
-    <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
-      <div class="flex items-center gap-3 min-w-0">
-        <router-link
-          to="/agents"
-          class="text-sm hover:underline whitespace-nowrap"
-          :style="{ color: 'var(--color-primary)' }"
-        >← Geräte</router-link>
-        <h1 class="text-2xl font-bold truncate" :style="{ color: 'var(--color-text-primary)' }">{{ hostname }}</h1>
-        <span
-          v-if="agent"
-          class="px-2 py-1 text-xs rounded-full"
-          :class="agent.is_online ? 'bg-green-500 text-white' : 'bg-gray-500 text-white'"
-        >{{ agent.is_online ? 'Online' : 'Offline' }}</span>
+    <div class="page-header">
+      <div class="min-w-0">
+        <router-link to="/agents" class="link text-sm inline-flex items-center gap-1">
+          <AppIcon name="chevronLeft" :size="14" /> Geräte
+        </router-link>
+        <div class="flex items-center gap-3 mt-1">
+          <h2 class="page-title truncate">{{ hostname }}</h2>
+          <span v-if="agent" class="badge" :class="agent.is_online ? 'badge-success' : 'badge-neutral'">
+            <span class="status-dot" :class="agent.is_online ? 'status-dot-online' : 'status-dot-offline'" />
+            {{ agent.is_online ? 'Online' : 'Offline' }}
+          </span>
+        </div>
       </div>
-      <router-link
-        to="/logs"
-        class="text-sm hover:underline"
-        :style="{ color: 'var(--color-primary)' }"
-      >Alle Logs →</router-link>
+      <router-link to="/logs" class="btn btn-secondary btn-sm">Alle Logs →</router-link>
     </div>
 
-    <!-- Geraete-Steckbrief -->
-    <div v-if="agent" class="rounded-lg shadow p-4 mb-4" :style="cardStyle">
-      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-sm">
-        <div>
-          <p class="text-xs mb-0.5" :style="{ color: 'var(--color-text-muted)' }">IP-Adresse</p>
-          <p class="font-mono" :style="{ color: 'var(--color-text-primary)' }">{{ agent.ip_address || '–' }}</p>
-        </div>
-        <div>
-          <p class="text-xs mb-0.5" :style="{ color: 'var(--color-text-muted)' }">MAC</p>
-          <p class="font-mono" :style="{ color: 'var(--color-text-primary)' }">{{ agent.mac_address || '–' }}</p>
-        </div>
-        <div>
-          <p class="text-xs mb-0.5" :style="{ color: 'var(--color-text-muted)' }">Typ</p>
-          <p :style="{ color: 'var(--color-text-primary)' }">{{ typeLabel(agent.device_type) }}</p>
-        </div>
-        <div>
-          <p class="text-xs mb-0.5" :style="{ color: 'var(--color-text-muted)' }">Zuletzt gesehen</p>
-          <p :style="{ color: 'var(--color-text-primary)' }">{{ formatTime(agent.last_seen) }}</p>
-        </div>
-        <div>
-          <p class="text-xs mb-0.5" :style="{ color: 'var(--color-text-muted)' }">Erstmals gesehen</p>
-          <p :style="{ color: 'var(--color-text-primary)' }">{{ formatTime(agent.first_seen) }}</p>
-        </div>
-        <div>
-          <p class="text-xs mb-0.5" :style="{ color: 'var(--color-text-muted)' }">Logs gespeichert</p>
-          <p :style="{ color: 'var(--color-text-primary)' }">
-            {{ agent.log_count != null ? agent.log_count.toLocaleString('de-DE') : '–' }}
-          </p>
-        </div>
-      </div>
+    <!-- Steckbrief -->
+    <div v-if="agent" class="card mb-4">
+      <div class="card-body">
+        <dl class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div v-for="fact in facts" :key="fact.label">
+            <dt class="fact-label">{{ fact.label }}</dt>
+            <dd class="fact-value" :class="fact.mono ? 'font-mono' : ''">{{ fact.value }}</dd>
+          </div>
+        </dl>
 
-      <div
-        v-if="agent.retention_max_logs || agent.retention_days"
-        class="mt-3 pt-3 border-t text-xs"
-        :style="{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }"
-      >
-        Retention:
-        <span v-if="agent.retention_max_logs">max. {{ agent.retention_max_logs.toLocaleString('de-DE') }} Logs</span>
-        <span v-if="agent.retention_max_logs && agent.retention_days"> · </span>
-        <span v-if="agent.retention_days">älter als {{ agent.retention_days }} Tage werden gelöscht</span>
+        <p v-if="agent.retention_max_logs || agent.retention_days" class="retention-note">
+          <AppIcon name="trash" :size="13" />
+          Aufbewahrung:
+          <span v-if="agent.retention_max_logs">max. {{ agent.retention_max_logs.toLocaleString('de-DE') }} Logs</span>
+          <span v-if="agent.retention_max_logs && agent.retention_days">·</span>
+          <span v-if="agent.retention_days">älter als {{ agent.retention_days }} Tage werden gelöscht</span>
+        </p>
       </div>
     </div>
 
-    <!-- Kein Agent-Eintrag (z.B. Logs von einem inzwischen geloeschten Geraet) -->
-    <div v-else-if="!loadingAgent" class="rounded-lg shadow p-4 mb-4 text-sm" :style="cardStyle">
-      <p :style="{ color: 'var(--color-text-muted)' }">
-        Zu diesem Hostnamen gibt es keinen Agent-Eintrag (mehr). Die gespeicherten Logs werden trotzdem angezeigt.
-      </p>
+    <!-- Kein Agent-Eintrag (z.B. Logs eines inzwischen geloeschten Geraets) -->
+    <div v-else-if="!loadingAgent" class="card mb-4">
+      <div class="card-body text-sm" style="color: var(--color-text-muted)">
+        Zu diesem Hostnamen gibt es keinen Geräte-Eintrag (mehr). Die gespeicherten Logs werden trotzdem angezeigt.
+      </div>
     </div>
 
     <!-- Logliste, fest auf dieses Geraet -->
@@ -91,6 +64,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import LogTable from '../components/LogTable.vue'
+import AppIcon from '../components/AppIcon.vue'
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -100,10 +74,18 @@ const loadingAgent = ref(true)
 
 const hostname = computed(() => String(route.params.hostname || ''))
 
-const cardStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface)',
-  borderColor: 'var(--color-border)',
-}))
+const facts = computed(() => {
+  const a = agent.value
+  if (!a) return []
+  return [
+    { label: 'IP-Adresse', value: a.ip_address || '–', mono: true },
+    { label: 'MAC', value: a.mac_address || '–', mono: true },
+    { label: 'Art', value: typeLabel(a.device_type) },
+    { label: 'Zuletzt gesehen', value: formatTime(a.last_seen) },
+    { label: 'Erstmals gesehen', value: formatTime(a.first_seen) },
+    { label: 'Logs gespeichert', value: a.log_count != null ? a.log_count.toLocaleString('de-DE') : '–' },
+  ]
+})
 
 onMounted(loadAgent)
 watch(hostname, loadAgent)
@@ -146,3 +128,32 @@ function formatTime(ts) {
   return new Date(ts).toLocaleString('de-DE')
 }
 </script>
+
+<style scoped>
+.fact-label {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin-bottom: 0.125rem;
+}
+
+.fact-value {
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.retention-note {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 1rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+</style>

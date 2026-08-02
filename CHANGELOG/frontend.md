@@ -2,6 +2,43 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.14.00.00
+### Changed
+- **Oberfläche neu gestaltet.** Grundlage ist ein Design-System in
+  `assets/css/main.css`: Tokens für Radien, Schatten, Abstände und Zustandsfarben plus
+  fertige Klassen (`.card`, `.btn`, `.input`, `.badge`, `.table`, `.stat-card`, `.modal`, …).
+  Die Zustandsfarben (Hover, „soft"-Flächen, Fokusring) entstehen per `color-mix()` aus den
+  Markenfarben — eine im Branding geänderte Primärfarbe zieht damit überall automatisch mit.
+- **Farbschema**: dunkler, kontrastreicher Hintergrund (`#16161f`) statt des blaugrauen
+  Vorgängers; hell entsprechend ruhiger. Bestehende Installationen, die die Farben nie
+  angepasst haben, werden beim Start automatisch übernommen (siehe `CHANGELOG/backend.md`).
+- **Seitenmenü**: Navigation in Gruppen (Überwachung / Verwaltung / System), eigene
+  Icon-Komponente (`components/AppIcon.vue`, Inline-SVG statt Emoji), aktiver Eintrag mit
+  Farbfläche und Markierungsbalken — auch im angedockten Zustand erkennbar. Marke, Theme-
+  Umschalter und Benutzer sitzen in eigenen Bereichen; darüber liegt eine Kopfleiste mit
+  dem Titel der aktuellen Seite.
+- **Anmeldung**: zweispaltig mit Markenseite (Logo, Tagline) und Formular, Passwort ein-/
+  ausblendbar, Fehler als Hinweisfeld statt roter Box, MFA-Schritt mit eigenem Code-Feld.
+- **Dashboard**: Kennzahlen als Kacheln mit Icon und Einordnung, die in die passend
+  gefilterte Log-Ansicht führen (z. B. „Fehler & kritisch" → `?min_severity=error`),
+  dazu Verteilung nach Schweregrad und aktivste Quellen als Balken sowie Ladeskelette.
+- **Geräte**: Karten mit Statuspunkt, Eckdaten als Definitionsliste und eigenen Knöpfen
+  für Aufbewahrung/Löschen; Aufbewahrungs-Dialog auf die neue Modal-Klasse umgestellt.
+- Log-Level-Abzeichen nutzen jetzt die Badge-Klassen des Design-Systems statt fester
+  Tailwind-Farben (`bg-red-500` …) — dadurch im hellen Theme lesbar und brandingfähig.
+
+### Fixed
+- **Zoom auf Mobilgeräten war gesperrt** (`user-scalable=no` in `index.html`) — entfernt.
+- Beim Start blitzte kurz ein weißer Hintergrund auf (`<body class="bg-gray-100">`);
+  die Seite startet jetzt direkt im Theme-Hintergrund.
+- Tastatur-Fokus ist durchgängig sichtbar (`:focus-visible`), Scrollbars folgen dem Theme.
+
+### Performance
+- Der globale Übergang `* { transition: … }` galt für **jedes** Element im Dokument und
+  kostete bei Loglisten mit tausenden Zeilen spürbar Rechenzeit. Er gilt jetzt nur noch für
+  die Bausteine, die beim Theme-Wechsel tatsächlich die Farbe wechseln; zusätzlich werden
+  Animationen bei `prefers-reduced-motion` abgeschaltet.
+
 ## 2026.07.31.23.30.00
 ### Added
 - Geräteart **FRITZ!Box** wird in Geräteliste, Geräte-Ansicht und Log-Filter mit Klarnamen

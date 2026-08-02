@@ -1,21 +1,21 @@
 <!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.07.31.21.10.00
+     Version:     2026.08.02.14.00.00
+     Changelog:   ../../../CHANGELOG/frontend.md
      Beschreibung: LogBot - Log-Ansicht ueber alle Hosts.
                    Filter/Tabelle/Export stecken in components/LogTable.vue und
                    werden mit der Geraete-Ansicht (DeviceLogs.vue) geteilt.
      ============================================================================== -->
 
 <template>
-  <div class="p-6">
-    <div class="flex items-center justify-between mb-4">
-      <h1 class="text-2xl font-bold" :style="{ color: 'var(--color-text-primary)' }">Logs</h1>
-      <router-link
-        to="/agents"
-        class="text-sm hover:underline"
-        :style="{ color: 'var(--color-primary)' }"
-      >Geräte-Übersicht →</router-link>
+  <div class="page">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Logs</h2>
+        <p class="page-subtitle">Alle Geräte · Filter stehen in der Adresszeile und lassen sich teilen</p>
+      </div>
+      <router-link to="/agents" class="btn btn-secondary btn-sm">Geräte-Übersicht →</router-link>
     </div>
 
     <LogTable sync-url />

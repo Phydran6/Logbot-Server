@@ -14,6 +14,7 @@
 import { defineStore } from 'pinia'
 import { ref, reactive } from 'vue'
 import { useThemeStore } from './themeStore'
+import { useAuthStore } from './auth'
 
 const API_BASE = '/api/branding'
 
@@ -97,18 +98,15 @@ export const useBrandingStore = defineStore('branding', () => {
     }
   }
   
+  // Schreibende Aufrufe laufen ueber den Auth-Store: die Endpunkte sind seit
+  // 2026.08.02 Admins vorbehalten und brauchen den Bearer-Token.
   async function saveConfig() {
     try {
-      const response = await fetch(`${API_BASE}/config`, {
+      await useAuthStore().api(`${API_BASE}/config`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config)
+        body: { ...config }
       })
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      
+
       applyCSS()
       updatePageMeta()
       
@@ -122,13 +120,7 @@ export const useBrandingStore = defineStore('branding', () => {
   
   async function resetToDefaults() {
     try {
-      const response = await fetch(`${API_BASE}/reset`, { method: 'POST' })
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      
-      const data = await response.json()
+      const data = await useAuthStore().api(`${API_BASE}/reset`, { method: 'POST' })
       Object.assign(config, data)
       
       applyCSS()
@@ -145,20 +137,14 @@ export const useBrandingStore = defineStore('branding', () => {
   async function uploadLogo(file) {
     const formData = new FormData()
     formData.append('file', file)
-    
+
     try {
-      const response = await fetch(`${API_BASE}/upload/logo`, {
+      const data = await useAuthStore().api(`${API_BASE}/upload/logo`, {
         method: 'POST',
         body: formData
       })
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      
-      const data = await response.json()
       config.logo_path = data.path
-      
+
       return true
     } catch (err) {
       console.error('[Branding] Logo-Upload Fehler:', err)
@@ -170,21 +156,15 @@ export const useBrandingStore = defineStore('branding', () => {
   async function uploadFavicon(file) {
     const formData = new FormData()
     formData.append('file', file)
-    
+
     try {
-      const response = await fetch(`${API_BASE}/upload/favicon`, {
+      const data = await useAuthStore().api(`${API_BASE}/upload/favicon`, {
         method: 'POST',
         body: formData
       })
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      
-      const data = await response.json()
       config.favicon_path = data.path
       updatePageMeta()
-      
+
       return true
     } catch (err) {
       console.error('[Branding] Favicon-Upload Fehler:', err)

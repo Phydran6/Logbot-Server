@@ -2,6 +2,26 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.14.00.00
+### Security
+- **Branding-Endpunkte waren ohne Anmeldung beschreibbar** (`app/branding.py`). `PUT /config`,
+  `POST /upload/logo`, `POST /upload/favicon` und `POST /reset` hingen an keiner Prüfung —
+  wer den Server erreichte, konnte Farben, Firmenname und vor allem **`custom_css`** setzen,
+  das die Oberfläche bei jedem Besucher ungefiltert in ein `<style>`-Element schreibt, und
+  beliebige Dateien ablegen. Alle vier verlangen jetzt einen Admin (`get_current_admin`).
+- **Pfad-Ausbruch beim Asset-Abruf**: `GET /assets/{filename}` reichte den Namen direkt an
+  `os.path.join` weiter — `../../etc/passwd` hätte damit jede lesbare Datei des Containers
+  ausgeliefert. Der Name muss jetzt exakt dem Muster der eigenen Upload-Routine entsprechen,
+  zusätzlich wird der aufgelöste Pfad gegen den Asset-Ordner geprüft.
+- **Uploads ohne Größenbegrenzung** konnten die Platte füllen: jetzt stückweises Schreiben
+  mit Abbruch bei 5 MB (`MAX_UPLOAD_BYTES`) und Aufräumen der angefangenen Datei.
+
+### Changed
+- Neue Standard-Farbschemata passend zum überarbeiteten Design. Damit bestehende
+  Installationen nicht beim alten Aussehen hängen bleiben, hebt `_migrate_legacy_schemes`
+  die gespeicherte Konfiguration **nur dann** auf die neuen Werte, wenn dort exakt die alten
+  Standardfarben stehen — selbst gewählte Farben bleiben unangetastet.
+
 ## 2026.08.02.13.30.00
 ### Fixed
 - **Ingest lehnte große Lieferungen ab.** Die FRITZ!Box liefert ihren kompletten Puffer auf

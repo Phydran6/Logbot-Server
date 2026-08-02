@@ -1,4 +1,4 @@
-﻿# LogBot v2026.07.31.23.30.00
+﻿# LogBot v2026.08.02.14.00.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -260,6 +260,14 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.08.02.14.00.00 (2026-08-02)
+- **Oberfläche neu gestaltet.** Neues Design-System (Farb-Tokens, Karten, Knöpfe, Formularfelder, Abzeichen, Tabellen) — die Zustandsfarben leiten sich aus der Markenfarbe ab, eine im Branding geänderte Primärfarbe zieht überall mit. Dunkles Schema kontrastreicher, helles ruhiger.
+- **Seitenmenü** mit gruppierter Navigation (Überwachung / Verwaltung / System), eigenen Icons statt Emoji und klar erkennbarem aktivem Eintrag — auch im angedockten Zustand. Darüber eine Kopfleiste mit dem Titel der aktuellen Seite.
+- **Anmeldung** zweispaltig mit Markenseite; **Dashboard** mit Kennzahl-Kacheln, die in die passend gefilterte Log-Ansicht führen, plus Verteilung nach Schweregrad und aktivsten Quellen; **Geräte** als Karten mit Statuspunkt.
+- SICHERHEIT: **Branding-Endpunkte waren ohne Anmeldung beschreibbar** — inklusive `custom_css`, das jedem Besucher ausgeliefert wird. Jetzt nur noch für Admins. Ebenfalls behoben: Pfad-Ausbruch beim Asset-Abruf und Uploads ohne Größenlimit.
+- FIX: Zoom auf Mobilgeräten war gesperrt; weißes Aufblitzen beim Start; Tastatur-Fokus jetzt durchgängig sichtbar.
+- PERFORMANCE: Der globale CSS-Übergang galt für jedes Element im Dokument und bremste lange Loglisten — gilt jetzt nur noch für die Bausteine, die beim Theme-Wechsel wirklich umfärben.
+
 ### v2026.07.31.23.30.00 (2026-07-31)
 - **FRITZ!Box-Logs anbindbar:** `POST /api/agents/ingest` nimmt jetzt Lieferungen von Sammlern (z. B. n8n) an — `ip_address`, `device_type` und pro Eintrag `timestamp`/`event_id`/`group`/`facility`. Das gemeldete Gerät erscheint mit eigener IP und eigenem Namen in der Geräteliste statt unter der IP des Sammlers. Paketgröße 50 → 1000.
 - **Keine doppelten Logs mehr:** Einträge mit eigenem Zeitstempel bekommen einen `dedup_key`; wiederholte Lieferungen derselben Ereignisse werden verworfen (`ON CONFLICT DO NOTHING`). Die Antwort meldet `accepted` und `duplicates`. Bestands-Datenbanken bekommen Spalte + Index beim Start automatisch.
