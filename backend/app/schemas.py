@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.31.23.30.00
+# Version:     2026.08.02.13.30.00
 # Changelog:   ../../CHANGELOG/backend.md
 # Beschreibung: LogBot - Pydantic Schemas
 # ==============================================================================
@@ -236,7 +236,9 @@ class LogIngestRequest(BaseModel):
     # wenn ein Sammler (z.B. n8n) die Logs fuer ein anderes Geraet liefert.
     ip_address: Optional[str] = Field(default=None, max_length=45)
     device_type: Optional[str] = Field(default=None, pattern="^[a-z0-9_-]{1,50}$")
-    events: List[LogIngestEntry] = Field(..., max_length=1000)
+    # Grosszuegig: die FRITZ!Box liefert ihren kompletten Puffer (schon ueber 800
+    # Eintraege gesehen). Sammler sollten trotzdem stueckeln - siehe n8n-Workflow.
+    events: List[LogIngestEntry] = Field(..., max_length=5000)
 
 class LogIngestResponse(BaseModel):
     accepted: int

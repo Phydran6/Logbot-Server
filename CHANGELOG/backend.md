@@ -2,6 +2,13 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.13.30.00
+### Fixed
+- **Ingest lehnte große Lieferungen ab.** Die FRITZ!Box liefert ihren kompletten Puffer auf
+  einmal — beobachtet wurden 800 Einträge, das Limit lag bei 500 („List should have at most
+  500 items"). Obergrenze jetzt **5000**. Zusätzlich stückelt der n8n-Workflow die Einträge
+  in Pakete zu 400, damit die Größe des Puffers keine Rolle mehr spielt.
+
 ## 2026.07.31.23.30.00
 ### Added
 - **Ingest für Sammler erweitert** (`POST /api/agents/ingest`). Bisher konnte ein Agent nur
