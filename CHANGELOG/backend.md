@@ -20,6 +20,10 @@ FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
     plus Entsperrung durch PIN oder Biometrie.
 - Neue Abhängigkeit: `webauthn`.
 
+### Security
+- **Webhook-Abruf ohne Bremse**: `GET /api/webhook/{id}/call` ist ohne Anmeldung erreichbar
+  (Token als Parameter) und liefert Logdaten — jetzt auf 60 Aufrufe pro Minute begrenzt.
+
 ### Performance
 - `GET /api/database/status` schätzt die Zeilenzahl über `pg_class.reltuples`, statt
   `count(*)` über die gesamte `logs`-Tabelle laufen zu lassen (bei Millionen Zeilen ein

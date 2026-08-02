@@ -330,8 +330,19 @@ async def apply_saved_dns_config():
 # Öffentlicher Webhook Endpoint
 # =============================================================================
 @app.get("/api/webhook/{webhook_id}/call", tags=["Webhooks"])
-async def call_webhook(webhook_id: int, token: str = Query(...), db: AsyncSession = Depends(get_db)):
-    """Öffentlicher Webhook-Endpoint für n8n/externe Tools. Auth via Token-Parameter."""
+@limiter.limit("60/minute")
+async def call_webhook(
+    request: Request,
+    webhook_id: int,
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Öffentlicher Webhook-Endpoint für n8n/externe Tools. Auth via Token-Parameter.
+
+    Mit Bremse: der Endpunkt ist ohne Anmeldung erreichbar und liefert Logdaten.
+    60 Aufrufe pro Minute reichen für Abholdienste wie n8n und begrenzen zugleich,
+    was ein Unbefugter mit geratenen Tokens anrichten kann.
+    """
     result = await db.execute(
         select(Webhook).where(Webhook.id == webhook_id, Webhook.token == token, Webhook.is_active == True)
     )
