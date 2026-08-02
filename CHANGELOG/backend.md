@@ -2,6 +2,29 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.18.00.00
+### Added
+- **Passkeys / WebAuthn** (`routes/passkey.py`): Anmeldung mit Windows Hello, Face ID,
+  Fingerabdruck oder Sicherheitsschlüssel statt Passwort und Einmalcode.
+  - Registrieren (angemeldet): `POST /register/options` → `POST /register/verify`;
+    verwalten über `GET/PUT/DELETE /credentials`.
+  - Anmelden (offen): `POST /login/options` → `POST /login/verify` liefert das Zugangstoken.
+    Ohne Benutzernamen sucht der Browser selbst einen passenden Passkey; ein unbekannter
+    Benutzername liefert trotzdem gültige Optionen, damit sich darüber keine Konten ausspähen
+    lassen.
+  - Herkunft und Domäne für die Signaturprüfung kommen aus `SITE_URL`, ersatzweise aus dem
+    `Origin`-Header. Jede Challenge gilt genau einmal und läuft nach 5 Minuten ab.
+  - Neue Tabelle `webauthn_credentials` (Startup-Migration und `db/init.sql`), `sign_count`
+    wird fortgeschrieben — er entlarvt geklonte Schlüssel.
+  - Bewusst **kein** zusätzlicher MFA-Schritt nach dem Passkey: er ist bereits Gerätebesitz
+    plus Entsperrung durch PIN oder Biometrie.
+- Neue Abhängigkeit: `webauthn`.
+
+### Performance
+- `GET /api/database/status` schätzt die Zeilenzahl über `pg_class.reltuples`, statt
+  `count(*)` über die gesamte `logs`-Tabelle laufen zu lassen (bei Millionen Zeilen ein
+  Sekunden-Scan bei jedem Aufruf der Systemzustand-Seite).
+
 ## 2026.08.02.16.00.00
 ### Added
 - **Externe Datenbank** (`app/config.py`): neue Umgebungsvariablen `DATABASE_URL` (komplette

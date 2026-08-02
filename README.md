@@ -1,4 +1,4 @@
-﻿# LogBot v2026.08.02.16.00.00
+﻿# LogBot v2026.08.02.18.00.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -260,6 +260,12 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.08.02.18.00.00 (2026-08-02)
+- **Anmeldung mit Passkey** (Windows Hello, Face ID, Fingerabdruck, Sicherheitsschlüssel). Einrichten unter *System → Anmeldesicherheit*, anmelden über den Knopf auf der Login-Seite. Der geheime Teil bleibt auf dem Gerät, die Signatur gilt nur für diese Adresse — eine nachgebaute Anmeldeseite bekommt nichts Verwertbares. Voraussetzung: HTTPS mit gültigem Zertifikat.
+- SICHERHEIT: **PostgreSQL war auf allen Netzwerkschnittstellen erreichbar** — der Port ist jetzt auf `127.0.0.1` beschränkt (`DB_BIND=0.0.0.0` hebt das bewusst wieder auf).
+- SICHERHEIT: Neues **`docker-compose.hardened.yml`** nimmt dem Backend die weitreichenden Container-Rechte (`privileged`, `pid: host`, `SYS_BOOT`). Sie existieren nur für den Neustart-Knopf und die DNS-Übernahme, heben aber die Trennung zwischen Container und Server praktisch auf. Start: `docker compose -f docker-compose.yml -f docker-compose.hardened.yml up -d`.
+- PERFORMANCE: Die Systemzustand-Seite zählt die Logzeilen nicht mehr einzeln durch, sondern nimmt die Schätzung der Datenbank.
+
 ### v2026.08.02.16.00.00 (2026-08-02)
 - **Externe Datenbank:** LogBot kann die Daten auf einem eigenen Datenbankserver ablegen und selbst nur noch als Anwendung laufen. Konfiguration über `DATABASE_URL` (oder `DB_HOST`/`DB_PORT`) und `DB_SSLMODE` in der `.env`, Start mit `docker compose -f docker-compose.yml -f docker-compose.external-db.yml up -d`. Der mitgelieferte Postgres-Container bleibt dabei stehen, das Volume unangetastet — der Rückweg ist offen. Unter *Systemzustand* steht, welche Datenbank tatsächlich aktiv ist und ob die Verbindung verschlüsselt läuft.
 - **Anmeldung über LDAP / Active Directory** (optional, unter *System → Verzeichnis*): Schlägt die lokale Anmeldung fehl, wird zusätzlich das Verzeichnis gefragt — lokale Konten bleiben unberührt. Gruppen lassen sich auf Rollen abbilden, eine Pflichtgruppe kann den Zugang begrenzen, neue Benutzer werden auf Wunsch beim ersten Anmelden angelegt. Ein Testfeld spielt eine echte Anmeldung durch und zeigt Gruppen und Rolle.

@@ -23,7 +23,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "5432:5432"
+      # Nur vom Server selbst erreichbar. Vorher war der Port auf allen
+      # Schnittstellen offen - die Datenbank hing damit ungeschuetzt im
+      # Netz und war nur durch das Passwort getrennt.
+      # Zugriff von aussen wirklich noetig? Dann DB_BIND=0.0.0.0 in der .env.
+      - "${DB_BIND:-127.0.0.1}:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-logbot} -d ${DB_NAME:-logbot}"]
       interval: 5s
@@ -59,6 +63,12 @@ services:
     build: ./backend
     container_name: logbot-backend
     restart: unless-stopped
+    # ACHTUNG, bewusst weitreichende Rechte: privileged + pid:host + SYS_BOOT
+    # existieren nur fuer den Neustart-Knopf unter "Einstellungen" (der Container
+    # startet damit den *Host* neu) und fuer das Lesen der Host-DNS-Konfiguration.
+    # Preis: wer im Backend Code ausfuehren kann, uebernimmt den ganzen Server.
+    # Wer den Neustart-Knopf nicht braucht, faehrt die Rechte herunter mit:
+    #   docker compose -f docker-compose.yml -f docker-compose.hardened.yml up -d
     privileged: true
     pid: "host"
     security_opt:

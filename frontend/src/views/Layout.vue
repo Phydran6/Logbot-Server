@@ -222,10 +222,11 @@ const navGroups = computed(() => [
     title: 'System',
     items: [
       { to: '/settings', name: 'Settings', icon: 'settings', label: 'Einstellungen' },
+      { to: '/settings/security', name: 'SecuritySettings', icon: 'lock', label: 'Anmeldesicherheit' },
       { to: '/settings/branding', name: 'BrandingSettings', icon: 'branding', label: 'Branding' },
       ...(auth.isAdmin
         ? [
-            { to: '/settings/ldap', name: 'LdapSettings', icon: 'lock', label: 'Verzeichnis (LDAP)' },
+            { to: '/settings/ldap', name: 'LdapSettings', icon: 'users', label: 'Verzeichnis (LDAP)' },
             { to: '/settings/archiving', name: 'ArchivingSettings', icon: 'download', label: 'Archivierung' },
           ]
         : []),

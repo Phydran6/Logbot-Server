@@ -117,8 +117,9 @@
           <div class="info-row"><span>Gesamt</span><span class="tabular">{{ fmt(health?.logs_total) }}</span></div>
           <div class="info-row"><span>Letzte 24 Stunden</span><span class="tabular">{{ fmt(health?.logs_last_24h) }}</span></div>
           <div class="info-row"><span>Ø pro Minute</span><span class="tabular">{{ fmt(logsPerMinute) }}</span></div>
-          <div v-if="database?.log_rows != null" class="info-row">
-            <span>Zeilen in der Tabelle</span><span class="tabular">{{ fmt(database.log_rows) }}</span>
+          <div v-if="database?.log_rows_estimated != null" class="info-row">
+            <span>Zeilen in der Tabelle</span>
+            <span class="tabular" title="Schätzung des Datenbank-Planers">≈ {{ fmt(database.log_rows_estimated) }}</span>
           </div>
         </div>
       </div>

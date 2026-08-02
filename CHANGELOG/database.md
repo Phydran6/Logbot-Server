@@ -3,6 +3,22 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.18.00.00
+### Security
+- **PostgreSQL war auf allen Netzwerkschnittstellen offen** (`ports: "5432:5432"`). Die
+  Datenbank hing damit im Netz und war nur durch das Passwort geschützt. Der Port ist jetzt an
+  `127.0.0.1` gebunden; wer den Zugriff von außen wirklich braucht, setzt `DB_BIND=0.0.0.0`.
+- **`docker-compose.hardened.yml`** (neu): nimmt dem Backend `privileged`, `pid: host`,
+  `seccomp=unconfined` und `SYS_BOOT` und setzt `no-new-privileges`. Diese Rechte existieren nur
+  für den Neustart-Knopf und das Auslesen der Host-DNS-Server; sie heben die Trennung zwischen
+  Container und Server praktisch auf. Ohne sie laufen alle Kernfunktionen weiter — nur der
+  Neustart-Knopf und die automatische DNS-Übernahme entfallen. Der Grund für die Rechte steht
+  jetzt auch als Warnung im Haupt-Compose.
+
+### Added
+- `webauthn_credentials` in `db/init.sql` (Passkeys) sowie `users.auth_source` für
+  Neuinstallationen.
+
 ## 2026.08.02.16.00.00
 ### Added
 - **`docker-compose.external-db.yml`**: LogBot mit einer Datenbank betreiben, die nicht Teil des

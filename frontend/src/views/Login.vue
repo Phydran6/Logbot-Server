@@ -97,6 +97,20 @@
           <button type="submit" class="btn btn-primary w-full" :disabled="loading">
             {{ loading ? 'Anmelden…' : 'Anmelden' }}
           </button>
+
+          <!-- Passkey: Windows Hello, Face ID, Fingerabdruck, Sicherheitsschlüssel -->
+          <template v-if="passkeySupported">
+            <div class="divider-text"><span>oder</span></div>
+            <button
+              type="button"
+              class="btn btn-secondary w-full"
+              :disabled="passkeyBusy"
+              @click="handlePasskey"
+            >
+              <AppIcon name="lock" :size="16" />
+              {{ passkeyBusy ? 'Warte auf Gerät…' : 'Mit Passkey anmelden' }}
+            </button>
+          </template>
         </form>
 
         <!-- Schritt 2: MFA-Code -->
@@ -144,6 +158,7 @@ import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/themeStore'
 import { useBrandingStore } from '../stores/brandingStore'
 import AppIcon from '../components/AppIcon.vue'
+import { isSupported as passkeyAvailable, describeError as describePasskeyError } from '../utils/webauthn'
 import pkg from '../../package.json'
 
 const router = useRouter()
@@ -158,6 +173,10 @@ const password = ref('')
 const showPassword = ref(false)
 const loading = ref(false)
 const error = ref('')
+
+// Passkey
+const passkeySupported = passkeyAvailable()
+const passkeyBusy = ref(false)
 
 // MFA-Schritt 2
 const mfaToken = ref(null)
@@ -225,6 +244,21 @@ async function handleLogin() {
     error.value = e.message
   } finally {
     loading.value = false
+  }
+}
+
+async function handlePasskey() {
+  passkeyBusy.value = true
+  error.value = ''
+  try {
+    // Benutzername ist optional: ist das Feld leer, sucht der Browser selbst
+    // einen passenden Passkey für diese Adresse heraus.
+    await auth.loginPasskey(username.value.trim())
+    router.push('/')
+  } catch (e) {
+    error.value = e.name ? describePasskeyError(e) : e.message
+  } finally {
+    passkeyBusy.value = false
   }
 }
 
@@ -403,6 +437,23 @@ async function handleMfa() {
 .password-toggle:hover {
   color: var(--color-text-primary);
   background-color: var(--hover-surface);
+}
+
+/* "oder"-Trenner zwischen Passwort- und Passkey-Anmeldung */
+.divider-text {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.divider-text::before,
+.divider-text::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background-color: var(--color-border);
 }
 
 .code-input {

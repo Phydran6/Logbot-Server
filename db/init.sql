@@ -69,6 +69,23 @@ CREATE INDEX IF NOT EXISTS idx_logs_facility ON logs(facility);
 ALTER TABLE logs ADD COLUMN IF NOT EXISTS dedup_key VARCHAR(64);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_dedup_key ON logs(dedup_key) WHERE dedup_key IS NOT NULL;
 
+-- Passkeys / WebAuthn (Anmeldung ohne Passwort)
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credential_id VARCHAR(512) UNIQUE NOT NULL,
+    public_key TEXT NOT NULL,
+    sign_count INTEGER NOT NULL DEFAULT 0,
+    name VARCHAR(100),
+    transports VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id);
+
+-- Herkunft eines Kontos: 'local' oder 'ldap'
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source VARCHAR(20) NOT NULL DEFAULT 'local';
+
 -- Webhooks-Tabelle
 CREATE TABLE IF NOT EXISTS webhooks (
     id SERIAL PRIMARY KEY,

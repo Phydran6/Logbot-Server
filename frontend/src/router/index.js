@@ -116,6 +116,13 @@ const routes = [
         component: () => import('../views/BrandingSettings.vue')
       },
 
+      // Eigene Anmeldesicherheit (Passkeys)
+      {
+        path: 'settings/security',
+        name: 'SecuritySettings',
+        component: () => import('../views/SecuritySettings.vue')
+      },
+
       // Anmeldung am Verzeichnis (LDAP / Active Directory)
       {
         path: 'settings/ldap',

@@ -2,6 +2,16 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.18.00.00
+### Added
+- **Passkeys**: neue Ansicht `views/SecuritySettings.vue` (*System → Anmeldesicherheit*) zum
+  Anlegen, Umbenennen und Entfernen eigener Passkeys, dazu ein Knopf **„Mit Passkey anmelden"**
+  auf der Anmeldeseite. `utils/webauthn.js` übersetzt zwischen base64url und den Binärdaten,
+  die der Browser erwartet, und übersetzt Browser-Fehler in verständliche Sätze
+  (abgebrochen, bereits hinterlegt, kein HTTPS …).
+- Fehlt HTTPS oder die Browser-Unterstützung, erscheinen die Passkey-Knöpfe gar nicht erst,
+  sondern ein Hinweis, woran es liegt.
+
 ## 2026.08.02.16.00.00
 ### Added
 - **Verzeichnis (LDAP)** — neue Ansicht `views/LdapSettings.vue` unter *System → Verzeichnis*:

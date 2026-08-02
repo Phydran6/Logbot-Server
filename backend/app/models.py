@@ -30,6 +30,27 @@ class User(Base):
     mfa_locked_until = Column(DateTime, nullable=True)
     app_login_tokens = relationship("AppLoginToken", back_populates="user", passive_deletes=True)
     mfa_backup_codes = relationship("MFABackupCode", back_populates="user", passive_deletes=True)
+    webauthn_credentials = relationship("WebAuthnCredential", back_populates="user", passive_deletes=True)
+
+
+class WebAuthnCredential(Base):
+    """Ein registrierter Passkey (Sicherheitsschlüssel, Windows Hello, Face ID …).
+
+    credential_id und public_key sind base64url-Text: so lassen sie sich ohne
+    Sonderbehandlung speichern und mit dem vergleichen, was der Browser schickt.
+    sign_count wächst bei jeder Nutzung und entlarvt geklonte Schlüssel.
+    """
+    __tablename__ = "webauthn_credentials"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    credential_id = Column(String(512), unique=True, nullable=False)
+    public_key = Column(Text, nullable=False)
+    sign_count = Column(Integer, default=0, nullable=False)
+    name = Column(String(100))
+    transports = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    user = relationship("User", back_populates="webauthn_credentials")
 
 
 class MFABackupCode(Base):

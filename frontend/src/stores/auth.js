@@ -65,6 +65,38 @@ export const useAuthStore = defineStore('auth', () => {
     await fetchUser()
   }
 
+  /**
+   * Anmeldung mit Passkey (WebAuthn).
+   * Zwei Schritte: Aufgabe vom Server holen, vom Gerät unterschreiben lassen,
+   * Signatur zurückschicken. Kein MFA-Schritt danach - der Passkey ist bereits
+   * Gerät + Entsperrung.
+   */
+  async function loginPasskey(username = '') {
+    const { getCredential } = await import('../utils/webauthn')
+
+    const optionsRes = await fetch('/api/auth/passkey/login/options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username }),
+    })
+    if (!optionsRes.ok) throw new Error(await parseError(optionsRes) || 'Passkey-Anmeldung nicht möglich')
+    const start = await optionsRes.json()
+
+    const credential = await getCredential(start.options)
+
+    const verifyRes = await fetch('/api/auth/passkey/login/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge_handle: start.challenge_handle, credential }),
+    })
+    if (!verifyRes.ok) throw new Error(await parseError(verifyRes) || 'Passkey wurde abgelehnt')
+
+    const data = await verifyRes.json()
+    token.value = data.access_token
+    localStorage.setItem('token', data.access_token)
+    await fetchUser()
+  }
+
   async function fetchUser() {
     user.value = await api('/api/auth/me')
   }
@@ -89,5 +121,5 @@ export const useAuthStore = defineStore('auth', () => {
     return res.json()
   }
 
-  return { token, user, isAuthenticated, isAdmin, login, loginMfa, logout, fetchUser, api }
+  return { token, user, isAuthenticated, isAdmin, login, loginMfa, loginPasskey, logout, fetchUser, api }
 })

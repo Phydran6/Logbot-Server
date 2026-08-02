@@ -85,9 +85,14 @@ async def database_status(
         info["connections"] = None
 
     try:
-        logs = (await db.execute(text("SELECT count(*) FROM logs"))).scalar()
-        info["log_rows"] = logs
+        # Bewusst die Schätzung des Planers statt count(*): bei Millionen Zeilen
+        # läuft count(*) durch die ganze Tabelle und blockiert diese Auskunft
+        # sekundenlang. Für "wie viel liegt hier ungefähr" reicht reltuples.
+        rows = (await db.execute(text(
+            "SELECT reltuples::bigint FROM pg_class WHERE relname = 'logs'"
+        ))).scalar()
+        info["log_rows_estimated"] = int(rows) if rows and rows > 0 else 0
     except Exception:
-        info["log_rows"] = None
+        info["log_rows_estimated"] = None
 
     return info

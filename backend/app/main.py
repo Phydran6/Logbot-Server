@@ -32,7 +32,7 @@ from .limiter import limiter
 from .models import Webhook, Log, Agent, AgentToken
 from sqlalchemy import func
 from .schemas import LogResponse, LogDetailResponse, LogIngestRequest, LogIngestResponse
-from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, database_router, ldap_router, archiving_router, caddy as caddy_router, network as network_router
+from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, database_router, ldap_router, archiving_router, passkey_router, caddy as caddy_router, network as network_router
 from .branding import branding_router
 
 # =============================================================================
@@ -98,6 +98,7 @@ app.include_router(settings_router)
 app.include_router(database_router)
 app.include_router(ldap_router)
 app.include_router(archiving_router)
+app.include_router(passkey_router)
 app.include_router(caddy_router.router)
 app.include_router(network_router.router)
 
@@ -155,6 +156,34 @@ async def ensure_agent_retention_columns():
         logger.info("agents retention columns ready")
     except Exception as exc:
         logger.warning("agents retention migration skipped: %s", exc)
+
+
+@app.on_event("startup")
+async def ensure_webauthn_table():
+    """Tabelle für Passkeys (WebAuthn) anlegen, falls noch nicht vorhanden."""
+    logger = logging.getLogger("logbot.startup")
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS webauthn_credentials (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    credential_id VARCHAR(512) UNIQUE NOT NULL,
+                    public_key TEXT NOT NULL,
+                    sign_count INTEGER NOT NULL DEFAULT 0,
+                    name VARCHAR(100),
+                    transports VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at TIMESTAMP
+                )
+            """)
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id)"
+            )
+        logger.info("webauthn_credentials ready")
+    except Exception as exc:
+        logger.warning("webauthn table migration skipped: %s", exc)
 
 
 @app.on_event("startup")

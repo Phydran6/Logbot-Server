@@ -17,9 +17,11 @@ from .settings import router as settings_router
 from .database import router as database_router
 from .ldap import router as ldap_router
 from .archiving import router as archiving_router
+from .passkey import router as passkey_router
 from . import caddy
 from . import network
 
 __all__ = ["auth_router", "mfa_router", "health_router", "users_router", "agents_router",
            "agent_tokens_router", "logs_router", "webhooks_router", "settings_router",
-           "database_router", "ldap_router", "archiving_router", "caddy", "network"]
+           "database_router", "ldap_router", "archiving_router", "passkey_router",
+           "caddy", "network"]
