@@ -1,206 +1,228 @@
-﻿<!-- ==============================================================================
+<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.05.13.20.58.33
-     Beschreibung: LogBot - System Health mit Theme-Support
+     Version:     2026.08.02.16.00.00
+     Changelog:   ../../../CHANGELOG/frontend.md
+     Beschreibung: LogBot - Systemzustand: Auslastung, Logs, Geräte, Datenbank.
      ============================================================================== -->
 
 <template>
-  <div class="p-6">
-    <div class="flex justify-between items-center mb-6">
-      <h1 class="text-2xl font-bold" :style="{ color: 'var(--color-text-primary)' }">System Health</h1>
-      <button
-        @click="loadHealth"
-        class="px-4 py-2 rounded flex items-center gap-2 hover:opacity-80"
-        :style="buttonSecondaryStyle"
-      >
-        🔄 Aktualisieren
-      </button>
-    </div>
-    
-    <!-- Status Banner -->
-    <div 
-      class="rounded-lg p-6 mb-6"
-      :style="health?.status === 'healthy' ? healthyBannerStyle : warningBannerStyle"
-    >
-      <div class="flex items-center gap-4">
-        <span class="text-4xl">{{ health?.status === 'healthy' ? '💚' : '⚠️' }}</span>
-        <div>
-          <h2 class="text-2xl font-bold" :style="{ color: health?.status === 'healthy' ? 'var(--color-success)' : 'var(--color-warning)' }">
-            {{ health?.status === 'healthy' ? 'System läuft normal' : 'System eingeschränkt' }}
-          </h2>
-          <p :style="{ color: 'var(--color-text-secondary)' }">Version {{ health?.version }} | Uptime: {{ formatUptime(health?.uptime_seconds) }}</p>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Metriken Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-      <!-- CPU -->
-      <div class="rounded-lg shadow p-6" :style="cardStyle">
-        <div class="flex justify-between items-start mb-4">
-          <div>
-            <p class="text-sm" :style="{ color: 'var(--color-text-muted)' }">CPU Auslastung</p>
-            <p class="text-3xl font-bold" :style="{ color: 'var(--color-text-primary)' }">{{ health?.cpu_percent?.toFixed(1) || 0 }}%</p>
-          </div>
-          <span class="text-2xl">🔲</span>
-        </div>
-        <div class="w-full rounded-full h-2" :style="{ backgroundColor: 'var(--color-surface-elevated)' }">
-          <div 
-            class="h-2 rounded-full transition-all"
-            :class="getUsageColor(health?.cpu_percent)"
-            :style="{ width: (health?.cpu_percent || 0) + '%' }"
-          ></div>
-        </div>
-      </div>
-      
-      <!-- RAM -->
-      <div class="rounded-lg shadow p-6" :style="cardStyle">
-        <div class="flex justify-between items-start mb-4">
-          <div>
-            <p class="text-sm" :style="{ color: 'var(--color-text-muted)' }">RAM Auslastung</p>
-            <p class="text-3xl font-bold" :style="{ color: 'var(--color-text-primary)' }">{{ health?.memory_percent?.toFixed(1) || 0 }}%</p>
-          </div>
-          <span class="text-2xl">🧠</span>
-        </div>
-        <div class="w-full rounded-full h-2" :style="{ backgroundColor: 'var(--color-surface-elevated)' }">
-          <div 
-            class="h-2 rounded-full transition-all"
-            :class="getUsageColor(health?.memory_percent)"
-            :style="{ width: (health?.memory_percent || 0) + '%' }"
-          ></div>
-        </div>
-      </div>
-      
-      <!-- Disk -->
-      <div class="rounded-lg shadow p-6" :style="cardStyle">
-        <div class="flex justify-between items-start mb-4">
-          <div>
-            <p class="text-sm" :style="{ color: 'var(--color-text-muted)' }">Festplatte</p>
-            <p class="text-3xl font-bold" :style="{ color: 'var(--color-text-primary)' }">{{ health?.disk_percent?.toFixed(1) || 0 }}%</p>
-          </div>
-          <span class="text-2xl">💾</span>
-        </div>
-        <div class="w-full rounded-full h-2" :style="{ backgroundColor: 'var(--color-surface-elevated)' }">
-          <div 
-            class="h-2 rounded-full transition-all"
-            :class="getUsageColor(health?.disk_percent)"
-            :style="{ width: (health?.disk_percent || 0) + '%' }"
-          ></div>
-        </div>
-      </div>
-      
-      <!-- Database -->
-      <div class="rounded-lg shadow p-6" :style="cardStyle">
-        <div class="flex justify-between items-start mb-4">
-          <div>
-            <p class="text-sm" :style="{ color: 'var(--color-text-muted)' }">Datenbank</p>
-            <p class="text-3xl font-bold" :style="{ color: health?.database_connected ? 'var(--color-success)' : 'var(--color-danger)' }">
-              {{ health?.database_connected ? 'OK' : 'Fehler' }}
-            </p>
-          </div>
-          <span class="text-2xl">🗄️</span>
-        </div>
-        <p class="text-sm" :style="{ color: 'var(--color-text-muted)' }">
-          {{ health?.database_connected ? 'Verbunden' : 'Nicht verbunden' }}
+  <div class="page">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Systemzustand</h2>
+        <p class="page-subtitle">
+          Version {{ health?.version || '–' }} · Laufzeit {{ formatUptime(health?.uptime_seconds) }}
         </p>
       </div>
+      <button class="btn btn-secondary btn-sm" :disabled="loading" @click="loadAll(true)">
+        <AppIcon name="refresh" :size="16" />
+        Aktualisieren
+      </button>
     </div>
-    
-    <!-- Log Statistiken -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <div class="rounded-lg shadow p-6" :style="cardStyle">
-        <h3 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Log Statistiken</h3>
-        <div class="space-y-4">
-          <div class="flex justify-between items-center">
-            <span :style="{ color: 'var(--color-text-secondary)' }">Gesamt Logs</span>
-            <span class="text-xl font-bold" :style="{ color: 'var(--color-text-primary)' }">{{ health?.logs_total?.toLocaleString() || 0 }}</span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span :style="{ color: 'var(--color-text-secondary)' }">Logs (24h)</span>
-            <span class="text-xl font-bold" :style="{ color: 'var(--color-text-primary)' }">{{ health?.logs_last_24h?.toLocaleString() || 0 }}</span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span :style="{ color: 'var(--color-text-secondary)' }">Logs/Minute (Ø)</span>
-            <span class="text-xl font-bold" :style="{ color: 'var(--color-text-primary)' }">{{ logsPerMinute }}</span>
-          </div>
-        </div>
-      </div>
-      
-      <div class="rounded-lg shadow p-6" :style="cardStyle">
-        <h3 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Agent Status</h3>
-        <div class="space-y-4">
-          <div class="flex justify-between items-center">
-            <span :style="{ color: 'var(--color-text-secondary)' }">Gesamt Agents</span>
-            <span class="text-xl font-bold" :style="{ color: 'var(--color-text-primary)' }">{{ health?.agents_total || 0 }}</span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span :style="{ color: 'var(--color-text-secondary)' }">Online</span>
-            <span class="text-xl font-bold" :style="{ color: 'var(--color-success)' }">{{ health?.agents_online || 0 }}</span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span :style="{ color: 'var(--color-text-secondary)' }">Offline</span>
-            <span class="text-xl font-bold" :style="{ color: 'var(--color-text-muted)' }">{{ (health?.agents_total || 0) - (health?.agents_online || 0) }}</span>
-          </div>
+
+    <!-- Gesamtzustand -->
+    <div class="card mb-4" :style="{ borderColor: isHealthy ? 'var(--color-success)' : 'var(--color-warning)' }">
+      <div class="card-body flex items-center gap-4">
+        <span class="stat-icon" :style="{ backgroundColor: isHealthy ? 'var(--success-soft)' : 'var(--warning-soft)', color: isHealthy ? 'var(--color-success)' : 'var(--color-warning)' }">
+          <AppIcon :name="isHealthy ? 'check' : 'warning'" :size="20" />
+        </span>
+        <div>
+          <p class="font-semibold" :style="{ color: isHealthy ? 'var(--color-success)' : 'var(--color-warning)' }">
+            {{ isHealthy ? 'System läuft normal' : 'System eingeschränkt' }}
+          </p>
+          <p class="text-sm" style="color: var(--color-text-muted)">
+            Stand: {{ lastUpdated }} — die Werte aktualisieren sich nicht von selbst.
+          </p>
         </div>
       </div>
     </div>
-    
-    <!-- Auto-Refresh Info -->
-    <p class="text-center text-sm mt-6" :style="{ color: 'var(--color-text-muted)' }">
-      Daten werden nicht automatisch aktualisiert. Klicke auf "Aktualisieren" für aktuelle Werte.
-    </p>
+
+    <!-- Auslastung -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+      <div v-for="metric in metrics" :key="metric.label" class="stat-card">
+        <div class="flex items-start justify-between gap-3">
+          <span class="stat-label">{{ metric.label }}</span>
+          <span class="stat-icon" :style="{ backgroundColor: 'var(--primary-soft)', color: 'var(--color-primary)' }">
+            <AppIcon :name="metric.icon" :size="18" />
+          </span>
+        </div>
+        <span class="stat-value">{{ metric.value }}</span>
+        <div class="bar-track">
+          <div class="bar-fill" :style="{ width: metric.percent + '%', backgroundColor: usageColor(metric.percent) }" />
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <!-- Datenbank -->
+      <div class="card lg:col-span-1">
+        <div class="card-header">
+          <span class="card-title">Datenbank</span>
+          <span class="badge" :class="dbReachable ? 'badge-success' : 'badge-danger'">
+            {{ dbReachable ? 'verbunden' : 'nicht erreichbar' }}
+          </span>
+        </div>
+        <div class="card-body space-y-2 text-sm">
+          <div class="info-row">
+            <span>Ablage</span>
+            <span class="badge" :class="database?.target?.external ? 'badge-primary' : 'badge-neutral'">
+              {{ database?.target?.external ? 'externer Server' : 'mitgeliefert (Container)' }}
+            </span>
+          </div>
+          <div class="info-row">
+            <span>Server</span>
+            <span class="font-mono">{{ database?.target?.host || '–' }}:{{ database?.target?.port || '–' }}</span>
+          </div>
+          <div class="info-row">
+            <span>Datenbank</span>
+            <span class="font-mono">{{ database?.target?.database || '–' }}</span>
+          </div>
+          <div class="info-row">
+            <span>Verschlüsselt</span>
+            <span :style="{ color: database?.target?.tls ? 'var(--color-success)' : (database?.target?.external ? 'var(--color-danger)' : 'var(--color-text-muted)') }">
+              {{ database?.target?.tls ? 'ja' : 'nein' }}
+            </span>
+          </div>
+          <div v-if="database?.server_version" class="info-row">
+            <span>PostgreSQL</span>
+            <span>{{ database.server_version }}</span>
+          </div>
+          <div v-if="database?.size" class="info-row">
+            <span>Größe</span>
+            <span>{{ database.size }}</span>
+          </div>
+          <div v-if="database?.connections" class="info-row">
+            <span>Verbindungen</span>
+            <span>{{ database.connections.active }} aktiv / {{ database.connections.total }}</span>
+          </div>
+          <div v-if="database?.latency_ms != null" class="info-row">
+            <span>Antwortzeit</span>
+            <span>{{ database.latency_ms }} ms</span>
+          </div>
+
+          <p v-if="database?.target?.external && !database?.target?.tls" class="warn-note">
+            <AppIcon name="warning" :size="14" />
+            Verbindung zu einer externen Datenbank ohne TLS — <code>DB_SSLMODE=require</code> in der
+            <code>.env</code> setzen.
+          </p>
+          <p v-if="database?.error" class="warn-note">{{ database.error }}</p>
+        </div>
+      </div>
+
+      <!-- Logs -->
+      <div class="card">
+        <div class="card-header"><span class="card-title">Logs</span></div>
+        <div class="card-body space-y-2 text-sm">
+          <div class="info-row"><span>Gesamt</span><span class="tabular">{{ fmt(health?.logs_total) }}</span></div>
+          <div class="info-row"><span>Letzte 24 Stunden</span><span class="tabular">{{ fmt(health?.logs_last_24h) }}</span></div>
+          <div class="info-row"><span>Ø pro Minute</span><span class="tabular">{{ fmt(logsPerMinute) }}</span></div>
+          <div v-if="database?.log_rows != null" class="info-row">
+            <span>Zeilen in der Tabelle</span><span class="tabular">{{ fmt(database.log_rows) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Geräte -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Geräte</span>
+          <router-link to="/agents" class="link text-xs">Übersicht</router-link>
+        </div>
+        <div class="card-body space-y-2 text-sm">
+          <div class="info-row"><span>Erfasst</span><span class="tabular">{{ fmt(health?.agents_total) }}</span></div>
+          <div class="info-row">
+            <span>Online</span>
+            <span class="tabular" style="color: var(--color-success)">{{ fmt(health?.agents_online) }}</span>
+          </div>
+          <div class="info-row">
+            <span>Offline</span>
+            <span class="tabular">{{ fmt((health?.agents_total || 0) - (health?.agents_online || 0)) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import AppIcon from '../components/AppIcon.vue'
 
 const authStore = useAuthStore()
 const health = ref(null)
+const database = ref(null)
 const loading = ref(false)
+const lastLoaded = ref(null)
 
 const CACHE_MS = 5000
 let cachedHealth = null
 let cachedHealthTs = 0
 
-// Computed Styles
-const cardStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface)',
-  borderColor: 'var(--color-border)'
-}))
+const isHealthy = computed(() => health.value?.status === 'healthy')
+const dbReachable = computed(() => database.value?.reachable ?? health.value?.database_connected ?? false)
 
-const buttonSecondaryStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface-elevated)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border)'
-}))
+const metrics = computed(() => [
+  {
+    label: 'CPU',
+    icon: 'dashboard',
+    percent: health.value?.cpu_percent || 0,
+    value: `${(health.value?.cpu_percent || 0).toFixed(1)} %`,
+  },
+  {
+    label: 'Arbeitsspeicher',
+    icon: 'dashboard',
+    percent: health.value?.memory_percent || 0,
+    value: `${(health.value?.memory_percent || 0).toFixed(1)} %`,
+  },
+  {
+    label: 'Festplatte',
+    icon: 'agents',
+    percent: health.value?.disk_percent || 0,
+    value: `${(health.value?.disk_percent || 0).toFixed(1)} %`,
+  },
+  {
+    label: 'Datenbank',
+    icon: 'agents',
+    percent: dbReachable.value ? 100 : 0,
+    value: dbReachable.value ? 'OK' : 'Fehler',
+  },
+])
 
-const healthyBannerStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface-elevated)',
-  border: '1px solid var(--color-success)'
-}))
+const logsPerMinute = computed(() => {
+  if (!health.value?.logs_last_24h) return 0
+  return Math.round(health.value.logs_last_24h / (24 * 60))
+})
 
-const warningBannerStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface-elevated)',
-  border: '1px solid var(--color-warning)'
-}))
+const lastUpdated = computed(() =>
+  lastLoaded.value ? lastLoaded.value.toLocaleTimeString('de-DE') : 'wird geladen…'
+)
 
-onMounted(() => loadHealth())
+onMounted(() => loadAll(false))
 
-async function loadHealth() {
+async function loadAll(force) {
   loading.value = true
   try {
     const now = Date.now()
-    if (cachedHealth && now - cachedHealthTs < CACHE_MS) {
+    if (!force && cachedHealth && now - cachedHealthTs < CACHE_MS) {
       health.value = cachedHealth
-      return
+    } else {
+      const data = await authStore.api('/api/health/detailed')
+      cachedHealth = data
+      cachedHealthTs = now
+      health.value = data
     }
-    const data = await authStore.api('/api/health/detailed')
-    cachedHealth = data
-    cachedHealthTs = now
-    health.value = data
+
+    // Datenbank-Auskunft ist Admins vorbehalten - für alle anderen bleibt der
+    // Bereich einfach leer, statt einen Fehler zu zeigen.
+    try {
+      database.value = await authStore.api('/api/database/status')
+    } catch {
+      database.value = null
+    }
+
+    lastLoaded.value = new Date()
   } catch (e) {
     console.error('Fehler:', e)
   } finally {
@@ -208,26 +230,73 @@ async function loadHealth() {
   }
 }
 
-const logsPerMinute = computed(() => {
-  if (!health.value?.logs_last_24h) return 0
-  return Math.round(health.value.logs_last_24h / (24 * 60))
-})
+function fmt(value) {
+  return (value || 0).toLocaleString('de-DE')
+}
 
-function getUsageColor(percent) {
-  if (!percent) return 'bg-gray-400'
-  if (percent < 60) return 'bg-green-500'
-  if (percent < 80) return 'bg-yellow-500'
-  return 'bg-red-500'
+function usageColor(percent) {
+  if (percent < 60) return 'var(--color-success)'
+  if (percent < 80) return 'var(--color-warning)'
+  return 'var(--color-danger)'
 }
 
 function formatUptime(seconds) {
-  if (!seconds) return '-'
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`
-  if (hours > 0) return `${hours}h ${minutes}m`
-  return `${minutes}m`
+  if (!seconds) return '–'
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d) return `${d} Tage, ${h} Std.`
+  if (h) return `${h} Std., ${m} Min.`
+  return `${m} Min.`
 }
 </script>
+
+<style scoped>
+.bar-track {
+  height: 0.375rem;
+  margin-top: 0.25rem;
+  border-radius: var(--radius-full);
+  background-color: var(--hover-surface);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width var(--duration) var(--ease);
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.info-row > span:first-child {
+  color: var(--color-text-muted);
+}
+
+.info-row > span:last-child {
+  color: var(--color-text-primary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.warn-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: var(--radius);
+  background-color: var(--warning-soft);
+  color: var(--color-warning);
+  font-size: 0.75rem;
+}
+
+.warn-note code {
+  font-size: 0.6875rem;
+}
+</style>

@@ -1,4 +1,4 @@
-﻿# LogBot v2026.08.02.14.00.00
+﻿# LogBot v2026.08.02.16.00.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -260,6 +260,11 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.08.02.16.00.00 (2026-08-02)
+- **Externe Datenbank:** LogBot kann die Daten auf einem eigenen Datenbankserver ablegen und selbst nur noch als Anwendung laufen. Konfiguration über `DATABASE_URL` (oder `DB_HOST`/`DB_PORT`) und `DB_SSLMODE` in der `.env`, Start mit `docker compose -f docker-compose.yml -f docker-compose.external-db.yml up -d`. Der mitgelieferte Postgres-Container bleibt dabei stehen, das Volume unangetastet — der Rückweg ist offen. Unter *Systemzustand* steht, welche Datenbank tatsächlich aktiv ist und ob die Verbindung verschlüsselt läuft.
+- **Anmeldung über LDAP / Active Directory** (optional, unter *System → Verzeichnis*): Schlägt die lokale Anmeldung fehl, wird zusätzlich das Verzeichnis gefragt — lokale Konten bleiben unberührt. Gruppen lassen sich auf Rollen abbilden, eine Pflichtgruppe kann den Zugang begrenzen, neue Benutzer werden auf Wunsch beim ersten Anmelden angelegt. Ein Testfeld spielt eine echte Anmeldung durch und zeigt Gruppen und Rolle.
+- **Archivierung alter Logs** (unter *System → Archivierung*): Logs ab einem einstellbaren Alter werden gepackt auf **SFTP, FTPS, FTP, SMB** oder in einen eingebundenen Ordner geschrieben — täglich zur festgelegten Stunde oder auf Knopfdruck, auf Wunsch mit anschließendem Löschen in der Datenbank. Mit Verbindungstest und Historie der letzten Läufe.
+
 ### v2026.08.02.14.00.00 (2026-08-02)
 - **Oberfläche neu gestaltet.** Neues Design-System (Farb-Tokens, Karten, Knöpfe, Formularfelder, Abzeichen, Tabellen) — die Zustandsfarben leiten sich aus der Markenfarbe ab, eine im Branding geänderte Primärfarbe zieht überall mit. Dunkles Schema kontrastreicher, helles ruhiger.
 - **Seitenmenü** mit gruppierter Navigation (Überwachung / Verwaltung / System), eigenen Icons statt Emoji und klar erkennbarem aktivem Eintrag — auch im angedockten Zustand. Darüber eine Kopfleiste mit dem Titel der aktuellen Seite.

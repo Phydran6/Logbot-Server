@@ -12,3 +12,9 @@ httpx==0.26.0
 slowapi==0.1.9
 qrcode[pil]==7.4.2
 pyotp==2.9.0
+# Optionale Anmeldung gegen LDAP / Active Directory (app/ldap_auth.py)
+ldap3==2.9.1
+# Archivierung auf externe Ziele (app/archiving.py): SFTP bzw. SMB-Freigaben.
+# FTP/FTPS und eingebundene Ordner brauchen nichts zusaetzliches.
+paramiko==3.4.0
+smbprotocol==1.12.0

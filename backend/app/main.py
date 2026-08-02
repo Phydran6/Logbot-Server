@@ -24,6 +24,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select, desc, delete, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from . import archiving
 from . import fritzbox
 from .config import settings, validate_security_settings
 from .database import get_db, async_session, engine
@@ -31,7 +32,7 @@ from .limiter import limiter
 from .models import Webhook, Log, Agent, AgentToken
 from sqlalchemy import func
 from .schemas import LogResponse, LogDetailResponse, LogIngestRequest, LogIngestResponse
-from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, caddy as caddy_router, network as network_router
+from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, database_router, ldap_router, archiving_router, caddy as caddy_router, network as network_router
 from .branding import branding_router
 
 # =============================================================================
@@ -94,6 +95,9 @@ app.include_router(logs_router)
 app.include_router(webhooks_router)
 app.include_router(branding_router)
 app.include_router(settings_router)
+app.include_router(database_router)
+app.include_router(ldap_router)
+app.include_router(archiving_router)
 app.include_router(caddy_router.router)
 app.include_router(network_router.router)
 
@@ -151,6 +155,21 @@ async def ensure_agent_retention_columns():
         logger.info("agents retention columns ready")
     except Exception as exc:
         logger.warning("agents retention migration skipped: %s", exc)
+
+
+@app.on_event("startup")
+async def ensure_auth_source_column():
+    """Kennzeichnet, ob ein Konto lokal ist oder aus dem Verzeichnis (LDAP) kommt."""
+    logger = logging.getLogger("logbot.startup")
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source VARCHAR(20) NOT NULL DEFAULT 'local'"
+            )
+        logger.info("users.auth_source ready")
+    except Exception as exc:
+        logger.warning("users.auth_source migration skipped: %s", exc)
 
 
 @app.on_event("startup")
@@ -647,7 +666,39 @@ async def agent_retention_task():
             logger.error("Agent-Retention-Task Fehler: %s", exc)
 
 
+async def archiving_task():
+    """Stündlicher Blick auf die Uhr: läuft die Archivierung zur eingestellten Stunde.
+
+    Bewusst kein Cron: der Container soll ohne Zusatzdienst auskommen. Damit ein
+    Lauf nicht mehrfach startet (der Task wacht jede Stunde auf), merkt sich die
+    Funktion den zuletzt archivierten Tag.
+    """
+    logger = logging.getLogger("logbot.archiving")
+    last_run_day = None
+
+    while True:
+        await asyncio.sleep(600)  # alle 10 Minuten prüfen, ob die Stunde erreicht ist
+        try:
+            async with async_session() as session:
+                config = await archiving.load_config(session)
+                hour = int(config.get("schedule_hour", -1))
+                if not config.get("enabled") or hour < 0:
+                    continue
+
+                now = datetime.utcnow()
+                if now.hour != hour or last_run_day == now.date():
+                    continue
+
+                last_run_day = now.date()
+                logger.info("Archivierung startet (Zeitplan %s Uhr)", hour)
+                result = await archiving.run_archiving(session, config, triggered_by="Zeitplan")
+                logger.info("Archivierung beendet: %s", result.get("message"))
+        except Exception as exc:
+            logger.error("Archivierungs-Task Fehler: %s", exc)
+
+
 @app.on_event("startup")
 async def start_background_tasks():
     asyncio.create_task(disk_monitor())
     asyncio.create_task(agent_retention_task())
+    asyncio.create_task(archiving_task())

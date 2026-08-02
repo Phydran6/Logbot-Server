@@ -14,8 +14,12 @@ from .agents import router as agents_router, token_router as agent_tokens_router
 from .logs import router as logs_router
 from .webhooks import router as webhooks_router
 from .settings import router as settings_router
+from .database import router as database_router
+from .ldap import router as ldap_router
+from .archiving import router as archiving_router
 from . import caddy
 from . import network
 
 __all__ = ["auth_router", "mfa_router", "health_router", "users_router", "agents_router",
-           "agent_tokens_router", "logs_router", "webhooks_router", "settings_router", "caddy", "network"]
+           "agent_tokens_router", "logs_router", "webhooks_router", "settings_router",
+           "database_router", "ldap_router", "archiving_router", "caddy", "network"]

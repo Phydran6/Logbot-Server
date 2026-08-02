@@ -29,6 +29,11 @@ DB_USER      = os.getenv('DB_USER',      'logbot')
 DB_PASSWORD  = os.getenv('DB_PASSWORD',  '')
 DB_NAME      = os.getenv('DB_NAME',      'logbot')
 SYSLOG_PORT  = int(os.getenv('SYSLOG_PORT', '514'))
+# Externe Datenbank: komplette Verbindung in einer Variable (hat Vorrang vor den
+# Einzelwerten). DB_SSLMODE gehoert gesetzt, sobald die DB ausserhalb des
+# Docker-Netzes steht - sonst laufen Zugangsdaten und Logs im Klartext.
+DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
+DB_SSL       = os.getenv('DB_SSLMODE',   '').strip()
 
 BATCH_SIZE       = 100
 BATCH_INTERVAL   = 2.0
@@ -340,10 +345,17 @@ class DatabaseManager:
     async def connect(self):
         for i in range(30):
             try:
+                if DATABASE_URL:
+                    # Externe Datenbank als fertige URL (gleiche Variable wie im Backend).
+                    self.pool = await asyncpg.create_pool(
+                        dsn=DATABASE_URL, min_size=2, max_size=10, ssl=DB_SSL or None,
+                    )
+                    logger.info("DB verbunden ueber DATABASE_URL")
+                    return
                 self.pool = await asyncpg.create_pool(
                     host=DB_HOST, port=DB_PORT, user=DB_USER,
                     password=DB_PASSWORD, database=DB_NAME,
-                    min_size=2, max_size=10,
+                    min_size=2, max_size=10, ssl=DB_SSL or None,
                 )
                 logger.info("DB verbunden: %s:%s/%s", DB_HOST, DB_PORT, DB_NAME)
                 return

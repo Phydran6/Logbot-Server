@@ -18,6 +18,9 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(String(20), default="user")
     is_active = Column(Boolean, default=True)
+    # Woher das Konto kommt: "local" (Passwort in dieser Datenbank) oder "ldap"
+    # (Anmeldung gegen das Verzeichnis, lokaler Hash ist unbrauchbar).
+    auth_source = Column(String(20), default="local", nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     # MFA / TOTP

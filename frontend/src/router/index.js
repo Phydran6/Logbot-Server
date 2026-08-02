@@ -116,6 +116,22 @@ const routes = [
         component: () => import('../views/BrandingSettings.vue')
       },
 
+      // Anmeldung am Verzeichnis (LDAP / Active Directory)
+      {
+        path: 'settings/ldap',
+        name: 'LdapSettings',
+        component: () => import('../views/LdapSettings.vue'),
+        meta: { admin: true }
+      },
+
+      // Archivierung der Logs auf externe Ziele
+      {
+        path: 'settings/archiving',
+        name: 'ArchivingSettings',
+        component: () => import('../views/ArchivingSettings.vue'),
+        meta: { admin: true }
+      },
+
     ]
   }
 ]
@@ -142,13 +158,17 @@ router.beforeEach(async (to, from, next) => {
   
   // User-Daten laden falls noch nicht vorhanden
   if (!auth.user) {
-    try { 
-      await auth.fetchUser() 
-    } catch { 
-      return next('/login') 
+    try {
+      await auth.fetchUser()
+    } catch {
+      return next('/login')
     }
   }
-  
+
+  // Admin-Bereiche: Nicht-Admins landen auf dem Dashboard statt in einer
+  // Ansicht, die ihnen ohnehin nur Fehler zeigen würde.
+  if (to.meta.admin && !auth.isAdmin) return next('/')
+
   next()
 })
 

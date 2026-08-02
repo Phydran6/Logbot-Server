@@ -3,6 +3,16 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.16.00.00
+### Added
+- **`docker-compose.external-db.yml`**: LogBot mit einer Datenbank betreiben, die nicht Teil des
+  Stacks ist. Der mitgelieferte Postgres-Container wird über ein nie aktiviertes Profil
+  stillgelegt (Volume und Daten bleiben erhalten, der Rückweg ist offen), die Wartebedingungen
+  von `backend` und `syslog` entfallen. Start:
+  `docker compose -f docker-compose.yml -f docker-compose.external-db.yml up -d`
+- `.env`: `DB_HOST`/`DB_PORT` sind jetzt überschreibbar, neu sind `DATABASE_URL` (komplette
+  Verbindung) und `DB_SSLMODE`. Beide werden an **backend und syslog** durchgereicht.
+
 ## 2026.07.31.23.30.00
 ### Added
 - **`logs.dedup_key`** (`VARCHAR(64)`) plus partieller Unique-Index

@@ -8,6 +8,7 @@
 import io
 import json
 import base64
+import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Union
@@ -29,8 +30,10 @@ from ..schemas import (
     LoginMFARequired,
     MFALoginRequest,
 )
+from .. import ldap_auth
 from ..auth import (
     verify_password,
+    get_password_hash,
     create_access_token,
     create_mfa_pending_token,
     decode_mfa_pending_token,
@@ -48,6 +51,54 @@ router = APIRouter(prefix="/api/auth", tags=["Auth"])
 _APP_TOKEN_TTL_MINUTES = 15
 
 
+async def _login_via_ldap(db: AsyncSession, username: str, password: str):
+    """Anmeldung am Verzeichnis; legt den Benutzer bei Bedarf an. None = kein Zugang.
+
+    Ein bereits vorhandenes **lokales** Konto gleichen Namens wird nicht
+    übernommen: sonst könnte ein gleichnamiges Verzeichniskonto das lokale
+    Admin-Konto kapern. Solche Fälle müssen die Admins selbst auflösen.
+    """
+    config = await ldap_auth.load_config(db)
+    if not config.get("enabled"):
+        return None
+
+    ok, details = await ldap_auth.authenticate(config, username, password)
+    if not ok:
+        return None
+
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+
+    if user:
+        if (user.auth_source or "local") != "ldap":
+            logging.getLogger("logbot.ldap").warning(
+                "LDAP-Anmeldung für '%s' abgelehnt: es gibt bereits ein lokales Konto mit diesem Namen",
+                username,
+            )
+            return None
+        # Stammdaten bei jeder Anmeldung nachziehen - Gruppenwechsel wirken sofort.
+        user.role = details.get("role", "user")
+        if details.get("email"):
+            user.email = details["email"]
+    else:
+        if not config.get("auto_create_users", True):
+            return None
+        user = User(
+            username=username,
+            email=details.get("email"),
+            # Unbrauchbarer Hash: Anmeldung ist nur über das Verzeichnis möglich.
+            password_hash=get_password_hash(secrets.token_urlsafe(32)),
+            role=details.get("role", "user"),
+            is_active=True,
+            auth_source="ldap",
+        )
+        db.add(user)
+
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
 @router.post("/login", response_model=None)
 @limiter.limit("10/minute")
 async def login(
@@ -57,9 +108,14 @@ async def login(
 ) -> Union[Token, LoginMFARequired]:
     result = await db.execute(select(User).where(User.username == form_data.username))
     user = result.scalar_one_or_none()
+
+    if not user or not verify_password(form_data.password, user.password_hash):
+        # Zweiter Versuch über das Verzeichnis, falls eingerichtet.
+        user = await _login_via_ldap(db, form_data.username, form_data.password)
+
     # Gleiche Fehlermeldung für "User existiert nicht" und "Passwort falsch"
     # verhindert User-Enumeration
-    if not user or not verify_password(form_data.password, user.password_hash):
+    if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Falsche Anmeldedaten")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Benutzer deaktiviert")

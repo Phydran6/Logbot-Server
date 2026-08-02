@@ -37,11 +37,15 @@ services:
     container_name: logbot-syslog
     restart: unless-stopped
     environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
+      # Bei externer Datenbank DB_HOST in der .env auf den externen Server setzen
+      # (oder DATABASE_URL nutzen) - siehe docker-compose.external-db.yml.
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${DB_USER:-logbot}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME:-logbot}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_SSLMODE: ${DB_SSLMODE:-}
     ports:
       - "514:514/udp"
       - "514:514/tcp"
@@ -65,11 +69,14 @@ services:
     # (schreibt /etc/resolv.conf im Container). Standard: per DHCP vergebener
     # System-DNS des Hosts; optional eigene Server. Siehe backend routes/network.py.
     environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${DB_USER:-logbot}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME:-logbot}
+      # Externe Datenbank: setzt die Einzelwerte oben ausser Kraft.
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_SSLMODE: ${DB_SSLMODE:-}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET muss gesetzt sein}
       CADDY_ADMIN_URL: ${CADDY_ADMIN_URL:-http://caddy:2019}
       CADDY_CERTS_DIR: ${CADDY_CERTS_DIR:-/caddy-certs}

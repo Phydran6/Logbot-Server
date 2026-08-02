@@ -2,6 +2,26 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.16.00.00
+### Added
+- **Verzeichnis (LDAP)** — neue Ansicht `views/LdapSettings.vue` unter *System → Verzeichnis*:
+  Server, Dienstkonto, Suchfilter, Attribute, Pflicht- und Admin-Gruppe. Dazu ein Testfeld, das
+  eine echte Anmeldung durchspielt und DN, Gruppen und die daraus folgende Rolle anzeigt.
+- **Archivierung** — neue Ansicht `views/ArchivingSettings.vue` unter *System → Archivierung*:
+  Ziel (SFTP/FTPS/FTP/SMB/eingebundener Ordner), Zugangsdaten, Zielordner, Alter der Logs,
+  Zeitplan und „nach Übertragung löschen". Knöpfe für Verbindungstest und sofortigen Lauf,
+  darunter die Historie der letzten Läufe mit Menge, Größe und Dauer.
+- **Systemzustand** (`views/Health.vue`) neu aufgebaut und um einen **Datenbank-Bereich**
+  erweitert: lokal oder extern, Server, Verschlüsselung, PostgreSQL-Version, Größe,
+  Verbindungen, Antwortzeit. Warnt ausdrücklich, wenn eine externe Datenbank ohne TLS
+  angebunden ist.
+- Router: Ansichten können `meta.admin` setzen — Nicht-Admins landen auf dem Dashboard statt in
+  einer Ansicht, die ihnen nur Fehlermeldungen zeigen würde.
+
+### Changed
+- Branding-Store schickt bei Speichern, Uploads und Zurücksetzen den Anmelde-Token mit
+  (die Endpunkte sind seit 2026.08.02.14.00.00 Admins vorbehalten).
+
 ## 2026.08.02.14.00.00
 ### Changed
 - **Oberfläche neu gestaltet.** Grundlage ist ein Design-System in

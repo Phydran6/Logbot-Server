@@ -2,6 +2,41 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.16.00.00
+### Added
+- **Externe Datenbank** (`app/config.py`): neue Umgebungsvariablen `DATABASE_URL` (komplette
+  Verbindung, hat Vorrang) und `DB_SSLMODE` (`require`/`verify-ca`/`verify-full`). `postgresql://`
+  wird automatisch auf den async-Treiber gehoben, Benutzer/Passwort werden URL-sicher kodiert.
+  Der Syslog-Dienst versteht dieselben Variablen (`syslog/syslog_server.py`).
+- **`GET /api/database/status`** (Admin): zeigt Verbindungsziel ohne Zugangsdaten, ob die
+  Datenbank extern liegt, ob TLS aktiv ist, PostgreSQL-Version, Größe, Verbindungen und
+  Antwortzeit. Jede Kennzahl einzeln abgesichert, damit fehlende Rechte auf einer verwalteten
+  Datenbank nicht die ganze Auskunft kippen.
+- **Anmeldung gegen LDAP / Active Directory** (`app/ldap_auth.py`, `routes/ldap.py`), optional
+  und über die Oberfläche einzurichten:
+  - Schlägt die lokale Anmeldung fehl, wird zusätzlich das Verzeichnis gefragt. Lokale Konten
+    funktionieren unverändert weiter.
+  - Passwortprüfung immer über einen **zweiten Bind mit dem DN des Benutzers** — die reine
+    Suche beweist gar nichts. Leere Passwörter werden abgelehnt, weil LDAP-Server sie als
+    anonyme Anmeldung akzeptieren und Erfolg melden würden.
+  - Eingaben werden nach RFC 4515 escaped (sonst ließe sich der Suchfilter umschreiben).
+  - Gruppen → Rollen (`admin_group`), optionale Pflichtgruppe, Benutzer werden auf Wunsch beim
+    ersten Anmelden angelegt. Neue Spalte `users.auth_source` (`local`/`ldap`) samt
+    Startup-Migration; ein bereits vorhandenes **lokales** Konto gleichen Namens wird nie
+    übernommen, sonst könnte ein gleichnamiges Verzeichniskonto den lokalen Admin kapern.
+  - `POST /api/ldap/test` spielt eine echte Anmeldung durch und zeigt DN, Gruppen und die
+    daraus abgeleitete Rolle — auch bevor LDAP scharf geschaltet ist.
+- **Archivierung alter Logs** (`app/archiving.py`, `routes/archiving.py`): schreibt Logs älter
+  als N Tage als `.ndjson.gz` und überträgt sie per **SFTP, FTPS, FTP, SMB** oder in einen
+  eingebundenen Ordner. Zeitplan (täglich zur eingestellten Stunde, Hintergrund-Task ohne
+  zusätzlichen Dienst), Verbindungstest mit echter Testdatei, Historie der letzten 20 Läufe.
+  Das Löschen nach der Übertragung läuft über die **gemerkten Zeilen-IDs**, nicht über den
+  Zeitstempel — sonst könnten zwischenzeitlich eingetroffene Einträge mit altem Datum
+  ungesichert verschwinden.
+
+### Changed
+- Neue Abhängigkeiten: `ldap3` (LDAP), `paramiko` (SFTP), `smbprotocol` (SMB).
+
 ## 2026.08.02.14.00.00
 ### Security
 - **Branding-Endpunkte waren ohne Anmeldung beschreibbar** (`app/branding.py`). `PUT /config`,
