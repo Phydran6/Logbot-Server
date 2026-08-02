@@ -6,11 +6,11 @@ Version:        2026.08.02.14.00.00
 Changelog:      ../../CHANGELOG/backend.md
 ================================================================================
 
-LogBot Branding API - Backend für Whitelabel-System
+LogBot Branding API - Backend fÃ¼r Whitelabel-System
 ===================================================
 
 Schreibende Endpunkte (Konfiguration, Uploads, Reset) sind Admins vorbehalten:
-über sie lassen sich Custom-CSS und Dateien in die Oberfläche einbringen, die
+Ã¼ber sie lassen sich Custom-CSS und Dateien in die OberflÃ¤che einbringen, die
 jeder Besucher ausgeliefert bekommt.
 ================================================================================
 """
@@ -39,7 +39,7 @@ branding_router = APIRouter(prefix="/api/branding", tags=["Branding"])
 BRANDING_CONFIG_PATH = "/app/data/branding_config.json"
 ASSETS_DIR = "/app/data/assets"
 
-# Logos/Favicons sind kleine Dateien - alles darüber ist ein Versehen oder Absicht.
+# Logos/Favicons sind kleine Dateien - alles darÃ¼ber ist ein Versehen oder Absicht.
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 # Erlaubte Asset-Namen: genau das Muster, das die Upload-Routine selbst erzeugt.
@@ -47,16 +47,16 @@ ASSET_NAME_PATTERN = re.compile(r"^(logo|favicon)_\d{8}_\d{6}\.[a-z0-9]{1,5}$")
 
 
 def _asset_path(filename: str) -> Optional[str]:
-    """Pfad zu einem Asset - oder None, wenn der Name nicht zulässig ist.
+    """Pfad zu einem Asset - oder None, wenn der Name nicht zulÃ¤ssig ist.
 
-    Ohne diese Prüfung könnte über den Namen aus dem Asset-Ordner ausgebrochen
+    Ohne diese PrÃ¼fung kÃ¶nnte Ã¼ber den Namen aus dem Asset-Ordner ausgebrochen
     werden (z.B. "../../etc/passwd").
     """
     if not filename or not ASSET_NAME_PATTERN.match(filename):
         return None
 
     filepath = os.path.normpath(os.path.join(ASSETS_DIR, filename))
-    # Doppelt gesichert: der aufgelöste Pfad muss im Asset-Ordner liegen.
+    # Doppelt gesichert: der aufgelÃ¶ste Pfad muss im Asset-Ordner liegen.
     if os.path.commonpath([os.path.abspath(filepath), os.path.abspath(ASSETS_DIR)]) != os.path.abspath(ASSETS_DIR):
         return None
     return filepath
@@ -67,23 +67,23 @@ def _asset_path(filename: str) -> Optional[str]:
 # =============================================================================
 
 class ColorScheme(BaseModel):
-    """Farbschema für Dark oder Light Mode"""
+    """Farbschema fÃ¼r Dark oder Light Mode"""
     background: str = Field(description="Haupt-Hintergrund")
     surface: str = Field(description="Karten, Modals")
     surface_elevated: str = Field(description="Dropdowns, Tooltips")
     border: str = Field(description="Rahmenfarbe")
-    text_primary: str = Field(description="Primärer Text")
-    text_secondary: str = Field(description="Sekundärer Text")
-    text_muted: str = Field(description="Gedämpfter Text")
+    text_primary: str = Field(description="PrimÃ¤rer Text")
+    text_secondary: str = Field(description="SekundÃ¤rer Text")
+    text_muted: str = Field(description="GedÃ¤mpfter Text")
 
 
 class BrandingConfig(BaseModel):
-    """Vollständige Branding-Konfiguration"""
+    """VollstÃ¤ndige Branding-Konfiguration"""
     
     # Allgemein
     company_name: str = "LogBot"
     tagline: str = "Centralized Log Management"
-    footer_text: str = "© 2026 LogBot. All rights reserved."
+    footer_text: str = "Â© 2026 LogBot. All rights reserved."
     support_email: str = "support@example.com"
     
     # Assets
@@ -185,7 +185,7 @@ def _migrate_legacy_schemes(data: dict) -> tuple[dict, bool]:
 # =============================================================================
 
 def ensure_directories():
-    """Erstellt benötigte Verzeichnisse"""
+    """Erstellt benÃ¶tigte Verzeichnisse"""
     config_dir = os.path.dirname(BRANDING_CONFIG_PATH)
     if config_dir:
         os.makedirs(config_dir, exist_ok=True)
@@ -193,7 +193,7 @@ def ensure_directories():
 
 
 def load_config() -> BrandingConfig:
-    """Lädt Konfiguration aus JSON oder gibt Default zurück"""
+    """LÃ¤dt Konfiguration aus JSON oder gibt Default zurÃ¼ck"""
     ensure_directories()
 
     if os.path.exists(BRANDING_CONFIG_PATH):
@@ -227,7 +227,7 @@ def save_config(config: BrandingConfig) -> None:
 
 @branding_router.get("/config", response_model=BrandingConfig)
 async def get_branding_config():
-    """GET /api/branding/config - Lädt aktuelle Konfiguration"""
+    """GET /api/branding/config - LÃ¤dt aktuelle Konfiguration"""
     return load_config()
 
 
@@ -239,9 +239,9 @@ async def update_branding_config(config: BrandingConfig, _admin: User = Depends(
 
 
 async def _store_upload(file: UploadFile, allowed: list, prefix: str) -> str:
-    """Prüft und speichert einen Upload; gibt den erzeugten Dateinamen zurück.
+    """PrÃ¼ft und speichert einen Upload; gibt den erzeugten Dateinamen zurÃ¼ck.
 
-    Der Dateiname wird immer selbst erzeugt (Zeitstempel + geprüfte Endung) -
+    Der Dateiname wird immer selbst erzeugt (Zeitstempel + geprÃ¼fte Endung) -
     der vom Client gelieferte Name landet nie im Dateisystem.
     """
     ensure_directories()
@@ -253,8 +253,8 @@ async def _store_upload(file: UploadFile, allowed: list, prefix: str) -> str:
     filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
     filepath = os.path.join(ASSETS_DIR, filename)
 
-    # Stückweise schreiben und dabei mitzählen: ohne Limit könnte ein einziger
-    # Upload die Platte des Servers füllen.
+    # StÃ¼ckweise schreiben und dabei mitzÃ¤hlen: ohne Limit kÃ¶nnte ein einziger
+    # Upload die Platte des Servers fÃ¼llen.
     written = 0
     try:
         with open(filepath, "wb") as buffer:
@@ -262,7 +262,7 @@ async def _store_upload(file: UploadFile, allowed: list, prefix: str) -> str:
                 written += len(chunk)
                 if written > MAX_UPLOAD_BYTES:
                     raise HTTPException(
-                        413, f"Datei zu groß (max. {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"
+                        413, f"Datei zu groÃŸ (max. {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"
                     )
                 buffer.write(chunk)
     except Exception:
@@ -274,7 +274,7 @@ async def _store_upload(file: UploadFile, allowed: list, prefix: str) -> str:
 
 
 def _remove_asset(name: Optional[str]) -> None:
-    """Löscht ein früheres Asset, sofern der Name auf ein Asset zeigt."""
+    """LÃ¶scht ein frÃ¼heres Asset, sofern der Name auf ein Asset zeigt."""
     if not name:
         return
     filepath = _asset_path(name)
@@ -284,7 +284,7 @@ def _remove_asset(name: Optional[str]) -> None:
 
 @branding_router.post("/upload/logo")
 async def upload_logo(file: UploadFile = File(...), _admin: User = Depends(get_current_admin)):
-    """POST /api/branding/upload/logo - Lädt Logo hoch (nur Admin)"""
+    """POST /api/branding/upload/logo - LÃ¤dt Logo hoch (nur Admin)"""
     filename = await _store_upload(file, ['.png', '.jpg', '.jpeg', '.svg', '.webp'], "logo")
 
     config = load_config()
@@ -297,7 +297,7 @@ async def upload_logo(file: UploadFile = File(...), _admin: User = Depends(get_c
 
 @branding_router.post("/upload/favicon")
 async def upload_favicon(file: UploadFile = File(...), _admin: User = Depends(get_current_admin)):
-    """POST /api/branding/upload/favicon - Lädt Favicon hoch (nur Admin)"""
+    """POST /api/branding/upload/favicon - LÃ¤dt Favicon hoch (nur Admin)"""
     filename = await _store_upload(file, ['.ico', '.png', '.svg'], "favicon")
 
     config = load_config()
@@ -313,7 +313,7 @@ async def get_asset(filename: str):
     """GET /api/branding/assets/{filename} - Liefert Asset aus.
 
     Bewusst ohne Anmeldung: Logo und Favicon werden schon auf der Login-Seite
-    gebraucht. Der Name wird streng geprüft, damit darüber nichts anderes als
+    gebraucht. Der Name wird streng geprÃ¼ft, damit darÃ¼ber nichts anderes als
     ein Asset ausgeliefert werden kann.
     """
     filepath = _asset_path(filename)
@@ -324,7 +324,7 @@ async def get_asset(filename: str):
 
 @branding_router.post("/reset")
 async def reset_branding(_admin: User = Depends(get_current_admin)):
-    """POST /api/branding/reset - Setzt auf Standardwerte zurück (nur Admin)"""
+    """POST /api/branding/reset - Setzt auf Standardwerte zurÃ¼ck (nur Admin)"""
     if os.path.exists(ASSETS_DIR):
         for filename in os.listdir(ASSETS_DIR):
             filepath = os.path.join(ASSETS_DIR, filename)
