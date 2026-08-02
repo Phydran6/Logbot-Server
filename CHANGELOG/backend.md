@@ -2,6 +2,18 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.02.20.00.00
+### Fixed
+- **Backend startete nicht mehr, jede Anfrage endete mit HTTP 502.** `app/branding.py` lag als
+  Windows-1252 statt UTF-8 auf der Platte: das „ü" in „Backend für Whitelabel-System" war ein
+  einzelnes Byte `0xFC`. Python liest Quelldateien immer als UTF-8 und brach beim Import ab
+  (`SyntaxError: (unicode error) 'utf-8' codec can't decode byte 0xfc`). Der Container lief
+  damit in eine Neustartschleife, und Caddy meldete für Oberfläche, Login **und** den
+  Agenten-Ingest 502.
+  Ursache war ein Reparaturlauf gegen doppelt kodierte Umlaute, der bei dieser Datei aus
+  korrektem UTF-8 wieder Windows-1252 gemacht hat. Alle übrigen Quell- und
+  Konfigurationsdateien wurden byteweise geprüft und sind gültiges UTF-8.
+
 ## 2026.08.02.18.00.00
 ### Added
 - **Passkeys / WebAuthn** (`routes/passkey.py`): Anmeldung mit Windows Hello, Face ID,

@@ -1,4 +1,4 @@
-﻿# LogBot v2026.08.02.18.00.00
+﻿# LogBot v2026.08.02.20.00.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -260,6 +260,9 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.08.02.20.00.00 (2026-08-02)
+- FIX: **Backend startete nicht, alles antwortete mit HTTP 502** (Oberfläche, Login und Agenten-Ingest). `backend/app/branding.py` lag als Windows-1252 statt UTF-8 vor — ein einzelnes Byte statt „ü". Python liest Quelldateien immer als UTF-8 und brach beim Import ab. Datei zurück auf UTF-8 gebracht; alle übrigen Dateien wurden byteweise geprüft.
+
 ### v2026.08.02.18.00.00 (2026-08-02)
 - **Anmeldung mit Passkey** (Windows Hello, Face ID, Fingerabdruck, Sicherheitsschlüssel). Einrichten unter *System → Anmeldesicherheit*, anmelden über den Knopf auf der Login-Seite. Der geheime Teil bleibt auf dem Gerät, die Signatur gilt nur für diese Adresse — eine nachgebaute Anmeldeseite bekommt nichts Verwertbares. Voraussetzung: HTTPS mit gültigem Zertifikat.
 - SICHERHEIT: **PostgreSQL war auf allen Netzwerkschnittstellen erreichbar** — der Port ist jetzt auf `127.0.0.1` beschränkt (`DB_BIND=0.0.0.0` hebt das bewusst wieder auf).
