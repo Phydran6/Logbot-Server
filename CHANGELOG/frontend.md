@@ -2,6 +2,18 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.14.14.00.00
+### Fixed
+- **Systemzustand: die Kachel „Datenbank" war rot, obwohl die Datenbank verbunden war.**
+  Alle vier Kacheln teilten sich dieselbe Farbregel `usageColor(percent)`, die für
+  Auslastungswerte gedacht ist: ab 80 % rot. Die Datenbank-Kachel setzte bei *verbunden*
+  aber 100 — gemeint als „voller Balken", gelesen als „kritisch voll". Ergebnis: ein
+  vollflächig roter Balken über dem Wort „OK", während der Health-Check zu Recht meldete,
+  dass alles läuft. Nur die Anzeige war falsch, der Zustand nie.
+  Jede Kachel bringt ihre Farbe jetzt selbst mit: Auslastung wie bisher grün → gelb → rot,
+  die Datenbank grün bei „Verbunden" und rot bei „Nicht erreichbar" — mit ausgeschriebenem
+  Text statt „OK".
+
 ## 2026.08.14.12.00.00
 ### Added
 - **Systemcheck** (`components/SystemCheck.vue`, eingebunden im *Systemzustand*): ein Knopf

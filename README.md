@@ -1,4 +1,4 @@
-﻿# LogBot v2026.08.14.12.00.00
+﻿# LogBot v2026.08.14.14.00.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -306,6 +306,9 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.08.14.14.00.00 (2026-08-14)
+- FIX: **Systemzustand zeigte die Datenbank rot, obwohl sie verbunden war.** Die vier Kacheln teilten sich eine Farbregel, die für Auslastung gedacht ist (ab 80 % rot) — die Datenbank-Kachel setzte bei „verbunden" aber 100 als vollen Balken. Reiner Anzeigefehler, der Zustand war immer korrekt. Jede Kachel bringt ihre Farbe jetzt selbst mit; die Datenbank steht auf grün/„Verbunden" bzw. rot/„Nicht erreichbar".
+
 ### v2026.08.14.12.00.00 (2026-08-14)
 - **Systemcheck** unter *System → Systemzustand*: 24 Prüfungen in fünf Bereichen (Kern, Dienste, Sicherheit, Betrieb, Netz & Updates) auf einen Knopfdruck. Zu jedem Fund steht, was nicht geht, woran das gemessen wurde und was zu tun ist — angezeigt werden zuerst nur die Auffälligkeiten.
 - **Patchmanagement** unter *System → Updates*: vergleicht den installierten Stand mit GitHub, spielt das Update ein und kann auf eine vorherige Sicherung zurückfallen. Vor jedem Eingriff steht eine Rückfrage, die auf möglichen Datenverlust hinweist; die Datenbank lässt sich vorher sichern. Schlägt das Update fehl, fährt das System **selbsttätig** auf den alten Stand zurück. Als Kommandozeilen-Weg bleibt der Einzeiler `curl -sSL … | sudo bash -s -- update -y` — ein Update von Hand mit `docker compose build` ist nicht mehr nötig.

@@ -52,9 +52,9 @@
             <AppIcon :name="metric.icon" :size="18" />
           </span>
         </div>
-        <span class="stat-value">{{ metric.value }}</span>
+        <span class="stat-value" :style="metric.emphasize ? { color: metric.color } : null">{{ metric.value }}</span>
         <div class="bar-track">
-          <div class="bar-fill" :style="{ width: metric.percent + '%', backgroundColor: usageColor(metric.percent) }" />
+          <div class="bar-fill" :style="{ width: metric.percent + '%', backgroundColor: metric.color }" />
         </div>
       </div>
     </div>
@@ -170,32 +170,48 @@ let cachedHealthTs = 0
 const isHealthy = computed(() => health.value?.status === 'healthy')
 const dbReachable = computed(() => database.value?.reachable ?? health.value?.database_connected ?? false)
 
-const metrics = computed(() => [
-  {
-    label: 'CPU',
-    icon: 'dashboard',
-    percent: health.value?.cpu_percent || 0,
-    value: `${(health.value?.cpu_percent || 0).toFixed(1)} %`,
-  },
-  {
-    label: 'Arbeitsspeicher',
-    icon: 'dashboard',
-    percent: health.value?.memory_percent || 0,
-    value: `${(health.value?.memory_percent || 0).toFixed(1)} %`,
-  },
-  {
-    label: 'Festplatte',
-    icon: 'agents',
-    percent: health.value?.disk_percent || 0,
-    value: `${(health.value?.disk_percent || 0).toFixed(1)} %`,
-  },
-  {
-    label: 'Datenbank',
-    icon: 'agents',
-    percent: dbReachable.value ? 100 : 0,
-    value: dbReachable.value ? 'OK' : 'Fehler',
-  },
-])
+// Achtung, zwei verschiedene Bedeutungen in derselben Kachelreihe:
+// Bei CPU, Speicher und Platte ist "viel" schlecht - der Balken wird zum Ende hin rot.
+// Bei der Datenbank ist der Balken kein Füllstand, sondern ein Zustand: voll und
+// grün heißt verbunden, voll und rot heißt nicht erreichbar. Deshalb bringt jede
+// Kachel ihre Farbe selbst mit, statt sie aus dem Prozentwert abzuleiten.
+const metrics = computed(() => {
+  const cpu = health.value?.cpu_percent || 0
+  const memory = health.value?.memory_percent || 0
+  const disk = health.value?.disk_percent || 0
+
+  return [
+    {
+      label: 'CPU',
+      icon: 'dashboard',
+      percent: cpu,
+      value: `${cpu.toFixed(1)} %`,
+      color: usageColor(cpu),
+    },
+    {
+      label: 'Arbeitsspeicher',
+      icon: 'dashboard',
+      percent: memory,
+      value: `${memory.toFixed(1)} %`,
+      color: usageColor(memory),
+    },
+    {
+      label: 'Festplatte',
+      icon: 'agents',
+      percent: disk,
+      value: `${disk.toFixed(1)} %`,
+      color: usageColor(disk),
+    },
+    {
+      label: 'Datenbank',
+      icon: 'agents',
+      percent: 100,
+      value: dbReachable.value ? 'Verbunden' : 'Nicht erreichbar',
+      color: dbReachable.value ? 'var(--color-success)' : 'var(--color-danger)',
+      emphasize: true,
+    },
+  ]
+})
 
 const logsPerMinute = computed(() => {
   if (!health.value?.logs_last_24h) return 0
