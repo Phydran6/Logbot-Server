@@ -1,15 +1,20 @@
-﻿/**
+/**
  * ==============================================================================
- * Name:           Phil Fischer
- * E-Mail:         p.fischer@phytech.de
- * Version:        2026.05.13.20.58.33
+ * Name:           Phydran6
+ * Kontakt:        Phydran6
+ * Version:        2026.08.14.12.00.00
+ * Changelog:      ../../../CHANGELOG/frontend.md
  * ==============================================================================
- * 
+ *
  * LogBot Vue Router - Navigation und Route-Definitionen
  * ======================================================
- * Definiert alle verfügbaren Routen der Anwendung.
- * Enthält Auth-Guard für geschützte Bereiche.
- * 
+ * Drei Bereiche: Überwachung, Verwaltung, System.
+ *
+ * Alles, was zum System gehört (Netzwerk, Datenbank, Verzeichnis, Archivierung,
+ * Erscheinungsbild, Anmeldesicherheit), liegt unter /settings als Reiter. Die
+ * alten Adressen wie /settings/ldap funktionieren weiter: der Teil hinter
+ * /settings wählt den Reiter aus.
+ *
  * ==============================================================================
  */
 
@@ -31,124 +36,84 @@ const routes = [
   },
 
   // ---------------------------------------------------------------------------
-  // Öffentliche Routen: Rechtliche Seiten
-  // ---------------------------------------------------------------------------
-  {
-    path: '/impressum',
-    name: 'Impressum',
-    component: () => import('../views/Impressum.vue'),
-    meta: { public: true }
-  },
-  {
-    path: '/datenschutz',
-    name: 'Datenschutz',
-    component: () => import('../views/Datenschutz.vue'),
-    meta: { public: true }
-  },
-  
-  // ---------------------------------------------------------------------------
   // Geschützte Routen: Hauptlayout mit Sidebar
   // ---------------------------------------------------------------------------
   {
     path: '/',
     component: () => import('../views/Layout.vue'),
     children: [
-      // Dashboard (Startseite)
-      { 
-        path: '', 
-        name: 'Dashboard', 
-        component: () => import('../views/Dashboard.vue') 
+      // --- Überwachung -------------------------------------------------------
+      {
+        path: '',
+        name: 'Dashboard',
+        component: () => import('../views/Dashboard.vue')
       },
-      
-      // Log-Ansicht
-      { 
-        path: 'logs', 
-        name: 'Logs', 
-        component: () => import('../views/Logs.vue') 
+      {
+        path: 'logs',
+        name: 'Logs',
+        component: () => import('../views/Logs.vue')
       },
-      
-      // Agenten-Verwaltung
       {
         path: 'agents',
         name: 'Agents',
         component: () => import('../views/Agents.vue')
       },
-
-      // Log-Ansicht fuer ein einzelnes Geraet
       {
         path: 'devices/:hostname',
         name: 'DeviceLogs',
         component: () => import('../views/DeviceLogs.vue')
       },
 
-      // Benutzer-Verwaltung
-      { 
-        path: 'users', 
-        name: 'Users', 
-        component: () => import('../views/Users.vue') 
-      },
-      
-      // Webhooks
-      { 
-        path: 'webhooks', 
-        name: 'Webhooks', 
-        component: () => import('../views/Webhooks.vue') 
-      },
-      
-      // Allgemeine Einstellungen
-      { 
-        path: 'settings', 
-        name: 'Settings', 
-        component: () => import('../views/Settings.vue') 
-      },
-      
-      // System-Health
-      { 
-        path: 'health', 
-        name: 'Health', 
-        component: () => import('../views/Health.vue') 
-      },
-      
-      // Branding-Einstellungen
+      // --- Verwaltung --------------------------------------------------------
       {
-        path: 'settings/branding',
-        name: 'BrandingSettings',
-        component: () => import('../views/BrandingSettings.vue')
+        path: 'webhooks',
+        name: 'Webhooks',
+        component: () => import('../views/Webhooks.vue')
       },
-
-      // Eigene Anmeldesicherheit (Passkeys)
       {
-        path: 'settings/security',
-        name: 'SecuritySettings',
-        component: () => import('../views/SecuritySettings.vue')
-      },
-
-      // Anmeldung am Verzeichnis (LDAP / Active Directory)
-      {
-        path: 'settings/ldap',
-        name: 'LdapSettings',
-        component: () => import('../views/LdapSettings.vue'),
+        path: 'users',
+        name: 'Users',
+        component: () => import('../views/Users.vue'),
         meta: { admin: true }
       },
 
-      // Archivierung der Logs auf externe Ziele
+      // --- System ------------------------------------------------------------
+      // Ein Ziel für alle Einstellungen. Der optionale Teil hinter /settings
+      // wählt den Reiter (z.B. /settings/ldap).
       {
-        path: 'settings/archiving',
-        name: 'ArchivingSettings',
-        component: () => import('../views/ArchivingSettings.vue'),
+        path: 'settings/:tab?',
+        name: 'Settings',
+        component: () => import('../views/Settings.vue')
+      },
+      {
+        path: 'health',
+        name: 'Health',
+        component: () => import('../views/Health.vue')
+      },
+      {
+        path: 'updates',
+        name: 'Updates',
+        component: () => import('../views/Updates.vue'),
         meta: { admin: true }
       },
-
     ]
+  },
+
+  // ---------------------------------------------------------------------------
+  // Unbekannte Adresse: zurück auf das Dashboard statt leere Seite
+  // ---------------------------------------------------------------------------
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/'
   }
 ]
 
 // =============================================================================
 // Router-Instanz erstellen
 // =============================================================================
-const router = createRouter({ 
-  history: createWebHistory(), 
-  routes 
+const router = createRouter({
+  history: createWebHistory(),
+  routes
 })
 
 // =============================================================================
@@ -156,13 +121,13 @@ const router = createRouter({
 // =============================================================================
 router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore()
-  
+
   // Öffentliche Routen durchlassen
   if (to.meta.public) return next()
-  
+
   // Kein Token = zum Login
   if (!auth.token) return next('/login')
-  
+
   // User-Daten laden falls noch nicht vorhanden
   if (!auth.user) {
     try {

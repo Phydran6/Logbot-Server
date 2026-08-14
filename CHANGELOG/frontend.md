@@ -2,6 +2,39 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.14.12.00.00
+### Added
+- **Systemcheck** (`components/SystemCheck.vue`, eingebunden im *Systemzustand*): ein Knopf
+  prüft das ganze System durch. Das Ergebnis steht nach Bereichen sortiert da; standardmäßig
+  nur die Auffälligkeiten, aufgeklappt mit Messwert und Handlungsempfehlung. „Alle anzeigen"
+  blendet die unauffälligen Prüfungen dazu. Beim Öffnen erscheint der letzte Bericht, ohne
+  neu zu messen.
+- **Updates** (`views/Updates.vue`, *System → Updates*): installierter Stand gegen GitHub,
+  Update einspielen, Rückfall auf eine Sicherung, Fortschrittsanzeige und Protokoll.
+  - Vor Update **und** Rückfall kommt eine Rückfrage, die ausdrücklich auf möglichen
+    Datenverlust hinweist; erst ein gesetzter Haken gibt den Knopf frei. Beim Update lässt
+    sich der Datenbank-Abzug an- und abwählen.
+  - Während des Laufs ist der Server zeitweise weg — die Seite erkennt das, sagt es und
+    verbindet sich von selbst wieder.
+  - Der Einzeiler für die Kommandozeile steht mit Kopierknopf daneben.
+
+### Changed
+- **Linkes Menü aufgeräumt** (`views/Layout.vue`): sichtbar sind nur noch die drei Bereiche
+  *Überwachung*, *Verwaltung*, *System*. Ein Klick klappt die Unterpunkte auf; der Bereich der
+  gerade offenen Seite klappt selbsttätig auf. Vorher standen bis zu zehn Einträge untereinander.
+- **System entwirrt** (`views/Settings.vue`): *Verzeichnis (LDAP)*, *Archivierung*,
+  *Erscheinungsbild* und *Anmeldesicherheit* sind keine eigenen Menüpunkte mehr, sondern Reiter
+  der Einstellungen — gruppiert nach *Betrieb*, *Infrastruktur*, *Konto & Anmeldung* und
+  *Darstellung*. Geladen werden sie erst beim Öffnen des Reiters.
+  Die Adresse zieht mit (`/settings/ldap`), damit sich ein Bereich verlinken lässt und die
+  bisherigen Links weiter funktionieren. Der Reiter „System" heißt jetzt „Neustart" — das ist,
+  was er tut.
+
+### Removed
+- **Impressum, Datenschutz und Cookie-Hinweis** ersatzlos entfernt (Ansichten, Routen,
+  Fußzeilen-Links auf der Anmeldeseite und im Layout). LogBot ist ein internes Werkzeug und
+  keine Website; die Seiten standen nur im Weg.
+
 ## 2026.08.02.18.00.00
 ### Added
 - **Passkeys**: neue Ansicht `views/SecuritySettings.vue` (*System → Anmeldesicherheit*) zum

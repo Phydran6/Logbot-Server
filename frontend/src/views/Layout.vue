@@ -1,9 +1,9 @@
 <!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.08.02.14.00.00
+     Version:     2026.08.14.12.00.00
      Changelog:   ../../../CHANGELOG/frontend.md
-     Beschreibung: LogBot - Hauptlayout: dockbare Sidebar, Kopfleiste, Inhalt.
+     Beschreibung: LogBot - Hauptlayout: Sidebar mit drei aufklappbaren Bereichen.
      ============================================================================== -->
 
 <template>
@@ -57,27 +57,49 @@
         </button>
       </div>
 
-      <!-- Navigation -->
+      <!-- ============================================================
+           NAVIGATION - drei Bereiche, die Unterpunkte klappen auf.
+           Ohne Aufklappen staenden hier ein Dutzend Eintraege
+           untereinander; so sieht man erst die drei Bereiche.
+           ============================================================ -->
       <nav class="sidebar-nav">
-        <template v-for="group in navGroups" :key="group.title">
-          <p v-if="group.items.length" class="nav-group-title" :class="collapsed ? 'md:hidden' : ''">
-            {{ group.title }}
-          </p>
-          <ul v-if="group.items.length" class="nav-list">
+        <div v-for="group in navGroups" :key="group.key" class="nav-group">
+          <button
+            class="nav-group-btn"
+            :class="[
+              { 'is-open': isGroupOpen(group.key), 'has-active': activeGroupKey === group.key },
+              collapsed ? 'md:justify-center md:px-2' : ''
+            ]"
+            :title="collapsed ? group.title : null"
+            :aria-expanded="isGroupOpen(group.key)"
+            @click="toggleGroup(group.key)"
+          >
+            <AppIcon :name="group.icon" :size="18" class="shrink-0" />
+            <span class="flex-1 text-left" :class="collapsed ? 'md:hidden' : ''">{{ group.title }}</span>
+            <AppIcon
+              name="chevronDown"
+              :size="16"
+              class="nav-chevron shrink-0"
+              :class="[isGroupOpen(group.key) ? 'is-open' : '', collapsed ? 'md:hidden' : '']"
+            />
+          </button>
+
+          <!-- Eingeklappt ist nur der Desktop (md+). Auf dem Handy ist die Sidebar
+               ein Overlay und zeigt die Unterpunkte immer. -->
+          <ul v-if="isGroupOpen(group.key)" class="nav-list" :class="collapsed ? 'md:hidden' : ''">
             <li v-for="item in group.items" :key="item.to">
               <router-link
                 :to="item.to"
-                class="nav-link"
-                :class="[{ active: isActive(item) }, collapsed ? 'md:justify-center md:px-2' : '']"
-                :title="collapsed ? item.label : null"
+                class="nav-link nav-sub-link"
+                :class="{ active: isActive(item) }"
                 @click="sidebarOpen = false"
               >
-                <AppIcon :name="item.icon" :size="18" class="shrink-0" />
-                <span :class="collapsed ? 'md:hidden' : ''">{{ item.label }}</span>
+                <AppIcon :name="item.icon" :size="16" class="shrink-0" />
+                <span>{{ item.label }}</span>
               </router-link>
             </li>
           </ul>
-        </template>
+        </div>
       </nav>
 
       <!-- Fußbereich: eingeklappt aufklappen, Theme, Benutzer -->
@@ -142,11 +164,8 @@
         <router-view />
       </div>
 
-      <footer class="app-footer">
+      <footer v-if="footerText" class="app-footer">
         <span>{{ footerText }}</span>
-        <span class="flex-1" />
-        <router-link to="/impressum" class="hover:underline">Impressum</router-link>
-        <router-link to="/datenschutz" class="hover:underline">Datenschutz</router-link>
       </footer>
     </main>
   </div>
@@ -201,50 +220,91 @@ const brandInitial = computed(() => (companyName.value || 'L').trim().charAt(0).
 const userInitial = computed(() => (auth.user?.username || '?').trim().charAt(0).toUpperCase())
 const roleLabel = computed(() => (auth.user?.role === 'admin' ? 'Administrator' : 'Benutzer'))
 
-// Navigation in Gruppen - bei acht Eintraegen ohne Gliederung sucht man sonst.
+// =============================================================================
+// Navigation
+// =============================================================================
+// Drei Bereiche. Sichtbar sind zuerst nur diese drei; die Unterpunkte erscheinen
+// erst nach einem Klick. `match` nennt weitere Routen, bei denen der Eintrag
+// als aktiv gilt (z.B. die Geraete-Ansicht unter "Geräte").
 const navGroups = computed(() => [
   {
+    key: 'monitoring',
     title: 'Überwachung',
+    icon: 'dashboard',
     items: [
       { to: '/', name: 'Dashboard', icon: 'dashboard', label: 'Dashboard' },
       { to: '/logs', name: 'Logs', icon: 'logs', label: 'Logs' },
-      { to: '/agents', name: 'Agents', icon: 'agents', label: 'Geräte' },
+      { to: '/agents', name: 'Agents', icon: 'agents', label: 'Geräte', match: ['DeviceLogs'] },
     ],
   },
   {
+    key: 'management',
     title: 'Verwaltung',
+    icon: 'users',
     items: [
       { to: '/webhooks', name: 'Webhooks', icon: 'webhooks', label: 'Webhooks' },
       ...(auth.isAdmin ? [{ to: '/users', name: 'Users', icon: 'users', label: 'Benutzer' }] : []),
     ],
   },
   {
+    key: 'system',
     title: 'System',
+    icon: 'settings',
     items: [
       { to: '/settings', name: 'Settings', icon: 'settings', label: 'Einstellungen' },
-      { to: '/settings/security', name: 'SecuritySettings', icon: 'lock', label: 'Anmeldesicherheit' },
-      { to: '/settings/branding', name: 'BrandingSettings', icon: 'branding', label: 'Branding' },
-      ...(auth.isAdmin
-        ? [
-            { to: '/settings/ldap', name: 'LdapSettings', icon: 'users', label: 'Verzeichnis (LDAP)' },
-            { to: '/settings/archiving', name: 'ArchivingSettings', icon: 'download', label: 'Archivierung' },
-          ]
-        : []),
       { to: '/health', name: 'Health', icon: 'health', label: 'Systemzustand' },
+      ...(auth.isAdmin
+        ? [{ to: '/updates', name: 'Updates', icon: 'download', label: 'Updates' }]
+        : []),
     ],
   },
 ])
 
-// Die Geraete-Ansicht (/devices/<host>) gehoert sichtbar zu "Geräte".
+/** Welcher Bereich enthaelt die gerade offene Seite? */
+const activeGroupKey = computed(() => {
+  for (const group of navGroups.value) {
+    if (group.items.some(item => isActive(item))) return group.key
+  }
+  return ''
+})
+
+// Offener Bereich. Start: der Bereich der aktuellen Seite.
+const openGroup = ref(activeGroupKey.value || 'monitoring')
+
+// Beim Seitenwechsel den passenden Bereich offen halten.
+watch(activeGroupKey, (key) => {
+  if (key) openGroup.value = key
+})
+
+function isGroupOpen(key) {
+  return openGroup.value === key
+}
+
+/** Nur auf dem Desktop gibt es das eingeklappte Menue (Icons ohne Text). */
+function isDesktop() {
+  return typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+}
+
+function toggleGroup(key) {
+  // Eingeklappte Sidebar am Desktop: erst ausklappen, dann den Bereich oeffnen -
+  // sonst klickt man auf ein Icon und es passiert sichtbar nichts.
+  if (collapsed.value && isDesktop()) {
+    collapsed.value = false
+    openGroup.value = key
+    return
+  }
+  openGroup.value = openGroup.value === key ? '' : key
+}
+
 function isActive(item) {
   if (route.name === item.name) return true
-  return item.name === 'Agents' && route.name === 'DeviceLogs'
+  return Array.isArray(item.match) && item.match.includes(route.name)
 }
 
 const pageTitle = computed(() => {
   if (route.name === 'DeviceLogs') return String(route.params.hostname || 'Gerät')
   for (const group of navGroups.value) {
-    const hit = group.items.find(item => item.name === route.name)
+    const hit = group.items.find(item => isActive(item))
     if (hit) return hit.label
   }
   return companyName.value
@@ -360,23 +420,53 @@ function handleLogout() {
   padding: 0.75rem 0.625rem;
 }
 
-.nav-group-title {
-  padding: 0.75rem 0.75rem 0.375rem;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted);
+.nav-group + .nav-group {
+  margin-top: 0.25rem;
 }
 
-.is-collapsed .nav-group-title {
-  padding-top: 0.5rem;
+.nav-group-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.nav-group-btn:hover {
+  background-color: var(--hover-surface);
+  color: var(--color-text-primary);
+}
+
+.nav-group-btn.has-active {
+  color: var(--color-text-primary);
+}
+
+.nav-chevron {
+  transition: transform var(--duration) var(--ease);
+}
+
+.nav-chevron.is-open {
+  transform: rotate(180deg);
 }
 
 .nav-list {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
+  margin: 0.125rem 0 0.375rem;
+  padding-left: 0.875rem;
+  border-left: 1px solid var(--color-border);
+  margin-left: 1.0625rem;
+}
+
+.nav-sub-link {
+  font-size: 0.8125rem;
 }
 
 /* --------------------------------------------------------------- Fußbereich */

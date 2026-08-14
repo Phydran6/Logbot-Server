@@ -1,0 +1,4 @@
+# Shell-Skripte immer mit LF auschecken. Mit CRLF startet ein Skript unter Linux
+# nicht ("bad interpreter: /bin/bash^M") - das trifft install.sh und das
+# Wartungsskript fuer Updates.
+*.sh text eol=lf

@@ -2,6 +2,50 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.14.12.00.00
+### Added
+- **Systemcheck** (`app/diagnostics.py`, `routes/diagnostics.py`): prüft das System in einem
+  Durchlauf und sagt bei jedem Fund, *was* nicht geht, *woran* das gemessen wurde und *was zu
+  tun ist*. 24 Prüfungen in fünf Bereichen:
+  - **Kern**: Backend, Datenbankverbindung samt Antwortzeit, vollständiges Schema (Tabellen
+    *und* die per Startup-Migration nachgezogenen Spalten), Indizes, Platte, Speicher, CPU.
+  - **Dienste**: Weboberfläche, Caddy-Admin-API, Syslog-Empfänger auf 514, Zustand aller
+    `logbot-*`-Container (über den Host).
+  - **Sicherheit**: `JWT_SECRET` noch auf `change-me`, Standardpasswörter auf Admin-Konten
+    (bcrypt-Vergleich gegen `admin`/`password`/`logbot`), HTTPS aktiv, TLS zur externen
+    Datenbank.
+  - **Betrieb**: Logeingang (Alter des neuesten Eintrags), stille Geräte, gesetzte
+    Aufbewahrung, Archivierung (letzter Lauf), LDAP-Erreichbarkeit — beides nur, wenn
+    eingeschaltet.
+  - **Netz & Updates**: DNS, GitHub, Aktualität, Host-Zugriff.
+  Jede Prüfung läuft einzeln abgesichert und mit eigenem Zeitlimit (20 s): fällt eine aus,
+  bleibt der Rest des Berichts brauchbar. `GET /api/diagnostics/last` liefert den letzten
+  Bericht ohne neue Messung, `POST /api/diagnostics/run` misst neu (nur Admin).
+- **Patchmanagement** (`app/updater.py`, `routes/updates.py`, `scripts/logbot-update.sh`):
+  - `GET /api/updates/status` vergleicht den installierten Commit bzw. die `VERSION`-Datei mit
+    dem Stand auf GitHub (`api.github.com`, Ergebnis 15 Minuten zwischengespeichert — anonym
+    sind nur 60 Abfragen pro Stunde erlaubt; `GITHUB_TOKEN` hebt das an).
+  - `POST /api/updates/apply` spielt den neuen Stand ein, `POST /api/updates/rollback` fällt auf
+    eine Sicherung zurück. Beide verlangen ein Bestätigungswort im Rumpf, damit ein
+    versehentlicher Klick nichts auslöst.
+  - Das eigentliche Update läuft als Skript auf dem **Host**, nicht im Container — der
+    Container kann sich nicht selbst ersetzen. Gestartet wird es über `systemd-run`, damit der
+    Lauf den Neubau der Container überlebt (ein per `nsenter` gestarteter Kindprozess läge in
+    der Control-Group des Containers und würde mitgetötet).
+  - Ablauf: sichern (Dateien + optional `pg_dump`) → `git fetch`/`reset --hard` bzw. frischer
+    Clone → `docker compose build && up -d` → warten, bis `/api/health` wieder antwortet.
+    Schlägt ein Schritt fehl, spielt das Skript die Sicherung **selbsttätig** zurück.
+  - Fortschritt und Ergebnis stehen in `<install>/data/update-state.json`, das ausführliche
+    Protokoll in `<install>/data/update.log` (`GET /api/updates/log`). Bewusst Dateien auf dem
+    Host und keine Tabelle: während des Updates ist die Datenbank zeitweise weg.
+- `app/hostexec.py`: gemeinsamer Helfer für Befehle auf dem Host (`nsenter`), inklusive
+  Dateien lesen/schreiben und dem Start langlaufender Vorgänge.
+- `VERSION` im Projektwurzelverzeichnis als eindeutiger Versionsstand für den Abgleich.
+
+### Changed
+- Neue Umgebungsvariablen (alle mit sinnvollen Vorgaben): `LOGBOT_INSTALL_DIR` (`/opt/logbot`),
+  `LOGBOT_REPO_SLUG`, `LOGBOT_BRANCH`, `GITHUB_TOKEN`.
+
 ## 2026.08.02.20.00.00
 ### Fixed
 - **Backend startete nicht mehr, jede Anfrage endete mit HTTP 502.** `app/branding.py` lag als

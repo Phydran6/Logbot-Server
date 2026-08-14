@@ -1,9 +1,9 @@
 <!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.08.02.16.00.00
+     Version:     2026.08.14.12.00.00
      Changelog:   ../../../CHANGELOG/frontend.md
-     Beschreibung: LogBot - Systemzustand: Auslastung, Logs, Geräte, Datenbank.
+     Beschreibung: LogBot - Systemzustand: Systemcheck, Auslastung, Logs, Geräte, DB.
      ============================================================================== -->
 
 <template>
@@ -19,6 +19,11 @@
         <AppIcon name="refresh" :size="16" />
         Aktualisieren
       </button>
+    </div>
+
+    <!-- Vollständige Prüfung des Systems (nur Admin) -->
+    <div v-if="authStore.isAdmin" class="mb-4">
+      <SystemCheck />
     </div>
 
     <!-- Gesamtzustand -->
@@ -150,6 +155,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import AppIcon from '../components/AppIcon.vue'
+import SystemCheck from '../components/SystemCheck.vue'
 
 const authStore = useAuthStore()
 const health = ref(null)

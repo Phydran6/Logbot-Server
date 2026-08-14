@@ -94,6 +94,14 @@ services:
       # -> zurueck auf reines HTTP (Port 80), gespeicherte TLS-Config wird verworfen.
       CADDY_FORCE_HTTP: ${CADDY_FORCE_HTTP:-false}
       SITE_URL: ${SITE_URL:-}
+      # Patchmanagement (System -> Updates): wo die Installation auf dem HOST
+      # liegt und gegen welches Repository geprueft wird. Das Update selbst
+      # laeuft auf dem Host (systemd-run), nicht in diesem Container.
+      LOGBOT_INSTALL_DIR: ${LOGBOT_INSTALL_DIR:-/opt/logbot}
+      LOGBOT_REPO_SLUG: ${LOGBOT_REPO_SLUG:-Phydran6/Logbot-Server}
+      LOGBOT_BRANCH: ${LOGBOT_BRANCH:-main}
+      # Optional: hebt das Limit der anonymen GitHub-Abfragen an.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     expose:
       - "8000"
     volumes:

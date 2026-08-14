@@ -3,6 +3,22 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.08.14.12.00.00
+### Added
+- **`VERSION`** im Wurzelverzeichnis: der installierte Stand, gegen den die Update-Prüfung den
+  Stand auf GitHub vergleicht. Bei jedem Release mit anheben.
+- **`.gitattributes`**: `*.sh text eol=lf`. Ein Checkout mit CRLF lässt jedes Shell-Skript unter
+  Linux mit `bad interpreter: /bin/bash^M` scheitern — das betrifft `install.sh` genauso wie das
+  neue Wartungsskript.
+- `docker-compose.yml` (Backend): `LOGBOT_INSTALL_DIR` (Vorgabe `/opt/logbot`),
+  `LOGBOT_REPO_SLUG`, `LOGBOT_BRANCH`, `GITHUB_TOKEN` — alle optional, alle mit Vorgabe.
+  Sie steuern das Patchmanagement unter *System → Updates*.
+
+### Changed
+- `install.sh`: Abschluss nennt jetzt beide Update-Wege (Oberfläche und Einzeiler).
+- `docker-compose.hardened.yml`: hält fest, dass mit den engeren Rechten auch das Update über
+  die Oberfläche wegfällt — Updates laufen dann nur noch über den Einzeiler.
+
 ## 2026.08.02.18.00.00
 ### Security
 - **PostgreSQL war auf allen Netzwerkschnittstellen offen** (`ports: "5432:5432"`). Die

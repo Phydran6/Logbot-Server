@@ -1,4 +1,4 @@
-﻿# LogBot v2026.08.02.20.00.00
+﻿# LogBot v2026.08.14.12.00.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -20,6 +20,8 @@ Entwickelt von Phydran6
 - Webhook-Integration für n8n, Make, Zapier (ohne Login)
 - Dashboard mit Statistiken
 - Benutzerverwaltung mit Rollen
+- **Systemcheck**: prüft das ganze System auf Knopfdruck und erklärt jeden Fund
+- **Patchmanagement**: Update aus GitHub direkt über die Oberfläche, mit Rückfall
 - Health Monitoring für System-Ressourcen
 - Whitelabel-System mit Dark/Light Mode
 - Docker-basiert für einfache Installation
@@ -163,15 +165,24 @@ LogBot bietet ein Whitelabel-System zur Anpassung an deine Marke.
 ## Verzeichnisstruktur (Standard-Install unter /opt/logbot)
 ```
 /opt/logbot/
+  VERSION               # installierter Versionsstand (Abgleich mit GitHub)
   docker-compose.yml
   .env                  # Zugangsdaten (geheim!)
   backend/              # FastAPI Backend
     app/
+    scripts/            # Wartungsskript für Update/Rückfall (läuft auf dem Host)
   frontend/             # Vue.js Frontend
     src/
   syslog/               # Syslog Server
   caddy/                # Reverse Proxy
   db/                   # Datenbank-Schema
+  data/                 # Zustand und Protokoll des letzten Updates
+
+/opt/logbot-backups/    # Sicherungen vor jedem Update (für den Rückfall)
+  20260814-120000/
+    files/              # Kopie der Installation
+    database.sql.gz     # optionaler Datenbank-Abzug
+    backup.json         # Version, Commit, Zeitpunkt
 ```
 
 ## Befehle
@@ -192,11 +203,46 @@ docker compose down
 
 # Starten
 docker compose up -d
-
-# Update auf neue Version
-docker compose pull
-docker compose up -d --build
 ```
+
+## Systemcheck
+*System → Systemzustand → **Systemcheck starten***
+
+Prüft in einem Durchlauf Datenbank (Verbindung, Schema, Indizes), Dienste (Oberfläche, Caddy,
+Syslog, Container), Sicherheit (Standardpasswörter, `JWT_SECRET`, HTTPS, DB-Verschlüsselung),
+Betrieb (Logeingang, stille Geräte, Aufbewahrung, Archivierung, LDAP) und Netz (DNS, GitHub,
+Aktualität). Zu jedem Fund steht dabei, **was** nicht geht, **woran** das gemessen wurde und
+**was zu tun ist**. Angezeigt werden zuerst nur die Auffälligkeiten.
+
+## Update
+Es gibt genau zwei Wege — beide holen denselben Stand aus GitHub:
+
+**1. Über die Oberfläche:** *System → Updates*. Zeigt den installierten Stand gegen GitHub,
+spielt das Update ein und kann jederzeit auf eine vorherige Sicherung zurückfallen.
+
+**2. Als Einzeiler auf dem Server:**
+```bash
+curl -sSL https://github.com/Phydran6/Logbot-Server/raw/main/install.sh | sudo bash -s -- update -y
+```
+
+> ⚠️ **Zum Datenbestand:** Die Logs liegen in einem eigenen Docker-Volume und überstehen ein
+> Update normalerweise unbeschadet. Verlassen sollte man sich darauf nicht — ändert sich das
+> Datenbankschema oder bricht der Lauf ab, können Logs verloren gehen. Die Oberfläche weist vor
+> jedem Eingriff darauf hin und bietet an, die Datenbank vorher zu sichern.
+
+**Wie das Update abläuft** (`backend/scripts/logbot-update.sh`, läuft auf dem Host — von Hand:
+`sudo bash /opt/logbot/backend/scripts/logbot-update.sh apply`):
+1. Sichern nach `/opt/logbot-backups/<Zeitstempel>/` — Dateien und auf Wunsch ein `pg_dump`.
+2. Neuen Stand holen (`git fetch` + `reset --hard`, ersatzweise frischer Clone).
+3. `docker compose build && docker compose up -d --remove-orphans`.
+4. Warten, bis `/api/health` wieder antwortet.
+
+Schlägt Schritt 2, 3 oder 4 fehl, spielt das Skript die Sicherung **selbsttätig** zurück. Der
+Fortschritt steht in `/opt/logbot/data/update-state.json`, das Protokoll in
+`/opt/logbot/data/update.log` — beides zeigt die Oberfläche an.
+
+> Läuft LogBot mit `docker-compose.hardened.yml`, fehlt dem Backend der Zugriff auf den Host:
+> dann geht das Update nur über den Einzeiler. Der Systemcheck sagt das ausdrücklich an.
 > ⚠️ **PostgreSQL-Major-Upgrade (z. B. 16 → 17)?** Ein reiner Image-Tausch reicht **nicht** –
 > die alte 16er-Datenbank ist nicht mit einem 17er-Server kompatibel. Vorgehen: siehe
 > [Update / PostgreSQL-Major-Upgrade](#update--postgresql-major-upgrade).
@@ -260,6 +306,13 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.08.14.12.00.00 (2026-08-14)
+- **Systemcheck** unter *System → Systemzustand*: 24 Prüfungen in fünf Bereichen (Kern, Dienste, Sicherheit, Betrieb, Netz & Updates) auf einen Knopfdruck. Zu jedem Fund steht, was nicht geht, woran das gemessen wurde und was zu tun ist — angezeigt werden zuerst nur die Auffälligkeiten.
+- **Patchmanagement** unter *System → Updates*: vergleicht den installierten Stand mit GitHub, spielt das Update ein und kann auf eine vorherige Sicherung zurückfallen. Vor jedem Eingriff steht eine Rückfrage, die auf möglichen Datenverlust hinweist; die Datenbank lässt sich vorher sichern. Schlägt das Update fehl, fährt das System **selbsttätig** auf den alten Stand zurück. Als Kommandozeilen-Weg bleibt der Einzeiler `curl -sSL … | sudo bash -s -- update -y` — ein Update von Hand mit `docker compose build` ist nicht mehr nötig.
+- **Linkes Menü aufgeräumt**: sichtbar sind nur noch *Überwachung*, *Verwaltung* und *System*; die Unterpunkte klappen bei Bedarf auf.
+- **System entwirrt**: *Verzeichnis (LDAP)*, *Archivierung*, *Erscheinungsbild* und *Anmeldesicherheit* sind keine eigenen Menüpunkte mehr, sondern Reiter der Einstellungen. Alte Links wie `/settings/ldap` funktionieren weiter.
+- ENTFERNT: Impressum, Datenschutzerklärung und Cookie-Hinweis. LogBot ist ein internes Werkzeug, keine Website.
+
 ### v2026.08.02.20.00.00 (2026-08-02)
 - FIX: **Backend startete nicht, alles antwortete mit HTTP 502** (Oberfläche, Login und Agenten-Ingest). `backend/app/branding.py` lag als Windows-1252 statt UTF-8 vor — ein einzelnes Byte statt „ü". Python liest Quelldateien immer als UTF-8 und brach beim Import ab. Datei zurück auf UTF-8 gebracht; alle übrigen Dateien wurden byteweise geprüft.
 

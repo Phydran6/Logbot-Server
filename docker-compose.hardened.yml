@@ -23,6 +23,9 @@
 #
 # WAS DANN NICHT MEHR GEHT
 #   * Der Neustart-Knopf unter „Einstellungen" (Host neu starten).
+#   * Das Einspielen von Updates über „System → Updates". Der Systemcheck sagt
+#     das dann auch klar an. Updates laufen weiter über die Kommandozeile:
+#       curl -sSL <RAW-URL>/install.sh | sudo bash -s -- update -y
 #   * Das automatische Übernehmen der Host-DNS-Server. Stattdessen unter
 #     „Einstellungen → Netzwerk → DNS" die Server von Hand eintragen.
 #

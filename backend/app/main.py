@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.31.23.30.00
+# Version:     2026.08.14.12.00.00
 # Changelog:   ../../CHANGELOG/backend.md
 # Beschreibung: LogBot - FastAPI Hauptanwendung
 # ==============================================================================
@@ -32,7 +32,7 @@ from .limiter import limiter
 from .models import Webhook, Log, Agent, AgentToken
 from sqlalchemy import func
 from .schemas import LogResponse, LogDetailResponse, LogIngestRequest, LogIngestResponse
-from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, database_router, ldap_router, archiving_router, passkey_router, caddy as caddy_router, network as network_router
+from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, database_router, ldap_router, archiving_router, passkey_router, diagnostics_router, updates_router, caddy as caddy_router, network as network_router
 from .branding import branding_router
 
 # =============================================================================
@@ -99,6 +99,8 @@ app.include_router(database_router)
 app.include_router(ldap_router)
 app.include_router(archiving_router)
 app.include_router(passkey_router)
+app.include_router(diagnostics_router)
+app.include_router(updates_router)
 app.include_router(caddy_router.router)
 app.include_router(network_router.router)
 

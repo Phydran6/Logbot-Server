@@ -139,11 +139,6 @@
           <button type="button" class="btn btn-ghost w-full" @click="resetToStep1">Abbrechen</button>
         </form>
 
-        <div class="login-links">
-          <router-link to="/impressum" class="hover:underline">Impressum</router-link>
-          <span>·</span>
-          <router-link to="/datenschutz" class="hover:underline">Datenschutz</router-link>
-        </div>
       </div>
 
       <p class="login-version">v{{ appVersion }}</p>
@@ -461,15 +456,6 @@ async function handleMfa() {
   letter-spacing: 0.35em;
   font-size: 1.125rem;
   font-family: var(--font-mono);
-}
-
-.login-links {
-  display: flex;
-  justify-content: center;
-  gap: 0.5rem;
-  margin-top: 1.5rem;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
 }
 
 .login-version {

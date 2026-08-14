@@ -1,25 +1,37 @@
 ﻿<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.07.31.23.00.00
+     Version:     2026.08.14.12.00.00
      Changelog:   ../../../CHANGELOG/frontend.md
-     Beschreibung: LogBot - Einstellungen mit Theme-Support (inkl. Netzwerk-Tab: Reverse Proxy + DNS)
+     Beschreibung: LogBot - Einstellungen: eine Seite fuer alles am System.
+                   Verzeichnis (LDAP), Archivierung, Erscheinungsbild und
+                   Anmeldesicherheit sind hier Reiter statt eigener Menuepunkte.
      ============================================================================== -->
 
 <template>
   <div class="p-6">
-    <h1 class="text-2xl font-bold mb-6" :style="{ color: 'var(--color-text-primary)' }">Einstellungen</h1>
-    <!-- Tabs -->
-    <div class="flex flex-wrap gap-2 mb-6">
-      <button
-        v-for="tab in availableTabs"
-        :key="tab.id"
-        class="px-3 py-2 rounded text-sm"
-        :style="tabButtonStyle(tab.id)"
-        @click="setTab(tab.id)"
-      >
-        {{ tab.label }}
-      </button>
+    <div class="mb-5">
+      <h1 class="text-2xl font-bold" :style="{ color: 'var(--color-text-primary)' }">Einstellungen</h1>
+      <p class="text-sm mt-1" :style="{ color: 'var(--color-text-muted)' }">
+        Alles zum System an einem Ort. Die Adresse wechselt mit dem Reiter – so lässt sich
+        ein Bereich verlinken oder als Lesezeichen ablegen.
+      </p>
+    </div>
+
+    <!-- Reiter, nach Themen gruppiert -->
+    <div class="space-y-2 mb-6">
+      <div v-for="group in availableGroups" :key="group.title" class="flex flex-wrap items-center gap-2">
+        <span class="tab-group-label">{{ group.title }}</span>
+        <button
+          v-for="tab in group.tabs"
+          :key="tab.id"
+          class="px-3 py-2 rounded text-sm"
+          :style="tabButtonStyle(tab.id)"
+          @click="setTab(tab.id)"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
     </div>
 
     <!-- Allgemein -->
@@ -464,11 +476,12 @@
       </div>
     </div>
     
-    <!-- System (nur Admin) -->
-    <div v-if="authStore.isAdmin && activeTab === 'system'" class="rounded-lg shadow p-6 mt-6" :style="cardStyle">
-      <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">System</h2>
+    <!-- Wartung (nur Admin) -->
+    <div v-if="authStore.isAdmin && activeTab === 'maintenance'" class="rounded-lg shadow p-6 mt-6" :style="cardStyle">
+      <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Neustart</h2>
       <p class="text-sm mb-4" :style="{ color: 'var(--color-text-secondary)' }">
         Startet das Betriebssystem neu. Aktive Nutzer werden getrennt.
+        Updates gibt es im Bereich <router-link to="/updates" class="link">System → Updates</router-link>.
       </p>
       <button
         @click="rebootSystem"
@@ -500,24 +513,84 @@
         </button>
       </form>
     </div>
+
+    <!-- ================================================================
+         Eingebettete Bereiche
+         Das sind eigenstaendige Ansichten, die hier als Reiter haengen -
+         frueher hatte jede davon einen eigenen Menuepunkt. Sie werden erst
+         geladen, wenn der Reiter wirklich geoeffnet wird.
+         ================================================================ -->
+    <div v-if="activeTab === 'security'" class="embedded-panel">
+      <SecuritySettings />
+    </div>
+
+    <div v-if="activeTab === 'branding'" class="embedded-panel">
+      <BrandingSettings />
+    </div>
+
+    <div v-if="authStore.isAdmin && activeTab === 'ldap'" class="embedded-panel">
+      <LdapSettings />
+    </div>
+
+    <div v-if="authStore.isAdmin && activeTab === 'archiving'" class="embedded-panel">
+      <ArchivingSettings />
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
-const authStore = useAuthStore()
+// Erst laden, wenn der Reiter geoeffnet wird - sonst zieht jede Einstellungsseite
+// vier weitere Ansichten mit.
+const SecuritySettings = defineAsyncComponent(() => import('./SecuritySettings.vue'))
+const BrandingSettings = defineAsyncComponent(() => import('./BrandingSettings.vue'))
+const LdapSettings = defineAsyncComponent(() => import('./LdapSettings.vue'))
+const ArchivingSettings = defineAsyncComponent(() => import('./ArchivingSettings.vue'))
 
-const tabs = [
-  { id: 'general', label: 'Allgemein' },
-  { id: 'retention', label: 'Retention' },
-  { id: 'agents', label: 'Agent Token' },
-  { id: 'network', label: 'Netzwerk', adminOnly: true },
-  { id: 'database', label: 'Datenbank', adminOnly: true },
-  { id: 'system', label: 'System', adminOnly: true },
-  { id: 'password', label: 'Passwort' }
+const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+
+// Reiter, nach Themen gruppiert. Die id ist zugleich der Teil in der Adresse
+// (/settings/ldap) - damit funktionieren die frueheren Links weiter.
+const tabGroups = [
+  {
+    title: 'Betrieb',
+    tabs: [
+      { id: 'general', label: 'Allgemein' },
+      { id: 'retention', label: 'Aufbewahrung' },
+      { id: 'agents', label: 'Agent-Token' },
+      { id: 'archiving', label: 'Archivierung', adminOnly: true },
+    ],
+  },
+  {
+    title: 'Infrastruktur',
+    tabs: [
+      { id: 'network', label: 'Netzwerk', adminOnly: true },
+      { id: 'database', label: 'Datenbank', adminOnly: true },
+      { id: 'maintenance', label: 'Neustart', adminOnly: true },
+    ],
+  },
+  {
+    title: 'Konto & Anmeldung',
+    tabs: [
+      { id: 'password', label: 'Passwort' },
+      { id: 'security', label: 'Anmeldesicherheit' },
+      { id: 'ldap', label: 'Verzeichnis (LDAP)', adminOnly: true },
+    ],
+  },
+  {
+    title: 'Darstellung',
+    tabs: [
+      { id: 'branding', label: 'Erscheinungsbild' },
+    ],
+  },
 ]
+
+const tabs = tabGroups.flatMap(group => group.tabs)
 const activeTab = ref('general')
 const tabLoaded = ref({ network: false, database: false })
 const networkSubTabs = [
@@ -593,6 +666,15 @@ const caddyExtraHosts = computed(() =>
 )
 
 const availableTabs = computed(() => tabs.filter(t => !t.adminOnly || authStore.isAdmin))
+
+const availableGroups = computed(() =>
+  tabGroups
+    .map(group => ({
+      title: group.title,
+      tabs: group.tabs.filter(t => !t.adminOnly || authStore.isAdmin),
+    }))
+    .filter(group => group.tabs.length)
+)
 
 const tlsHint = computed(() => {
   if (caddyMode.value === 'http') return 'Nur HTTP (Port 80). Kein Zertifikat nötig.'
@@ -704,7 +786,16 @@ function subTabButtonStyle(id) {
   }
 }
 
+/** Reiter wechseln und dabei die Adresse mitziehen (/settings/<id>). */
 async function setTab(id) {
+  await openTab(id)
+  const target = id === 'general' ? '/settings' : `/settings/${id}`
+  if (route.path !== target) router.push(target)
+}
+
+/** Reiter oeffnen ohne die Adresse anzufassen (fuer den Weg von aussen). */
+async function openTab(id) {
+  if (!availableTabs.value.some(tab => tab.id === id)) id = 'general'
   activeTab.value = id
   if (id === 'database' && authStore.isAdmin && !tabLoaded.value.database) {
     await loadDatabaseSettings()
@@ -716,6 +807,16 @@ async function setTab(id) {
     tabLoaded.value.network = true
   }
 }
+
+// Adresse -> Reiter. Greift beim ersten Aufruf und bei Vor/Zurueck im Browser.
+watch(
+  () => route.params.tab,
+  (tab) => {
+    const wanted = String(tab || 'general')
+    if (wanted !== activeTab.value) openTab(wanted)
+  },
+  { immediate: true }
+)
 
 async function loadDatabaseSettings() {
   dbError.value = ''
@@ -1138,3 +1239,32 @@ async function copyHttpLink() {
   }
 }
 </script>
+
+<style scoped>
+.tab-group-label {
+  min-width: 9rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .tab-group-label {
+    min-width: 100%;
+  }
+}
+
+.embedded-panel {
+  margin-top: 1.5rem;
+}
+
+/* Die eingebetteten Ansichten bringen ihren eigenen Seitenrand mit. Innerhalb
+   dieser Seite ist der doppelt - deshalb nur beim aeussersten Element weg. */
+.embedded-panel > :deep(.page),
+.embedded-panel > :deep(.p-6) {
+  padding: 0;
+  max-width: none;
+}
+</style>

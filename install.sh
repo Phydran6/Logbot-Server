@@ -46,7 +46,7 @@ NC='\033[0m'
 # Konfiguration (Vorrang: Parameter > Umgebungsvariable > Default)
 # ==============================================================================
 
-LOGBOT_VERSION="2026.07.31.21.40.00"
+LOGBOT_VERSION="2026.08.14.12.00.00"
 
 INSTALL_DIR="${LOGBOT_DIR:-/opt/logbot}"
 REPO_URL="${LOGBOT_REPO:-https://github.com/Phydran6/Logbot-Server.git}"
@@ -435,6 +435,11 @@ print_summary() {
     echo "Syslog-Empfang:  Port 514 (UDP/TCP)"
     echo "API-Doku:        http://${local_ip}/api/docs"
     echo "PostgreSQL:      ${local_ip}:5432 (Zugangsdaten in $INSTALL_DIR/.env)"
+    echo ""
+    echo "Updates:"
+    echo "  In der Oberfläche unter System -> Updates (mit Rückfall-Option)"
+    echo "  oder als Einzeiler:"
+    echo "  curl -sSL ${REPO_URL%.git}/raw/${REPO_BRANCH}/install.sh | sudo bash -s -- update -y"
     echo ""
     echo "Nützliche Befehle:"
     echo "  cd $INSTALL_DIR"
