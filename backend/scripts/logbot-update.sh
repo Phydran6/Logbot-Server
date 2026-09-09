@@ -49,6 +49,10 @@ ACTION="${1:-status}"
 DIR="/opt/logbot"
 REPO="https://github.com/Phydran6/Logbot-Server.git"
 BRANCH="main"
+# Welcher Stand geholt wird. Leer = der Zweig aus --branch. Sonst ein Tag, ein
+# Release oder ein Commit - damit laesst sich der Server auf einer bestimmten
+# Version festhalten, statt immer dem Zweig zu folgen.
+REF=""
 DB_BACKUP="true"
 BACKUP_CHOICE=""
 
@@ -57,6 +61,7 @@ while [[ $# -gt 0 ]]; do
         --dir)           DIR="${2:-$DIR}"; shift ;;
         --repo)          REPO="${2:-$REPO}"; shift ;;
         --branch)        BRANCH="${2:-$BRANCH}"; shift ;;
+        --ref)           REF="${2:-}"; shift ;;
         --backup)        BACKUP_CHOICE="${2:-}"; shift ;;
         --db-backup)     DB_BACKUP="true" ;;
         --no-db-backup)  DB_BACKUP="false" ;;
@@ -64,6 +69,9 @@ while [[ $# -gt 0 ]]; do
     esac
     shift || true
 done
+
+# Ohne eigene Angabe ist der Zweig das Ziel.
+TARGET="${REF:-$BRANCH}"
 
 DIR="${DIR%/}"
 DATA_DIR="$DIR/data"
@@ -254,6 +262,7 @@ create_backup() {
   "version": "$(esc "$VERSION_BEFORE")",
   "commit": "$(esc "$COMMIT_BEFORE")",
   "branch": "$(esc "$BRANCH")",
+  "ref": "$(esc "$TARGET")",
   "database_dump": $DB_DUMP_DONE
 }
 EOF
@@ -306,14 +315,30 @@ prune_backups() {
 
 fetch_sources() {
     if [[ -d "$DIR/.git" ]]; then
-        log "Hole neuen Stand per git (Branch $BRANCH)..."
-        if ! git -C "$DIR" fetch --tags --prune origin "$BRANCH" >>"$LOG_FILE" 2>&1; then
+        log "Hole Stand '$TARGET' per git..."
+        # Erst alles holen, was es gibt (Zweige UND Tags) - danach steht der
+        # gewuenschte Punkt lokal zur Verfuegung, egal ob Tag, Zweig oder Commit.
+        if ! git -C "$DIR" fetch --tags --prune --force origin \
+                "+refs/heads/*:refs/remotes/origin/*" >>"$LOG_FILE" 2>&1; then
             log "git fetch fehlgeschlagen - versuche es mit einem frischen Clone."
         else
-            if git -C "$DIR" reset --hard FETCH_HEAD >>"$LOG_FILE" 2>&1; then
+            # Reihenfolge der Versuche: Tag/Commit direkt, dann der Zweig auf
+            # dem Server. So gewinnt ein Tag namens wie ein Zweig nicht zufaellig.
+            local resolved=""
+            for candidate in "refs/tags/$TARGET" "origin/$TARGET" "$TARGET"; do
+                if git -C "$DIR" rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null 2>&1; then
+                    resolved="$candidate"
+                    break
+                fi
+            done
+            if [[ -z "$resolved" ]]; then
+                log "'$TARGET' ist im Repository nicht auffindbar - versuche einen frischen Clone."
+            elif git -C "$DIR" reset --hard "$resolved" >>"$LOG_FILE" 2>&1; then
+                log "Stand gesetzt auf $resolved ($(git -C "$DIR" rev-parse --short HEAD 2>/dev/null))."
                 return 0
+            else
+                log "git reset fehlgeschlagen - versuche es mit einem frischen Clone."
             fi
-            log "git reset fehlgeschlagen - versuche es mit einem frischen Clone."
         fi
     else
         log "Installation ist kein Git-Repository - hole die Dateien per Clone."
@@ -321,9 +346,16 @@ fetch_sources() {
 
     local tmp
     tmp="$(mktemp -d /tmp/logbot-src.XXXXXX)" || return 1
-    if ! git clone --depth 1 --branch "$BRANCH" "$REPO" "$tmp/repo" >>"$LOG_FILE" 2>&1; then
-        rm -rf "$tmp"
-        return 1
+    # --branch nimmt auch ein Tag entgegen; ein Commit dagegen nicht - dafuer
+    # der zweite Versuch mit vollem Clone und anschliessendem Auschecken.
+    if ! git clone --depth 1 --branch "$TARGET" "$REPO" "$tmp/repo" >>"$LOG_FILE" 2>&1; then
+        log "Flacher Clone von '$TARGET' fehlgeschlagen - versuche vollen Clone."
+        rm -rf "$tmp/repo"
+        if ! git clone "$REPO" "$tmp/repo" >>"$LOG_FILE" 2>&1 \
+           || ! git -C "$tmp/repo" checkout --force "$TARGET" >>"$LOG_FILE" 2>&1; then
+            rm -rf "$tmp"
+            return 1
+        fi
     fi
     if [[ ! -f "$tmp/repo/docker-compose.yml" ]]; then
         rm -rf "$tmp"
@@ -426,12 +458,12 @@ do_apply() {
     step 15 "Sicherung" "Dateien und - falls gewaehlt - die Datenbank werden gesichert."
     create_backup
 
-    step 40 "Neuer Stand" "Der aktuelle Stand wird von GitHub geholt."
+    step 40 "Neuer Stand" "Stand '$TARGET' wird von GitHub geholt."
     if ! fetch_sources; then
         step 60 "Rueckfall" "Der neue Stand konnte nicht geholt werden - Rueckfall laeuft."
         ROLLED_BACK="true"
         restore_backup "$BACKUP_NAME"
-        finish_fail "Der neue Stand konnte nicht von GitHub geholt werden (Netz, Repository oder Branch pruefen). Der alte Stand wurde wiederhergestellt."
+        finish_fail "Der Stand '$TARGET' konnte nicht von GitHub geholt werden (Netz, Repository, Branch oder Release pruefen). Der alte Stand wurde wiederhergestellt."
     fi
 
     VERSION_AFTER="$(read_version)"
@@ -504,8 +536,8 @@ do_status() {
 
 mkdir -p "$DATA_DIR" 2>/dev/null
 case "$ACTION" in
-    apply)     log "---- Update gestartet (Branch $BRANCH, Verzeichnis $DIR) ----"; do_apply ;;
+    apply)     log "---- Update gestartet (Ziel $TARGET, Verzeichnis $DIR) ----"; do_apply ;;
     rollback)  log "---- Rueckfall gestartet (Verzeichnis $DIR) ----"; do_rollback ;;
     status)    do_status ;;
-    *)         echo "Aufruf: $0 {apply|rollback|status} [--dir <pfad>] [--repo <url>] [--branch <name>] [--backup <name>] [--no-db-backup]"; exit 2 ;;
+    *)         echo "Aufruf: $0 {apply|rollback|status} [--dir <pfad>] [--repo <url>] [--branch <name>] [--ref <release|tag|commit>] [--backup <name>] [--no-db-backup]"; exit 2 ;;
 esac

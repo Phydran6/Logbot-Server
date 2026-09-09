@@ -21,6 +21,7 @@ from ..database import get_db, async_session
 from ..models import Log, Agent, User
 from ..schemas import LogResponse, LogDetailResponse, LogListResponse, LogStatsResponse
 from ..auth import get_current_user
+from .. import logparse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/logs", tags=["Logs"])
@@ -473,6 +474,34 @@ async def export_logs(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="logbot-logs-{stamp}.csv"'},
     )
+
+
+@router.get("/{log_id}/parsed")
+async def get_log_parsed(log_id: int, db: AsyncSession = Depends(get_db),
+                         _=Depends(get_current_user)):
+    """Dieselbe Zeile, aber zerlegt: Zusammenfassung, Felder, Abzeichen.
+
+    Die Rohzeile kommt unveraendert mit - wenn die Erkennung danebenliegt, muss
+    man nachsehen koennen, was wirklich ankam. Der Parser fasst die Datenbank
+    nicht an, er stellt nur anders dar.
+    """
+    result = await db.execute(select(Log).where(Log.id == log_id))
+    log = result.scalar_one_or_none()
+    if not log:
+        raise HTTPException(status_code=404, detail="Log nicht gefunden")
+
+    return {
+        "id": log.id,
+        "timestamp": log.timestamp,
+        "hostname": log.hostname,
+        "ip_address": log.ip_address,
+        "level": log.level,
+        "source": log.source,
+        "message": log.message,
+        "raw_message": log.raw_message,
+        "extra_data": log.extra_data or {},
+        "parsed": logparse.parse_log_row(log),
+    }
 
 
 @router.get("/{log_id}", response_model=LogDetailResponse)

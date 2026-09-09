@@ -20,10 +20,18 @@ from .archiving import router as archiving_router
 from .passkey import router as passkey_router
 from .diagnostics import router as diagnostics_router
 from .updates import router as updates_router
+from .backup import router as backup_router
+from .mobile import router as mobile_router
+from .ai import router as ai_router
+from .stacks import router as stacks_router
+from .mail import router as mail_router
+from .shell import router as shell_router
 from . import caddy
 from . import network
 
 __all__ = ["auth_router", "mfa_router", "health_router", "users_router", "agents_router",
            "agent_tokens_router", "logs_router", "webhooks_router", "settings_router",
            "database_router", "ldap_router", "archiving_router", "passkey_router",
-           "diagnostics_router", "updates_router", "caddy", "network"]
+           "diagnostics_router", "updates_router", "backup_router", "mobile_router",
+           "ai_router", "stacks_router", "mail_router", "shell_router",
+           "caddy", "network"]

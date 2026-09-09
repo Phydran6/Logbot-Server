@@ -24,6 +24,9 @@ Das ist bewusst eine Datei auf dem Host und keine Tabelle in der Datenbank -
 waehrend eines Updates ist die Datenbank zeitweise nicht erreichbar.
 """
 
+import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -32,9 +35,11 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+from sqlalchemy import select
 
 from .config import settings
 from . import hostexec
+from .events import UPDATE_AVAILABLE, bus
 
 logger = logging.getLogger("logbot.updater")
 
@@ -116,16 +121,26 @@ async def local_state() -> dict:
 # =============================================================================
 # Stand auf GitHub
 # =============================================================================
-async def remote_state(force: bool = False) -> dict:
-    """Neuester Stand im Repository. Ergebnis wird zwischengespeichert."""
+async def remote_state(force: bool = False, ref: str = "") -> dict:
+    """Neuester Stand im Repository. Ergebnis wird zwischengespeichert.
+
+    `ref` ist der Zweig, das Tag oder der Commit, gegen den geprueft wird. Leer
+    bedeutet: der eingestellte Kanal entscheidet (siehe `resolve_target_ref`).
+    """
     global _remote_cache, _remote_cache_expires
 
-    if not force and _remote_cache and time.time() < _remote_cache_expires:
+    target = (ref or REPO_BRANCH).strip() or REPO_BRANCH
+
+    # Der Zwischenspeicher gilt nur fuer denselben Bezugspunkt - sonst
+    # antwortet eine Abfrage fuer ein Tag mit dem Stand des Zweiges.
+    if (not force and _remote_cache and time.time() < _remote_cache_expires
+            and _remote_cache.get("ref") == target):
         return _remote_cache
 
     info = {
         "repo": REPO_SLUG,
         "branch": REPO_BRANCH,
+        "ref": target,
         "reachable": False,
         "commit": None,
         "commit_short": None,
@@ -143,9 +158,9 @@ async def remote_state(force: bool = False) -> dict:
 
     try:
         async with httpx.AsyncClient(timeout=12.0, headers=headers) as client:
-            response = await client.get(f"{_API}/repos/{REPO_SLUG}/commits/{REPO_BRANCH}")
+            response = await client.get(f"{_API}/repos/{REPO_SLUG}/commits/{target}")
             if response.status_code == 404:
-                info["error"] = f"Repository oder Branch nicht gefunden ({REPO_SLUG}@{REPO_BRANCH})."
+                info["error"] = f"Repository, Zweig oder Release nicht gefunden ({REPO_SLUG}@{target})."
                 return _cache_remote(info)
             if response.status_code == 403:
                 info["error"] = ("GitHub hat die Anfrage abgelehnt (Limit fuer anonyme Abfragen). "
@@ -165,7 +180,7 @@ async def remote_state(force: bool = False) -> dict:
             # VERSION-Datei ist optional - fehlt sie, bleibt der Commit der Massstab.
             try:
                 raw = await client.get(
-                    f"https://raw.githubusercontent.com/{REPO_SLUG}/{REPO_BRANCH}/VERSION"
+                    f"https://raw.githubusercontent.com/{REPO_SLUG}/{target}/VERSION"
                 )
                 if raw.status_code == 200 and raw.text.strip():
                     info["version"] = raw.text.strip().splitlines()[0].strip()
@@ -211,34 +226,44 @@ async def version_check(force: bool = False) -> dict:
 
     Der Systemcheck nutzt diesen schlanken Weg; die Update-Seite das volle Bild.
     """
+    channel = await load_channel()
+    ref = await resolve_target_ref(channel)
     local = await local_state()
-    remote = await remote_state(force=force)
+    remote = await remote_state(force=force, ref=ref)
     available, reason = compare(local, remote)
-    return {"local": local, "remote": remote,
+    return {"local": local, "remote": remote, "channel": channel,
             "update_available": available, "reason": reason}
 
 
 async def update_status(force: bool = False) -> dict:
     """Installierter Stand + GitHub-Stand + Bewertung + laufender Vorgang."""
+    channel = await load_channel()
+    ref = await resolve_target_ref(channel)
     local = await local_state()
-    remote = await remote_state(force=force)
+    remote = await remote_state(force=force, ref=ref)
     run = await read_run_state()
     backups = await list_backups()
     available, reason = compare(local, remote)
 
+    oneliner = (f"curl -sSL https://raw.githubusercontent.com/{REPO_SLUG}/{REPO_BRANCH}/install.sh "
+                f"| sudo bash -s -- update -y")
+    if ref != REPO_BRANCH:
+        oneliner += f" --ref {ref}"
+
     return {
         "local": local,
         "remote": remote,
+        "channel": channel,
+        "target_ref": ref,
         "update_available": available,
         "reason": reason,
         "repo_url": REPO_URL,
         "run": run,
         "backups": backups,
         "can_update": bool(local.get("host_access")),
-        "oneliner": (
-            f"curl -sSL https://raw.githubusercontent.com/{REPO_SLUG}/{REPO_BRANCH}/install.sh "
-            f"| sudo bash -s -- update -y"
-        ),
+        "webhook": webhook_info(),
+        "watcher": {"interval_seconds": WATCH_INTERVAL, "enabled": WATCH_ENABLED},
+        "oneliner": oneliner,
     }
 
 
@@ -337,7 +362,7 @@ async def _install_script() -> Optional[str]:
 
 
 async def start_run(action: str, database_backup: bool = True,
-                    backup_name: str = "") -> dict:
+                    backup_name: str = "", ref: str = "") -> dict:
     """Startet `apply` oder `rollback` auf dem Host.
 
     Kehrt sofort zurueck - der Lauf ersetzt waehrenddessen diesen Container.
@@ -370,6 +395,10 @@ async def start_run(action: str, database_backup: bool = True,
     ]
     if action == "apply":
         command.append("--db-backup" if database_backup else "--no-db-backup")
+        # Welchen Stand holen? Ohne Angabe der Zweig, sonst das gewaehlte Release.
+        target = (ref or await resolve_target_ref(await load_channel())).strip()
+        if target and target != REPO_BRANCH:
+            command.extend(["--ref", target])
     if action == "rollback" and backup_name:
         command.extend(["--backup", backup_name])
 
@@ -385,3 +414,323 @@ async def start_run(action: str, database_backup: bool = True,
                         "erreichbar - diese Seite meldet sich von selbst zurueck."
                         if action == "apply" else
                         "Rueckfall laeuft. Die Oberflaeche ist waehrenddessen kurz nicht erreichbar.")}
+
+
+# =============================================================================
+# Kanal: welchen Stand soll dieser Server ueberhaupt fahren?
+# =============================================================================
+"""
+Nicht jeder will immer den letzten Commit. Drei Moeglichkeiten:
+
+* `stable`  - das zuletzt veroeffentlichte Release (GitHub Release, kein Prerelease).
+  Das ist die Voreinstellung fuer alle, die einfach nur einen Server betreiben.
+* `edge`    - der Kopf des Zweiges. Alles, was gepusht wird, steht sofort bereit.
+* `pinned`  - genau ein Release/Tag/Commit, festgenagelt. Der Server bleibt dort
+  stehen, bis jemand ihn bewusst weiterzieht.
+
+Die Wahl liegt in der settings-Tabelle, damit sie ein Update ueberlebt.
+"""
+
+CHANNEL_SETTING_KEY = "update_channel"
+
+CHANNELS = {
+    "stable": {
+        "label": "Stabil (letztes Release)",
+        "label_en": "Stable (latest release)",
+        "hint": "Nur veröffentlichte Releases. Empfohlen für den Regelbetrieb.",
+    },
+    "edge": {
+        "label": f"Aktuell ({REPO_BRANCH})",
+        "label_en": f"Latest ({REPO_BRANCH})",
+        "hint": "Jeder Push landet sofort als Angebot hier. Für Test- und Entwicklungsserver.",
+    },
+    "pinned": {
+        "label": "Festgelegte Version",
+        "label_en": "Pinned version",
+        "hint": "Ein bestimmtes Release oder Tag. Der Server bleibt darauf stehen.",
+    },
+}
+
+DEFAULT_CHANNEL = {"channel": "stable", "ref": "", "auto_offer": True}
+
+
+async def load_channel() -> dict:
+    """Liest die Kanal-Einstellung. Faellt auf 'stable' zurueck."""
+    from .database import async_session
+    from .models import Setting
+
+    try:
+        async with async_session() as session:
+            row = (await session.execute(
+                select(Setting).where(Setting.key == CHANNEL_SETTING_KEY)
+            )).scalar_one_or_none()
+    except Exception as exc:                                        # DB noch nicht da
+        logger.debug("Kanal-Einstellung nicht lesbar (%s) - nehme Standard", exc)
+        return dict(DEFAULT_CHANNEL)
+
+    config = dict(DEFAULT_CHANNEL)
+    if row and isinstance(row.value, dict):
+        config.update({k: v for k, v in row.value.items() if k in DEFAULT_CHANNEL})
+    if config["channel"] not in CHANNELS:
+        config["channel"] = "stable"
+    return config
+
+
+async def save_channel(channel: str, ref: str = "", auto_offer: bool = True) -> dict:
+    """Speichert die Kanal-Einstellung."""
+    from .database import async_session
+    from .models import Setting
+
+    if channel not in CHANNELS:
+        raise ValueError(f"Unbekannter Kanal '{channel}' (erlaubt: {', '.join(CHANNELS)}).")
+    ref = (ref or "").strip()
+    if channel == "pinned" and not ref:
+        raise ValueError("Für eine festgelegte Version fehlt die Angabe, welche.")
+
+    config = {"channel": channel, "ref": ref, "auto_offer": bool(auto_offer)}
+    async with async_session() as session:
+        row = (await session.execute(
+            select(Setting).where(Setting.key == CHANNEL_SETTING_KEY)
+        )).scalar_one_or_none()
+        if row:
+            row.value = config
+        else:
+            session.add(Setting(key=CHANNEL_SETTING_KEY, value=config,
+                                description="Welchen Stand dieser Server fahren soll"))
+        await session.commit()
+
+    # Der Zwischenspeicher gilt fuer den alten Bezugspunkt - verwerfen.
+    global _remote_cache, _remote_cache_expires
+    _remote_cache, _remote_cache_expires = None, 0.0
+    bus.clear(UPDATE_AVAILABLE)
+    logger.warning("Update-Kanal gesetzt: %s%s", channel, f" ({ref})" if ref else "")
+    return config
+
+
+async def resolve_target_ref(config: Optional[dict] = None) -> str:
+    """Welcher Git-Bezugspunkt gehoert zum eingestellten Kanal?"""
+    config = config or await load_channel()
+    channel = config.get("channel", "stable")
+
+    if channel == "edge":
+        return REPO_BRANCH
+    if channel == "pinned":
+        return (config.get("ref") or "").strip() or REPO_BRANCH
+
+    latest = await latest_release()
+    return (latest or {}).get("tag") or REPO_BRANCH
+
+
+# =============================================================================
+# Releases
+# =============================================================================
+_releases_cache: Optional[list] = None
+_releases_cache_expires: float = 0.0
+
+
+def _github_headers() -> dict:
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "LogBot-Updater"}
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+async def list_releases(force: bool = False, limit: int = 30) -> dict:
+    """Alle Releases des Repositories - fuer die Auswahl in der Oberflaeche.
+
+    Hat das Repository (noch) keine Releases, werden ersatzweise die Tags
+    gelistet. Ganz ohne beides bleibt der Zweig die einzige Wahl.
+    """
+    global _releases_cache, _releases_cache_expires
+
+    if not force and _releases_cache is not None and time.time() < _releases_cache_expires:
+        return {"releases": _releases_cache, "cached": True, "repo": REPO_SLUG,
+                "branch": REPO_BRANCH}
+
+    releases: list = []
+    error = None
+    source = "releases"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, headers=_github_headers()) as client:
+            response = await client.get(f"{_API}/repos/{REPO_SLUG}/releases",
+                                        params={"per_page": min(limit, 100)})
+            if response.status_code == 403:
+                error = ("GitHub hat die Anfrage abgelehnt (Limit für anonyme Abfragen). "
+                         "GITHUB_TOKEN setzen oder später erneut versuchen.")
+            elif response.status_code == 404:
+                error = f"Repository nicht gefunden ({REPO_SLUG})."
+            else:
+                response.raise_for_status()
+                for entry in response.json():
+                    releases.append({
+                        "tag": entry.get("tag_name"),
+                        "name": entry.get("name") or entry.get("tag_name"),
+                        "published_at": entry.get("published_at") or entry.get("created_at"),
+                        "prerelease": bool(entry.get("prerelease")),
+                        "draft": bool(entry.get("draft")),
+                        "url": entry.get("html_url"),
+                        "notes": (entry.get("body") or "").strip()[:4000],
+                    })
+
+            # Kein Release veroeffentlicht? Dann sind Tags der naechstbeste Massstab.
+            if not releases and not error:
+                source = "tags"
+                tags = await client.get(f"{_API}/repos/{REPO_SLUG}/tags",
+                                        params={"per_page": min(limit, 100)})
+                if tags.status_code == 200:
+                    for entry in tags.json():
+                        releases.append({
+                            "tag": entry.get("name"),
+                            "name": entry.get("name"),
+                            "published_at": None,
+                            "prerelease": False,
+                            "draft": False,
+                            "url": f"https://github.com/{REPO_SLUG}/releases/tag/{entry.get('name')}",
+                            "notes": "",
+                        })
+    except httpx.HTTPError as exc:
+        error = f"GitHub nicht erreichbar: {exc}"
+    except Exception as exc:                                        # defensiv
+        error = f"Release-Abfrage fehlgeschlagen: {exc}"
+
+    releases = [r for r in releases if r.get("tag") and not r.get("draft")]
+    if not error:
+        _releases_cache = releases
+        _releases_cache_expires = time.time() + _REMOTE_CACHE_TTL
+
+    return {
+        "releases": releases,
+        "source": source,
+        "error": error,
+        "cached": False,
+        "repo": REPO_SLUG,
+        "branch": REPO_BRANCH,
+        "channels": [
+            {"id": key, **value} for key, value in CHANNELS.items()
+        ],
+    }
+
+
+async def latest_release() -> Optional[dict]:
+    """Das neueste veroeffentlichte Release (ohne Prerelease)."""
+    data = await list_releases()
+    for entry in data.get("releases", []):
+        if not entry.get("prerelease"):
+            return entry
+    releases = data.get("releases") or []
+    return releases[0] if releases else None
+
+
+# =============================================================================
+# Beobachter: neuer Stand auf GitHub -> sofort an alle offenen Oberflaechen
+# =============================================================================
+"""
+Der Wunsch: "sobald ich auf GitHub etwas pushe, sollen alle laufenden Server
+das sofort mitbekommen".
+
+Zwei Wege fuehren dahin, und beide enden im selben Ereignisverteiler:
+
+1. GitHub-Webhook. Wirklich sofort - aber nur, wenn der Server aus dem Internet
+   erreichbar ist. Einrichtung: die URL aus `webhook_info()` in den Repository-
+   Einstellungen als Webhook eintragen, Ereignis "push", Secret aus der .env.
+2. Eigener Beobachter. Fragt GitHub im kurzen Takt (Standard 120 s) und nutzt
+   dabei ETags: unveraenderte Antworten kosten kein Abfragekontingent. Das ist
+   der Weg fuer alle Server hinter einer Firewall.
+
+Erst wenn wirklich etwas Neues da ist, gibt es ein Ereignis - kein Ereignis
+pro Abfrage.
+"""
+
+WATCH_ENABLED = os.getenv("LOGBOT_UPDATE_WATCH", "true").strip().lower() not in ("0", "false", "no")
+WATCH_INTERVAL = max(30, int(os.getenv("LOGBOT_UPDATE_WATCH_INTERVAL", "120")))
+
+# Woran wir merken, dass sich etwas geaendert hat.
+_last_announced_commit: Optional[str] = None
+
+
+def webhook_info() -> dict:
+    """Wie der GitHub-Webhook einzurichten ist (das Secret selbst bleibt geheim)."""
+    secret = os.getenv("LOGBOT_WEBHOOK_SECRET", "").strip()
+    base = (settings.site_url or "").rstrip("/")
+    return {
+        "configured": bool(secret),
+        "path": "/api/updates/webhook",
+        "url": f"{base}/api/updates/webhook" if base else "",
+        "content_type": "application/json",
+        "events": ["push"],
+        "hint": ("LOGBOT_WEBHOOK_SECRET in der .env setzen und denselben Wert im "
+                 "Repository unter Settings → Webhooks eintragen. Ohne Secret nimmt "
+                 "der Server keine Webhook-Meldungen an."),
+    }
+
+
+async def announce_if_new(reason: str = "watcher", force_check: bool = True) -> dict:
+    """Prueft den Stand und meldet ihn, falls er sich geaendert hat."""
+    global _last_announced_commit
+
+    status = await version_check(force=force_check)
+    remote = status.get("remote") or {}
+    commit = remote.get("commit")
+
+    if not status.get("update_available"):
+        # Wieder gleichauf (z.B. nach einem Update): den Hinweis zurueckziehen,
+        # sonst haengt in jedem offenen Fenster ein Banner, das nicht mehr stimmt.
+        if _last_announced_commit is not None:
+            _last_announced_commit = None
+            bus.clear(UPDATE_AVAILABLE)
+            bus.publish("update.cleared", {"reason": status.get("reason")}, sticky=False)
+        return {"announced": False, "reason": status.get("reason")}
+
+    if commit and commit == _last_announced_commit:
+        return {"announced": False, "reason": "Bereits gemeldet."}
+
+    _last_announced_commit = commit
+    payload = {
+        "source": reason,
+        "reason": status.get("reason"),
+        "channel": status.get("channel", {}).get("channel"),
+        "installed_version": (status.get("local") or {}).get("version"),
+        "available_version": remote.get("version"),
+        "commit": remote.get("commit_short"),
+        "commit_message": remote.get("commit_message"),
+        "commit_date": remote.get("commit_date"),
+        "repo": REPO_SLUG,
+    }
+    bus.publish(UPDATE_AVAILABLE, payload)
+    logger.warning("Neuer Stand auf GitHub gemeldet (%s): %s",
+                   reason, remote.get("commit_short") or remote.get("version"))
+    return {"announced": True, **payload}
+
+
+async def watch_task() -> None:
+    """Hintergrundaufgabe: haelt Ausschau nach einem neuen Stand."""
+    if not WATCH_ENABLED:
+        logger.info("Update-Beobachter ist abgeschaltet (LOGBOT_UPDATE_WATCH=false).")
+        return
+
+    # Kurz warten, damit Datenbank und Migrationen zuerst durchlaufen.
+    await asyncio.sleep(20)
+    logger.info("Update-Beobachter läuft (alle %ss)", WATCH_INTERVAL)
+
+    while True:
+        try:
+            await announce_if_new(reason="watcher")
+        except Exception as exc:                                    # defensiv
+            logger.warning("Update-Beobachter: %s", exc)
+        await asyncio.sleep(WATCH_INTERVAL)
+
+
+def verify_webhook_signature(body: bytes, signature: str) -> bool:
+    """Prueft die GitHub-Signatur (`X-Hub-Signature-256`).
+
+    Ohne gesetztes Secret nimmt der Server gar keine Meldung an: ein offener
+    Endpunkt waere sonst eine Einladung, den Server im Takt Anfragen an GitHub
+    schicken zu lassen.
+    """
+    secret = os.getenv("LOGBOT_WEBHOOK_SECRET", "").strip()
+    if not secret or not signature:
+        return False
+    expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature.strip())

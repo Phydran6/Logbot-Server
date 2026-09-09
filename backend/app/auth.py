@@ -116,3 +116,36 @@ async def get_current_admin(current_user: User = Depends(get_current_user)) -> U
     if current_user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin erforderlich")
     return current_user
+
+
+async def admin_from_token(token: str) -> Optional[User]:
+    """Prueft einen Token von Hand und gibt den Admin zurueck - sonst None.
+
+    Wofuer: Zwei Wege koennen keinen `Authorization`-Kopf mitschicken - der
+    Ereignisstrom (`EventSource`) und das Terminal (`WebSocket`). Beide bekommen
+    den Token deshalb als Abfrageparameter und pruefen ihn hier. Es ist dieselbe
+    Pruefung wie sonst, nur nicht ueber die uebliche Abhaengigkeit.
+
+    Kein HTTPException: die beiden Aufrufer muessen den Fehler selbst in ihrem
+    Protokoll melden (SSE-Ereignis bzw. WebSocket-Schliessgrund).
+    """
+    from .database import async_session
+
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    except JWTError:
+        return None
+    if payload.get("scope", SCOPE_ACCESS) != SCOPE_ACCESS:
+        return None
+    username = payload.get("sub")
+    if not username:
+        return None
+
+    async with async_session() as session:
+        user = (await session.execute(
+            select(User).where(User.username == username)
+        )).scalar_one_or_none()
+
+    if not user or not user.is_active or user.role != "admin":
+        return None
+    return user

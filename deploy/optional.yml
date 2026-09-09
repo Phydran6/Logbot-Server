@@ -1,0 +1,163 @@
+# ==============================================================================
+# Name:        Phydran6
+# Kontakt:     Phydran6
+# Changelog:   ../CHANGELOG/database.md
+# Beschreibung: LogBot - optionale Zusatzdienste (Portainer, Watchtower, n8n, Postfix)
+# ==============================================================================
+#
+# WAS HIER DRIN STEHT
+#   Vier Dienste, die LogBot nicht braucht, aber viele daneben haben wollen.
+#   Keiner davon startet von selbst: jeder haengt an einem eigenen Profil.
+#
+#     portainer    Container-Oberflaeche im Browser
+#     watchtower   holt neue Images und startet die Container damit neu
+#     n8n          Automatisierung (u.a. fuer die KI-Auswertung)
+#     postfix      Mailversand, damit der Server Mails verschicken kann
+#
+# VERWENDUNG
+#   Direkt:
+#     docker compose -f docker-compose.yml -f deploy/optional.yml \
+#       --profile portainer --profile watchtower up -d
+#
+#   Dauerhaft in der .env (dann reicht "docker compose up -d"):
+#     COMPOSE_FILE=docker-compose.yml:deploy/optional.yml
+#     COMPOSE_PROFILES=portainer,watchtower
+#
+#   Der Installer schreibt beides selbst, wenn man die Dienste dort auswaehlt;
+#   in der Oberflaeche stehen sie unter System -> Zusatzdienste.
+#
+# ZUGANGSDATEN
+#   Stehen in der .env und sind in der Oberflaeche unter System -> Zusatzdienste
+#   fuer Administratoren einsehbar. Der Installer wuerfelt sie beim ersten Mal
+#   aus; ein leeres Feld laesst den jeweiligen Dienst gar nicht erst starten.
+#
+# ------------------------------------------------------------------------------
+# SICHERHEITSHINWEIS, bewusst hier und nicht im Kleingedruckten
+#   Portainer und Watchtower brauchen den Docker-Socket (/var/run/docker.sock).
+#   Wer darauf schreiben kann, ist faktisch root auf diesem Server - egal, was
+#   in der Container-Konfiguration sonst steht. Genau deshalb ist im
+#   Standard-Stack kein solcher Dienst enthalten und beide liegen hier, hinter
+#   einem Profil, das man bewusst einschalten muss.
+#
+#   Portainer bekommt den Socket deshalb nur lesend (`:ro`): die Oberflaeche
+#   zeigt dann alles an, kann aber nichts starten, stoppen oder loeschen. Wer
+#   auch verwalten will, nimmt das `:ro` heraus und weiss, worauf er sich
+#   einlaesst. Watchtower muss schreiben duerfen - das ist seine Aufgabe.
+# ==============================================================================
+
+services:
+
+  # ----------------------------------------------------------------------------
+  # Portainer - Container-Oberflaeche
+  # ----------------------------------------------------------------------------
+  portainer:
+    image: portainer/portainer-ce:${PORTAINER_VERSION:-2.21.4-alpine}
+    container_name: logbot-portainer
+    restart: unless-stopped
+    profiles: ["portainer"]
+    command: >
+      --admin-password-file /run/secrets/portainer_password
+      --http-enabled
+    ports:
+      # Standard: nur vom Server selbst erreichbar. Wer aus dem Netz herankommen
+      # will, setzt PORTAINER_BIND=0.0.0.0 - und sollte vorher HTTPS einrichten.
+      - "${PORTAINER_BIND:-127.0.0.1}:${PORTAINER_PORT:-9000}:9000"
+      - "${PORTAINER_BIND:-127.0.0.1}:${PORTAINER_HTTPS_PORT:-9443}:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+      - ./data/portainer_password:/run/secrets/portainer_password:ro
+    networks:
+      - logbot
+
+  # ----------------------------------------------------------------------------
+  # Watchtower - haelt Container-Images aktuell
+  # ----------------------------------------------------------------------------
+  #   ACHTUNG, Zusammenspiel mit dem Patchmanagement: LogBots eigene Container
+  #   werden aus dem Quellcode gebaut, nicht aus einer Registry gezogen.
+  #   Watchtower fasst sie deshalb nicht an (WATCHTOWER_LABEL_ENABLE) - sonst
+  #   wuerden sich zwei Update-Wege in die Quere kommen. Zustaendig ist es fuer
+  #   die fertigen Images: Postgres, Caddy, n8n, Portainer, Postfix.
+  watchtower:
+    image: containrrr/watchtower:${WATCHTOWER_VERSION:-1.7.1}
+    container_name: logbot-watchtower
+    restart: unless-stopped
+    profiles: ["watchtower"]
+    environment:
+      # Wie oft nachgesehen wird (Sekunden). Standard: einmal taeglich.
+      WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_INTERVAL:-86400}
+      # Alte Images nach dem Austausch wegraeumen - sonst laeuft die Platte voll.
+      WATCHTOWER_CLEANUP: "true"
+      # Nur Container mit dem Label anfassen, nicht wahllos alles auf dem Host.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+      WATCHTOWER_TIMEOUT: "60s"
+      # Nur nachsehen und melden, statt selbst zu tauschen: auf "true" setzen.
+      WATCHTOWER_MONITOR_ONLY: ${WATCHTOWER_MONITOR_ONLY:-false}
+      # Optional eine Benachrichtigung, z.B. per Mail ueber den Postfix unten.
+      WATCHTOWER_NOTIFICATION_URL: ${WATCHTOWER_NOTIFICATION_URL:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - logbot
+
+  # ----------------------------------------------------------------------------
+  # n8n - Automatisierung (u.a. Ziel der KI-Auswertung)
+  # ----------------------------------------------------------------------------
+  n8n:
+    image: n8nio/n8n:${N8N_VERSION:-1.68.0}
+    container_name: logbot-n8n
+    restart: unless-stopped
+    profiles: ["n8n"]
+    environment:
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://logbot-n8n:5678/}
+      GENERIC_TIMEZONE: ${TZ:-Europe/Berlin}
+      # Ohne Anmeldung stuende die Oberflaeche offen - und mit ihr jeder
+      # hinterlegte Zugang zu Telegram, Mail oder KI-Anbietern.
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:?N8N_PASSWORD muss gesetzt sein, wenn das n8n-Profil laeuft}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}
+    ports:
+      - "${N8N_BIND:-127.0.0.1}:${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - logbot
+
+  # ----------------------------------------------------------------------------
+  # Postfix - damit der Server Mails verschicken kann
+  # ----------------------------------------------------------------------------
+  #   Konfiguriert wird nicht hier, sondern in der Oberflaeche unter
+  #   System -> Mail (nur Administratoren). Das Backend schreibt daraus
+  #   data/postfix/settings.env, das dieser Container beim Start liest.
+  #   Deshalb: nach jeder Aenderung startet das Backend den Container neu.
+  postfix:
+    image: boky/postfix:${POSTFIX_VERSION:-v4.3.1}
+    container_name: logbot-postfix
+    restart: unless-stopped
+    profiles: ["postfix"]
+    env_file:
+      - ./data/postfix/settings.env
+    environment:
+      # Nur aus dem Docker-Netz annehmen. Ein offenes Relay im Internet ist
+      # binnen Stunden als Spamschleuder in Benutzung.
+      ALLOWED_SENDER_DOMAINS: ${POSTFIX_SENDER_DOMAINS:-}
+      MYNETWORKS: ${POSTFIX_MYNETWORKS:-127.0.0.0/8,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
+      POSTFIX_myhostname: ${POSTFIX_HOSTNAME:-logbot.local}
+    ports:
+      # Bewusst nur lokal: nach aussen muss dieser Dienst nicht lauschen.
+      - "${POSTFIX_BIND:-127.0.0.1}:${POSTFIX_PORT:-1587}:587"
+    volumes:
+      - postfix_data:/var/spool/postfix
+    networks:
+      - logbot
+
+volumes:
+  portainer_data:
+  n8n_data:
+  postfix_data:

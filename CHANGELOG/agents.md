@@ -2,6 +2,40 @@
 
 Installer & Log-Forwarder für Linux/Windows (`agents/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.09.22.00.00
+### Added
+- **Windows-Agent als Einzeiler.** `install-windows.ps1` nimmt jetzt Parameter entgegen
+  (`-Action`, `-Fqdn`, `-Token`, `-Mode`, `-MinLevel`, `-Insecure`, `-Yes`, `-PurgeServer`)
+  und läuft ohne Menü durch:
+  `& ([scriptblock]::Create((irm <URL>))) -Action install -Fqdn … -Token … -Yes`
+  *Warum nicht `irm | iex`:* Eine Pipeline reicht nur Text weiter, Parameter kommen dabei
+  nicht an. `[scriptblock]::Create` macht daraus einen echten Skriptblock.
+- **Server-Aufräumen unter Windows** (`Remove-ServerEntry`): meldet den Agent beim
+  Deinstallieren ab, wie es der Linux-Agent schon konnte.
+- **Gerätenummer merken.** Beide Agents speichern die `agent_id`, die der Server bei der
+  ersten Lieferung zurückmeldet (`/opt/logbot-agent/agent_id` bzw.
+  `%ProgramData%\LogBot-Agent\agent_id`), und nennen sie beim Abmelden.
+
+### Fixed
+- **Installer blieb an Rückfragen stehen.** `ask` wartete unbegrenzt auf Eingabe. Über eine
+  Pipe (`curl | sudo bash`), per SSH ohne Terminal oder aus einem Automatismus heraus blieb
+  das Skript damit an der ersten Frage hängen. Jetzt: 60 s Zeitlimit
+  (`LOGBOT_ASK_TIMEOUT`), und ohne nutzbares Terminal wird gar nicht erst gefragt.
+- **Deinstallation hing an mehreren Stellen.**
+  `systemctl stop` bekommt 20 s, danach wird der Dienst per `SIGKILL` beendet;
+  `disable`, `daemon-reload` und der rsyslog-Neustart bekommen ebenfalls Zeitlimits.
+  Der Aufruf an den Server hatte **gar kein** Zeitlimit — jetzt 8 s zum Verbinden, 20 s
+  insgesamt. Beim Abmelden wird nur noch gefragt, was tatsächlich fehlt.
+- **Aufräumen auf dem Server traf womöglich den falschen Eintrag.** Der HTTPS-Agent meldete
+  eine MAC, die der Server nie gespeichert hatte, und eine lokale IP, die hinter NAT nicht
+  zur gespeicherten passte — übrig blieb der Abgleich über den Hostnamen allein. Jetzt geht
+  die gemerkte Gerätenummer mit, und `all_for_hostname` räumt zusätzlich alle weiteren
+  Einträge desselben Hostnamens ab (nach einem IP-Wechsel blieben sonst Karteileichen samt
+  Logs liegen).
+- Windows: eingefügte Adressen mit `https://` und Pfad werden auf den reinen FQDN gekürzt;
+  ein nicht erreichbarer Server bricht die Einrichtung nicht mehr ab (der Agent versucht es
+  zur Laufzeit ohnehin erneut).
+
 ## 2026.07.18.18.30.00
 ### Fixed
 - **Linux-Installer: Tastatureingabe wurde beim One-Liner ignoriert.** Vorher hatte jede Abfrage einen eigenen 5-s-Timeout – bei `curl … | bash` rauschten die Abfragen durch und eine Eingabe innerhalb der 5 s lief ins Leere. Jetzt gibt es **einen** Countdown am Anfang (`interactive_gate`): Wird eine Taste gedrückt, schaltet der Installer auf **manuell** und fragt ab da **alle** Werte blockierend ab (kein Timeout, Eingabe wird abgewartet). Ohne Tastendruck / ohne Terminal (Pipe/cron) läuft alles automatisch mit Standardwerten. Der Tastaturpuffer wird nach dem Aufweck-Tastendruck geleert, damit die erste echte Abfrage nicht sofort den Default nimmt.
