@@ -244,12 +244,28 @@ class LogIngestResponse(BaseModel):
     accepted: int
     duplicates: int = 0
     message: str = "ok"
+    # Welcher Geraeteeintrag auf dem Server bekommt diese Logs? Der Agent merkt
+    # sich die Nummer und nennt sie beim Deinstallieren - dann trifft das
+    # Aufraeumen genau seinen eigenen Eintrag und nicht den eines Namensvetters.
+    agent_id: Optional[int] = None
 
 class AgentDecommissionRequest(BaseModel):
+    """Der Agent meldet sich ab.
+
+    Zur Zuordnung gibt es vier Wege, vom genauesten zum ungenauesten:
+    agent_id (der Agent kennt seine Nummer vom Ingest), MAC, Hostname+IP,
+    Hostname allein. Der letzte Weg trifft bei gleichnamigen Rechnern womoeglich
+    den falschen - deshalb steht in der Antwort, wonach zugeordnet wurde.
+    """
+    agent_id: Optional[int] = None
     hostname: Optional[str] = None
     ip_address: Optional[str] = None
     mac_address: Optional[str] = None
     purge: bool = False
+    # Alle Eintraege dieses Hostnamens erwischen. Wechselt ein Rechner die IP
+    # (DHCP, NAT, Umzug), legt der Server jedes Mal einen neuen Eintrag an -
+    # beim Abraeumen sollen sie alle mitgehen, nicht nur einer.
+    all_for_hostname: bool = False
 
 class SettingsResponse(BaseModel):
     settings: Dict[str, Any]

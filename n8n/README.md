@@ -1,4 +1,28 @@
-# Logbot — n8n Workflow
+# n8n-Workflows
+
+Fertige Abläufe für n8n. Importieren, Zugangsdaten zuweisen, aktivieren.
+
+← [Übersicht](../README.md) · [Integrationen](../docs/integrations/README.md) · [Alle Dokumente](../docs/README.md)
+
+| Datei | Was sie tut |
+|-------|-------------|
+| [`logbot.json`](logbot.json) | Grundgerüst: Logs vom Webhook holen und weiterverarbeiten |
+| [`telegram-chat-flow.json`](telegram-chat-flow.json) | Telegram-Bot mit Claude-Analyse (unten beschrieben) |
+
+## n8n selbst betreiben
+
+Zwei Wege:
+
+* **Vorhandenes n8n** — irgendwo im Netz. Für die KI-Auswertung im Web-UI unter
+  *System → KI-Auswertung* den Weg **„n8n extern"** wählen und die Webhook-Adresse
+  eintragen.
+* **Als Container neben LogBot** — unter *System → Zusatzdienste* einschalten.
+  Die Adresse ist dann `http://logbot-n8n:5678/webhook/logbot`, und die Daten
+  bleiben im Docker-Netz.
+
+---
+
+## Telegram-Bot mit Claude-Analyse
 
 Telegram-Bot, der auf Anfrage Logs von einem Logbot-Webhook abholt und sie von Claude (Anthropic) analysieren lässt. Antwort kommt zurück in den Telegram-Chat.
 
@@ -15,7 +39,7 @@ Telegram-Bot, der auf Anfrage Logs von einem Logbot-Webhook abholt und sie von C
 ## Setup
 
 ### 1. Workflow importieren
-In n8n: **Workflows → Import from File → `Logbot.json`** auswählen.
+In n8n: **Workflows → Import from File → `telegram-chat-flow.json`** auswählen.
 
 ### 2. Credentials anlegen
 Folgende Credentials in n8n einrichten und im Workflow zuweisen:
@@ -44,3 +68,11 @@ Workflow steht standardmäßig auf `active: false`. Nach dem Setup oben rechts i
 - Der Bot antwortet nur auf konkrete Fragen — keine ungefragten Gesamt-Zusammenfassungen.
 - Telegram-Plaintext, kein Markdown (sonst Render-Probleme).
 - Die `CHATID:`-Zeile am Ende der LLM-Antwort ist ein Workaround, um den Chat-Kontext durch den Agent-Node durchzureichen.
+
+---
+
+## Ohne n8n geht es auch
+
+Wer nur „erklär mir diese Logzeilen" will, braucht n8n nicht: LogBot kann Claude
+und ChatGPT auch direkt ansprechen. Siehe
+[Integrationen → KI-Auswertung](../docs/integrations/README.md#ki-auswertung).

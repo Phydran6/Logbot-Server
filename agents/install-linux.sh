@@ -48,7 +48,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-AGENT_VERSION="2026.07.18.18.30.00"
+AGENT_VERSION="2026.09.09.22.00.00"
 
 # --- Pfade: Syslog-Modus (rsyslog) ---
 CONFIG_FILE="/etc/rsyslog.d/99-logbot.conf"
@@ -101,13 +101,25 @@ require_root() {
 have_tty() { true 2>/dev/null </dev/tty; }
 
 # Fragt einen Wert ab. Nur im MANUELLEN Modus (nach Tastendruck im Gate) wird
-# tatsächlich gefragt - dann BLOCKIEREND ohne Timeout, jede Eingabe wird abgewartet.
-# Im automatischen Modus wird still der Default genommen (keine Abfrage).
+# tatsächlich gefragt. Im automatischen Modus wird still der Default genommen.
+#
+# WICHTIG - Zeitlimit: früher wartete diese Funktion unbegrenzt. Lief das Skript
+# über eine Pipe (curl | sudo bash), über SSH ohne echtes Terminal oder aus
+# einem Automatismus heraus, blieb es an der ersten Frage einfach stehen. Genau
+# das war der Grund, warum die Deinstallation "an vielen Stellen hängt".
+# Jetzt gilt: keine Eingabe innerhalb von ASK_TIMEOUT Sekunden -> Default.
+# Ein Terminal steht ohnehin nicht zur Verfügung -> sofort Default.
 # ask VARNAME "Frage" "default"
+ASK_TIMEOUT="${LOGBOT_ASK_TIMEOUT:-60}"
+
 ask() {
     local __name="$1" prompt="$2" def="$3" ans=""
-    if [[ "$MANUAL" == "true" ]]; then
-        read -r -p "$prompt [${def:-leer}] (Enter = Default): " ans </dev/tty || true
+    if [[ "$MANUAL" == "true" ]] && have_tty; then
+        if ! read -r -t "$ASK_TIMEOUT" -p "$prompt [${def:-leer}] (Enter = Default): " ans </dev/tty; then
+            ans=""
+            echo ""
+            log_warn "Keine Eingabe innerhalb von ${ASK_TIMEOUT}s - nehme Standardwert."
+        fi
         echo ""
     fi
     [[ -z "$ans" ]] && ans="$def"
@@ -402,6 +414,10 @@ import urllib.request
 
 CONFIG_FILE = os.environ.get("LOGBOT_CONFIG", "/opt/logbot-agent/config.json")
 CURSOR_FILE = os.environ.get("LOGBOT_CURSOR", "/opt/logbot-agent/cursor")
+# Hier merkt sich der Agent, welcher Geraeteeintrag auf dem Server ihm gehoert.
+# Beim Deinstallieren wird genau dieser abgeraeumt - und nicht der eines
+# Rechners, der zufaellig genauso heisst.
+AGENT_ID_FILE = os.environ.get("LOGBOT_AGENT_ID", "/opt/logbot-agent/agent_id")
 BATCH_SIZE = 50
 MSG_MAX = 2048
 
@@ -467,6 +483,34 @@ def ingest_url():
     return "https://%s:%d/api/agents/ingest" % (host, SERVER_PORT)
 
 
+def remember_agent_id(payload):
+    """Merkt sich die Geraetenummer, die der Server zurueckmeldet."""
+    try:
+        agent_id = (payload or {}).get("agent_id")
+        if not agent_id:
+            return
+        if read_agent_id() == str(agent_id):
+            return
+        os.makedirs(os.path.dirname(AGENT_ID_FILE), exist_ok=True)
+        tmp = AGENT_ID_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(str(agent_id))
+        os.replace(tmp, AGENT_ID_FILE)
+        log("Geraetenummer auf dem Server: %s" % agent_id)
+    except Exception as e:
+        # Kein Grund abzubrechen - ohne die Nummer greift beim Abmelden nur der
+        # ungenauere Weg ueber den Hostnamen.
+        log("Geraetenummer nicht gespeichert: %s" % e)
+
+
+def read_agent_id():
+    try:
+        with open(AGENT_ID_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip() or None
+    except Exception:
+        return None
+
+
 def send(events):
     if not events:
         return True
@@ -481,7 +525,13 @@ def send(events):
     })
     try:
         with urllib.request.urlopen(req, timeout=15, context=build_ctx()) as r:
-            return 200 <= r.status < 300
+            ok = 200 <= r.status < 300
+            if ok:
+                try:
+                    remember_agent_id(json.loads(r.read().decode("utf-8", "replace")))
+                except Exception:
+                    pass
+            return ok
     except urllib.error.HTTPError as e:
         log("HTTP %s von %s" % (e.code, url))
         return False
@@ -853,12 +903,19 @@ uninstall() {
     # Server-Purge zuerst, solange Token/Config noch vorhanden sind
     [[ "$do_purge_server" == true ]] && purge_server_entry
 
-    # HTTPS-Dienst + Verzeichnis (inkl. cursor) entfernen
+    # HTTPS-Dienst + Verzeichnis (inkl. cursor) entfernen.
+    # `timeout` davor: reagiert der Dienst nicht mehr, wartet systemctl sonst
+    # bis zu 90 Sekunden pro Aufruf - und die Deinstallation sieht aus, als
+    # haenge sie. Nach 20 s wird nachgeholfen.
     if [[ -f "$SYSTEMD_UNIT" ]] || systemctl list-unit-files 2>/dev/null | grep -q "^${SERVICE_NAME}.service"; then
-        systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-        systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+        if ! timeout 20 systemctl stop "$SERVICE_NAME" 2>/dev/null; then
+            log_warn "Der Dienst liess sich nicht sauber stoppen - wird abgeschossen."
+            timeout 10 systemctl kill -s KILL "$SERVICE_NAME" 2>/dev/null || true
+        fi
+        timeout 15 systemctl disable "$SERVICE_NAME" 2>/dev/null || true
         rm -f "$SYSTEMD_UNIT"
-        systemctl daemon-reload 2>/dev/null || true
+        timeout 15 systemctl daemon-reload 2>/dev/null || true
+        timeout 15 systemctl reset-failed "$SERVICE_NAME" 2>/dev/null || true
         log_info "HTTPS-Dienst entfernt: $SERVICE_NAME"
     fi
     if [[ -d "$AGENT_DIR" ]]; then
@@ -875,55 +932,95 @@ uninstall() {
     rm -f "${CONFIG_FILE}.backup."* 2>/dev/null || true
     rm -f "${QUEUE_PREFIX}"* 2>/dev/null || true
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet rsyslog 2>/dev/null; then
-        systemctl restart rsyslog || true
+        timeout 30 systemctl restart rsyslog || log_warn "rsyslog liess sich nicht neu starten - bitte selbst nachsehen."
     fi
 
     log_success "LogBot Agent wurde entfernt (lokal)."
 }
 
+# Meldet den Agent auf dem Server ab und laesst dort Eintrag und Logs loeschen.
+#
+# Zwei Dinge, die hier frueher schiefgingen:
+#   1. Drei blockierende Rueckfragen. Ohne Terminal blieb die Deinstallation
+#      hier stehen - die Werte stehen aber ohnehin in der Konfiguration.
+#   2. `curl` ohne Zeitlimit. War der Server nicht erreichbar (abgebaut, Firewall,
+#      falscher FQDN), haing der Aufruf minutenlang. Jetzt: hoechstens 20 s.
+#
+# Neu ist ausserdem die Zuordnung ueber die gespeicherte Geraetenummer: der
+# Server loescht damit genau den Eintrag dieses Rechners. Fehlt sie, greift der
+# Hostname - dann aber gleich fuer alle Eintraege dieses Namens, damit keine
+# Karteileichen aus frueheren IP-Wechseln liegen bleiben.
 purge_server_entry() {
     detect_server_from_config
     local api_host="${FQDN:-$SERVER_HOST_DETECTED}"
     local api_port="${PORT:-${SERVER_PORT_DETECTED:-443}}"
     local api_token="${TOKEN:-$TOKEN_DETECTED}"
 
-    ask api_host "Server Host/FQDN" "$api_host"
-    ask api_port "Server Port" "$api_port"
-    ask api_token "Agent Token (Bearer)" "$api_token"
+    # Nur nachfragen, was tatsaechlich fehlt - und auch das nur mit Zeitlimit.
+    [[ -z "$api_host" ]]  && ask api_host  "Server Host/FQDN"      "$api_host"
+    [[ -z "$api_port" ]]  && ask api_port  "Server Port"           "443"
+    [[ -z "$api_token" ]] && ask api_token "Agent Token (Bearer)"  "$api_token"
 
     if [[ -z "$api_token" || -z "$api_host" ]]; then
-        log_warn "Kein Token/Host - Server-Purge ausgelassen."
-        return
+        log_warn "Kein Token/Host bekannt - der Server-Eintrag bleibt stehen."
+        log_info "Nachholen im Web-UI unter 'Geräte': dort das Gerät löschen (mit Logs)."
+        return 0
     fi
 
-    local curl_opts=()
-    [[ "$INSECURE" == "true" ]] && curl_opts+=(-k)
+    if ! command -v curl >/dev/null 2>&1; then
+        log_warn "curl nicht gefunden - der Server-Eintrag bleibt stehen."
+        return 0
+    fi
 
-    local host_ip mac_addr
+    local host_ip mac_addr agent_id
     host_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     mac_addr=$(ip link show 2>/dev/null | awk '$1=="link/ether"{print $2; exit}')
     [[ -z "$mac_addr" ]] && mac_addr=$(cat /sys/class/net/*/address 2>/dev/null | grep -v '^00:00:00:00:00:00$' | head -1)
+    agent_id="$(cat "${AGENT_DIR}/agent_id" 2>/dev/null | tr -dc '0-9')"
 
     local url_base
     [[ "$api_port" == "443" ]] && url_base="https://${api_host}" || url_base="https://${api_host}:${api_port}"
-    local payload
-    payload=$(cat <<EOF
-{"hostname":"$(hostname)","ip_address":"${host_ip:-}","mac_address":"${mac_addr:-}","purge":true}
-EOF
-)
 
-    if command -v curl >/dev/null 2>&1; then
-        if curl -sSf "${curl_opts[@]}" -X POST "${url_base}/api/agents/decommission" \
-            -H "Authorization: Bearer $api_token" \
-            -H "Content-Type: application/json" \
-            -d "$payload" >/dev/null; then
-            log_success "Server-Purge angefordert (Agent + Logs)."
-        else
-            log_warn "Server-Purge fehlgeschlagen oder nicht erreichbar."
-        fi
-    else
-        log_warn "curl nicht gefunden - Server-Purge ausgelassen."
-    fi
+    # agent_id nur mitschicken, wenn es eine gibt - sonst waere es JSON-null.
+    local id_field=""
+    [[ -n "$agent_id" ]] && id_field="\"agent_id\":${agent_id},"
+
+    local payload
+    payload="{${id_field}\"hostname\":\"$(hostname)\",\"ip_address\":\"${host_ip:-}\",\"mac_address\":\"${mac_addr:-}\",\"purge\":true,\"all_for_hostname\":true}"
+
+    local curl_opts=(-sS --connect-timeout 8 --max-time 20)
+    [[ "$INSECURE" == "true" ]] && curl_opts+=(-k)
+
+    log_info "Melde den Agent auf dem Server ab (${url_base})..."
+
+    local response http_code
+    response="$(curl "${curl_opts[@]}" -w '\n%{http_code}' -X POST \
+        "${url_base}/api/agents/decommission" \
+        -H "Authorization: Bearer $api_token" \
+        -H "Content-Type: application/json" \
+        -d "$payload" 2>&1)" || true
+
+    http_code="$(printf '%s' "$response" | tail -n1)"
+    local body
+    body="$(printf '%s' "$response" | sed '$d')"
+
+    case "$http_code" in
+        2*)
+            log_success "Auf dem Server abgeräumt: ${body}"
+            ;;
+        404)
+            log_info "Auf dem Server gab es dazu keinen Eintrag (mehr) - nichts zu tun."
+            ;;
+        401|403)
+            log_warn "Der Server hat den Token abgelehnt - der Eintrag bleibt stehen."
+            log_info "Im Web-UI unter 'Geräte' von Hand löschen."
+            ;;
+        *)
+            log_warn "Der Server war nicht erreichbar (${http_code:-keine Antwort}) - der Eintrag bleibt stehen."
+            log_info "Im Web-UI unter 'Geräte' von Hand löschen."
+            ;;
+    esac
+    return 0
 }
 
 # ==============================================================================

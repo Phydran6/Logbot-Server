@@ -2,6 +2,61 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.09.22.00.00
+### Added
+- **Sicherung und Wiederherstellung** (`app/backup.py`, `routes/backup.py`): ZIP-Datei mit
+  aussen liegendem, immer lesbarem `manifest.json` und innen liegender Nutzlast — wahlweise
+  im Klartext (`payload.zip`) oder AES-256-GCM-verschlüsselt (`payload.bin`, PBKDF2-HMAC-SHA256
+  mit 210 000 Runden). Sechs Bereiche einzeln wählbar, beim Sichern wie beim Zurückspielen.
+  Tabellen liegen als `jsonl.gz` und werden in Blöcken von 5000 Zeilen gelesen und geschrieben,
+  damit die `logs`-Tabelle den Speicher nicht sprengt.
+  *Warum das Manifest aussen liegt:* Beim Zurückspielen muss **vor** der Passwortabfrage
+  erkennbar sein, von welcher Version die Sicherung stammt — sonst fällt ein Versionskonflikt
+  erst auf, wenn die Daten halb in der Datenbank stehen.
+- **Versionsprüfung beim Zurückspielen**: gleich / älter / unlesbar / **neuer als der Server**.
+  Der letzte Fall blockiert und lässt sich nur ausdrücklich übergehen.
+- **Pflicht-Rückfrage vor Systemeingriffen** (`app/guard.py`): Update, Rückfall, Zurückspielen
+  und das Schalten eines Zusatzdienstes verlangen im Rumpf ein `backup`-Objekt. Fehlt es,
+  gibt es HTTP 400 — die Rückfrage lässt sich also nicht durch Weglassen der Oberfläche
+  umgehen. Scheitert die Sicherung, startet der Eingriff nicht.
+- **Ereignisverteiler** (`app/events.py`): Server-Sent Events an alle offenen Oberflächen,
+  mit gemerktem letztem Stand je Ereignistyp und Lebenszeichen alle 20 s. Bewusst kein
+  WebSocket — es fliesst nur in eine Richtung und läuft so durch jeden Reverse Proxy.
+- **Update-Beobachter** (`updater.watch_task`): fragt GitHub im kurzen Takt ab und meldet
+  einen neuen Stand genau einmal. Dazu **GitHub-Webhook** (`POST /api/updates/webhook`) mit
+  HMAC-Prüfung; ohne gesetztes `LOGBOT_WEBHOOK_SECRET` wird nichts angenommen.
+- **Release-Kanäle**: `stable`, `edge`, `pinned`. `remote_state()` prüft gegen den Kanal,
+  `start_run()` gibt `--ref` an das Wartungsskript weiter.
+- **Anzeige-Parser** (`app/logparse.py`): zerlegt Rohzeilen in Zusammenfassung, benannte
+  Felder und Abzeichen. RFC 5424/3164, UniFi Netconsole und MAC/Modell, Cisco IOS,
+  `key=value`, JSON, journald, Netfilter. Ändert nie Daten — reine Anzeige.
+- **App-Schnittstelle** (`routes/mobile.py`) unter `/api/app`: Cursor-Blättern (`before_id`),
+  Nachlaufen (`since_id`), kompakte Antworten, `bootstrap` mit `api_level`/`capabilities`.
+- **KI-Auswertung** (`app/ai.py`, `routes/ai.py`): Anthropic, OpenAI, n8n extern, n8n lokal.
+  Mit Vorschau des Sendeinhalts und Verbindungstest gegen eine erfundene Logzeile.
+- **Zusatzdienste** (`app/stacks.py`, `routes/stacks.py`): Compose-Profile schalten, Zugangs-
+  daten anzeigen und neu setzen, Protokolle lesen, Kapazität prüfen.
+- **Mailversand** (`app/mail.py`, `routes/mail.py`): erzeugt die vollständige
+  Postfix-Konfiguration und verschickt über SMTP — Container oder vorhandener Server.
+- **Terminal** (`app/shell.py`, `routes/shell.py`): PTY auf dem Host über WebSocket. Nur
+  Administratoren, nur mit `LOGBOT_WEBSHELL=true`, mit Sitzungsgrenze, Leerlauf-Abbruch und
+  Protokollierung.
+- `auth.admin_from_token()` für die beiden Wege ohne Kopfzeile (SSE, WebSocket).
+- `GET /api/logs/{id}/parsed` und `agent_id` in der Antwort von `/api/agents/ingest`.
+
+### Changed
+- `POST /api/updates/apply` und `/rollback` verlangen zusätzlich zum Bestätigungswort die
+  beantwortete Sicherungsfrage; `/apply` nimmt `ref` für ein bestimmtes Release entgegen.
+- `POST /api/agents/decommission` ordnet vom Genauesten zum Ungenauesten zu (`agent_id`,
+  MAC, Hostname+IP, Hostname) und meldet in `matched_by`, welcher Weg gegriffen hat.
+  `all_for_hostname` räumt zusätzlich alle weiteren Einträge desselben Hostnamens ab.
+
+### Fixed
+- **Zurückspielen scheiterte an Zeitstempeln.** JSON kennt keinen Datumstyp, asyncpg verlangte
+  beim Einfügen aber `datetime`-Objekte. Jeder Wert geht jetzt als Text und wird per
+  `CAST(CAST(:x AS text) AS <typ>)` von PostgreSQL umgewandelt — der innere Cast legt den
+  Parametertyp fest, der äussere den Zieltyp. ID-Zähler werden danach per `setval` nachgezogen.
+
 ## 2026.08.14.12.00.00
 ### Added
 - **Systemcheck** (`app/diagnostics.py`, `routes/diagnostics.py`): prüft das System in einem

@@ -10,10 +10,15 @@
  * ======================================================
  * Drei Bereiche: Überwachung, Verwaltung, System.
  *
- * Alles, was zum System gehört (Netzwerk, Datenbank, Verzeichnis, Archivierung,
- * Erscheinungsbild, Anmeldesicherheit), liegt unter /settings als Reiter. Die
- * alten Adressen wie /settings/ldap funktionieren weiter: der Teil hinter
- * /settings wählt den Reiter aus.
+ * Alles, was zu den Einstellungen gehört (Netzwerk, Datenbank, Verzeichnis,
+ * Archivierung, Erscheinungsbild, Anmeldesicherheit), liegt unter /settings als
+ * Reiter. Die alten Adressen wie /settings/ldap funktionieren weiter: der Teil
+ * hinter /settings wählt den Reiter aus. Angesteuert werden diese Reiter jetzt
+ * aus dem linken Menü — die Reiterleiste rechts ist nur noch der zweite Weg.
+ *
+ * Eigene Seiten unter System: Sicherung, KI-Auswertung, Zusatzdienste, Mail und
+ * Terminal. Die stehen bewusst nicht unter /settings: es sind eigene Werkzeuge,
+ * keine Einstellungen.
  *
  * ==============================================================================
  */
@@ -94,6 +99,36 @@ const routes = [
         path: 'updates',
         name: 'Updates',
         component: () => import('../views/Updates.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'backup',
+        name: 'Backup',
+        component: () => import('../views/Backup.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'ai',
+        name: 'AiSettings',
+        component: () => import('../views/AiSettings.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'stacks',
+        name: 'Stacks',
+        component: () => import('../views/Stacks.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'mail',
+        name: 'Mail',
+        component: () => import('../views/MailSettings.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'terminal',
+        name: 'Terminal',
+        component: () => import('../views/Terminal.vue'),
         meta: { admin: true }
       },
     ]

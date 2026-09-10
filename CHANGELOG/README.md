@@ -2,22 +2,58 @@
 
 Änderungen werden **pro Bereich** dokumentiert. Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
-**Aktuelle Projekt-/Release-Version:** `2026.08.14.14.00.00` (Datei `VERSION` im Wurzelverzeichnis, Root-README, `backend/app/config.py` → `app_version`, `frontend/package.json`, `install.sh` → `LOGBOT_VERSION`). Die Tabelle unten führt die Stände der einzelnen Bereiche.
-Die Agents-README trägt weiterhin `2026.07.18.18.30.00` — der Agent-Bereich wurde seitdem nicht geändert.
+← [Zur Übersicht](../README.md) · [Alle Dokumente](../docs/README.md)
 
-> Die Datei `VERSION` ist der Massstab für die Update-Prüfung (*System → Updates*): sie wird
-> gegen den Stand auf GitHub verglichen. Bei jedem Release mit anheben.
+---
 
-| Bereich | Changelog | Aktuelle Version |
-|---------|-----------|------------------|
-| Agents (Linux/Windows Installer & Forwarder) | [agents.md](agents.md) | 2026.07.18.18.30.00 |
-| Backend (FastAPI API) | [backend.md](backend.md) | 2026.08.14.12.00.00 |
-| Frontend (Vue UI) | [frontend.md](frontend.md) | 2026.08.14.14.00.00 |
-| Syslog-Server | [syslog.md](syslog.md) | 2026.05.13.20.58.33 |
-| Datenbank / Deployment (Postgres-Image, Compose, install.sh) | [database.md](database.md) | 2026.08.14.12.00.00 |
+## Wo steht was
+
+| | |
+|---|---|
+| **[Release-Verlauf](releases.md)** | Die Versionsgeschichte des Gesamtprojekts — was in welchem Release dazukam. Stand früher in der Haupt-README. |
+| [Agents](agents.md) | Linux- und Windows-Installer, Forwarder |
+| [Backend](backend.md) | FastAPI-API |
+| [Frontend](frontend.md) | Vue-Oberfläche |
+| [Syslog](syslog.md) | Syslog-Empfänger |
+| [Datenbank & Deployment](database.md) | Postgres-Image, Compose, `install.sh` |
+
+---
+
+## Aktuelle Stände
+
+**Projekt-/Release-Version:** `2026.09.09.22.00.00`
+
+Sie steht an fünf Stellen und muss bei jedem Release überall mitwandern:
+
+| Ort | Bedeutung |
+|-----|-----------|
+| `VERSION` | **Maßstab für die Update-Prüfung** — wird gegen den Stand auf GitHub verglichen |
+| `backend/app/config.py` → `app_version` | Version in der API und in Sicherungen |
+| `frontend/package.json` | Version im Seitenmenü |
+| `install.sh` → `LOGBOT_VERSION` | Version in der Installer-Ausgabe |
+| `CHANGELOG/releases.md` | der Eintrag zum Release |
+
+> Die Haupt-README trägt **bewusst keine Version** mehr: Sie beschreibt, was
+> LogBot ist und kann — nicht, welcher Stand gerade aktuell ist. Das steht in
+> `VERSION` und hier.
+
+| Bereich | Aktuelle Version |
+|---------|------------------|
+| Agents | 2026.09.09.22.00.00 |
+| Backend | 2026.09.09.22.00.00 |
+| Frontend | 2026.09.09.22.00.00 |
+| Syslog | 2026.05.13.20.58.33 |
+| Datenbank / Deployment | 2026.09.09.22.00.00 |
+
+---
 
 ## Konventionen
+
 - Neueste Version steht oben.
-- Kategorien: **Added**, **Changed**, **Fixed**, **Removed**, **Security**.
-- Ein Änderungsblock pro Version; die Version entspricht dem `Version:`-Zeitstempel im Datei-Header des jeweiligen Bereichs.
-- Nur den Bereich versionieren/eintragen, der tatsächlich geändert wurde.
+- Kategorien: **Added**, **Changed**, **Fixed**, **Removed**, **Security**
+  (bzw. Neu, Geändert, Behoben, Entfernt, Sicherheit).
+- Ein Änderungsblock pro Version; die Version entspricht dem `Version:`-Zeitstempel
+  im Datei-Kopf des jeweiligen Bereichs.
+- Nur den Bereich versionieren und eintragen, der tatsächlich geändert wurde.
+- Ein Eintrag sagt, **was** sich geändert hat und **warum** — nicht, welche Zeile
+  angefasst wurde. Bei Fehlerbehebungen gehört die Ursache dazu.
