@@ -30,6 +30,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -206,19 +207,71 @@ def _cache_remote(info: dict) -> dict:
 # =============================================================================
 # Gesamtbild
 # =============================================================================
+def parse_version(value: str) -> tuple:
+    """'2026.09.09.22.00.00' -> (2026, 9, 9, 22, 0, 0). Unlesbares -> ().
+
+    Auf sechs Stellen begrenzt, damit ein Zusatz wie '-rc1' den Vergleich nicht
+    kippt: verglichen wird der Zeitstempel, nicht das Anhaengsel.
+    """
+    parts = re.findall(r"\d+", str(value or ""))
+    return tuple(int(p) for p in parts[:6]) if parts else ()
+
+
 def compare(local: dict, remote: dict) -> tuple:
-    """Ist ein Update da? Gibt (verfuegbar, Begruendung) zurueck."""
+    """Ist ein Update da? Gibt (verfuegbar, Begruendung, Verhaeltnis) zurueck.
+
+    Das Verhaeltnis ist eines von: 'behind' (der Server hinkt hinterher, es gibt
+    also wirklich ein Update), 'same', 'ahead' (der Server ist NEUER als das,
+    worauf der Kanal zeigt) oder 'unknown'.
+
+    Warum die Reihenfolge zaehlt und nicht blosse Ungleichheit: Der Kanal
+    'stabil' zeigt auf das neueste veroeffentlichte Release. Bleibt das
+    Release-Anlegen mal aus, ist dieses Release aelter als der installierte
+    Stand. Ein reiner Ungleichheitsvergleich meldet dann 'Update verfuegbar'
+    und das Einspielen faehrt den Server in Wahrheit zurueck - ein Downgrade,
+    als Update getarnt. Genau das darf nicht passieren.
+    """
     if not remote.get("reachable"):
-        return False, (remote.get("error") or "Stand auf GitHub unbekannt.")
+        return False, (remote.get("error") or "Stand auf GitHub unbekannt."), "unknown"
+
+    local_version = parse_version(local.get("version"))
+    remote_version = parse_version(remote.get("version"))
+
+    # 1. Versionsstaende, sofern beide lesbar: die tragen die Reihenfolge.
+    if local_version and remote_version:
+        if remote_version > local_version:
+            return True, "Auf GitHub liegt ein neuerer Stand.", "behind"
+        if remote_version < local_version:
+            return False, (
+                f"Der installierte Stand ({local.get('version')}) ist NEUER als das, "
+                f"worauf der eingestellte Kanal zeigt ({remote.get('version')}). "
+                f"Einspielen waere ein Rueckschritt. Fehlt ein Release fuer den "
+                f"aktuellen Stand?"
+            ), "ahead"
+        # Gleiche Version: der Commit entscheidet (Zweig weitergelaufen,
+        # ohne dass die VERSION-Datei angehoben wurde).
+
+    # 2. Gleiche oder unlesbare Version: Commits vergleichen.
     if local.get("commit") and remote.get("commit"):
-        available = local["commit"] != remote["commit"]
-        return available, ("Auf GitHub liegt ein neuerer Stand." if available
-                           else "Der installierte Stand entspricht GitHub.")
+        if local["commit"] == remote["commit"]:
+            return False, "Der installierte Stand entspricht GitHub.", "same"
+        # Ohne Versionsangabe laesst sich die Richtung nicht bestimmen - dann
+        # gilt "es gibt etwas anderes", so wie bisher.
+        if local_version and remote_version and local_version == remote_version:
+            return True, ("Gleiche Version, aber ein anderer Commit - auf dem Zweig "
+                          "liegt Neues."), "behind"
+        return True, "Auf GitHub liegt ein anderer Stand.", "behind"
+
+    # 3. Nur die Versionsdatei ist lesbar.
+    if remote_version and not local_version:
+        return True, "Auf GitHub steht eine Version, hier ist keine lesbar.", "unknown"
     if remote.get("version"):
         available = remote["version"] != local.get("version")
         return available, ("Auf GitHub steht eine andere Version." if available
-                           else "Die Version entspricht dem Stand auf GitHub.")
-    return False, "Kein Vergleich moeglich (weder Commit noch VERSION-Datei lesbar)."
+                           else "Die Version entspricht dem Stand auf GitHub."), \
+            ("behind" if available else "same")
+
+    return False, "Kein Vergleich moeglich (weder Commit noch VERSION-Datei lesbar).", "unknown"
 
 
 async def version_check(force: bool = False) -> dict:
@@ -230,9 +283,9 @@ async def version_check(force: bool = False) -> dict:
     ref = await resolve_target_ref(channel)
     local = await local_state()
     remote = await remote_state(force=force, ref=ref)
-    available, reason = compare(local, remote)
+    available, reason, relation = compare(local, remote)
     return {"local": local, "remote": remote, "channel": channel,
-            "update_available": available, "reason": reason}
+            "update_available": available, "reason": reason, "relation": relation}
 
 
 async def update_status(force: bool = False) -> dict:
@@ -243,7 +296,7 @@ async def update_status(force: bool = False) -> dict:
     remote = await remote_state(force=force, ref=ref)
     run = await read_run_state()
     backups = await list_backups()
-    available, reason = compare(local, remote)
+    available, reason, relation = compare(local, remote)
 
     oneliner = (f"curl -sSL https://raw.githubusercontent.com/{REPO_SLUG}/{REPO_BRANCH}/install.sh "
                 f"| sudo bash -s -- update -y")
@@ -257,6 +310,10 @@ async def update_status(force: bool = False) -> dict:
         "target_ref": ref,
         "update_available": available,
         "reason": reason,
+        # 'behind' | 'same' | 'ahead' | 'unknown' - die Oberflaeche zeigt bei
+        # 'ahead' keinen Update-Knopf, sondern den Hinweis auf das fehlende Release.
+        "relation": relation,
+        "is_downgrade": relation == "ahead",
         "repo_url": REPO_URL,
         "run": run,
         "backups": backups,

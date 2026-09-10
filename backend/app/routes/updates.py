@@ -48,6 +48,9 @@ class UpdateRequest(BaseModel):
     # Wartungsskript auf dem Host anlegt (unabhaengig von der ZIP-Sicherung).
     database_backup: bool = True
     ref: str = Field(default="", description="Release/Tag/Commit; leer = eingestellter Kanal")
+    allow_downgrade: bool = Field(
+        default=False,
+        description="Auch einspielen, wenn das Ziel aelter ist als der installierte Stand")
     backup: Optional[BackupDecision] = None
 
 
@@ -194,6 +197,18 @@ async def apply_update(data: UpdateRequest, db: AsyncSession = Depends(get_db),
             detail=("Kein Zugriff auf den Host. Das Update über die Oberfläche braucht ein "
                     "Backend mit privileged/pid:host (Standard-docker-compose.yml). "
                     "Alternativ per Kommandozeile: " + status["oneliner"]),
+        )
+
+    # Zeigt der Kanal auf einen älteren Stand als den installierten, wäre das
+    # Einspielen ein Rückschritt — meist, weil für den aktuellen Stand noch kein
+    # Release angelegt wurde. Das passiert nicht aus Versehen.
+    if status.get("is_downgrade") and not data.ref.strip() and not data.allow_downgrade:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"{status['reason']} Einspielen würde den Server zurückfahren. "
+                    f"Entweder ein Release für den aktuellen Stand anlegen, den Kanal "
+                    f"auf '{updater.REPO_BRANCH}' stellen — oder, wenn der Rückschritt "
+                    f"gewollt ist, 'allow_downgrade' setzen."),
         )
 
     # Erst sichern, dann anfassen. Scheitert die Sicherung, läuft nichts an.

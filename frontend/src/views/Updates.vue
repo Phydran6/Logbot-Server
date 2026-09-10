@@ -96,8 +96,8 @@
       <div class="card lg:col-span-2">
         <div class="card-header">
           <span class="card-title">Versionsstand</span>
-          <span v-if="status" class="badge" :class="status.update_available ? 'badge-warning' : 'badge-success'">
-            {{ status.update_available ? 'Update verfügbar' : 'aktuell' }}
+          <span v-if="status" class="badge" :class="stateBadge">
+            {{ stateLabel }}
           </span>
         </div>
         <div class="card-body space-y-2 text-sm">
@@ -136,6 +136,24 @@
           <p v-if="status?.reason" class="text-xs pt-1" style="color: var(--color-text-muted)">
             {{ status.reason }}
           </p>
+
+          <!-- Der Kanal zeigt auf einen aelteren Stand als den installierten.
+               Meist fehlt einfach ein Release fuer den aktuellen Stand. Hier
+               steht deshalb kein Update-Knopf, sondern was zu tun ist. -->
+          <div v-if="status?.is_downgrade" class="downgrade-note">
+            <p class="font-semibold mb-1">Einspielen wäre hier ein Rückschritt.</p>
+            <p>
+              Der eingestellte Kanal <strong>{{ channelLabel }}</strong> zeigt auf
+              <span class="font-mono">{{ status?.remote?.version || status?.target_ref }}</span> —
+              installiert ist aber schon
+              <span class="font-mono">{{ status?.local?.version }}</span>.
+            </p>
+            <p class="mt-1">Zwei Wege:</p>
+            <ul class="downgrade-list">
+              <li>Auf GitHub ein Release für den aktuellen Stand anlegen — dann stimmt „Stabil“ wieder.</li>
+              <li>Oder oben den Kanal auf <strong>Aktuell ({{ status?.remote?.branch }})</strong> stellen.</li>
+            </ul>
+          </div>
           <p v-if="status?.local?.note" class="note note-warn">{{ status.local.note }}</p>
           <p v-if="status && !status.can_update" class="note note-warn">
             Dieser Server lässt sich nicht über die Oberfläche aktualisieren – dem Backend fehlt
@@ -149,7 +167,7 @@
               @click="askUpdate"
             >
               <AppIcon name="download" :size="16" />
-              {{ status?.update_available ? 'Update einspielen' : 'Neu installieren (gleicher Stand)' }}
+              {{ applyLabel }}
             </button>
           </div>
         </div>
@@ -426,7 +444,33 @@ const run = computed(() => {
   return serverRun.value
 })
 
-const canStart = computed(() => !!status.value?.can_update && !isRunning.value && !starting.value)
+const canStart = computed(() => (
+  !!status.value?.can_update && !isRunning.value && !starting.value
+  // Bei einem Rueckschritt bleibt der Knopf aus: der Server weist das ohnehin
+  // ab (HTTP 409), und ein Knopf, der nur eine Fehlermeldung erzeugt, hilft
+  // niemandem.
+  && !status.value?.is_downgrade
+))
+
+/** Drei Zustaende statt zwei: hinterher, gleichauf, oder voraus. */
+const stateBadge = computed(() => {
+  if (status.value?.is_downgrade) return 'badge-neutral'
+  return status.value?.update_available ? 'badge-warning' : 'badge-success'
+})
+
+const stateLabel = computed(() => {
+  if (status.value?.is_downgrade) return 'Server ist voraus'
+  return status.value?.update_available ? 'Update verfügbar' : 'aktuell'
+})
+
+const applyLabel = computed(() => (
+  status.value?.update_available ? 'Update einspielen' : 'Neu installieren (gleicher Stand)'
+))
+
+const channelLabel = computed(() => {
+  const key = status.value?.channel?.channel
+  return channels.value.find(c => c.id === key)?.label || key || '—'
+})
 
 onMounted(() => {
   load()
@@ -658,6 +702,22 @@ function formatTime(value) {
 </script>
 
 <style scoped>
+.downgrade-note {
+  margin-top: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-warning);
+  background-color: var(--primary-soft);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+
+.downgrade-list {
+  margin-top: 0.25rem;
+  padding-left: 1.125rem;
+  list-style: disc;
+}
+
 .channel-grid {
   display: grid;
   gap: 0.5rem;
