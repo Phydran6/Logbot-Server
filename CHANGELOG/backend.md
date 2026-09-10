@@ -2,6 +2,27 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.10.20.00.00
+### Fixed
+- **Der Kanal „stabil" konnte ein Downgrade als Update anbieten.** `compare()` verglich
+  installierten und entfernten Stand nur auf *Ungleichheit*, nicht auf *Reihenfolge*.
+  Zeigt der Kanal auf ein Release, das älter ist als der installierte Stand — was
+  passiert, sobald für den aktuellen Stand noch kein Release angelegt wurde —, meldete
+  die Oberfläche „Update verfügbar", und das Einspielen fuhr den Server in Wahrheit
+  zurück.
+  `compare()` ordnet Versionen jetzt (`parse_version`) und gibt zusätzlich das
+  Verhältnis zurück: `behind` (echtes Update), `same`, `ahead` (Server ist neuer als
+  der Kanal) oder `unknown`. Bei gleicher Version entscheidet weiterhin der Commit —
+  ein weitergelaufener Zweig ohne angehobene VERSION-Datei bleibt damit ein Update.
+- `POST /api/updates/apply` weist einen Rückschritt mit HTTP 409 ab und nennt beide
+  Auswege (Release anlegen oder Kanal wechseln). Wer den Rückschritt wirklich will,
+  setzt `allow_downgrade` oder gibt ein `ref` von Hand an.
+- Die Update-Seite zeigt bei diesem Zustand **„Server ist voraus"** statt eines
+  Update-Knopfs, dazu eine Erklärung, was zu tun ist. Der Knopf bleibt aus, statt nur
+  eine Fehlermeldung zu erzeugen.
+- `import re` fehlte in `app/updater.py` — fiel erst beim Test der neuen
+  Versionsordnung auf.
+
 ## 2026.09.09.22.00.00
 ### Added
 - **Sicherung und Wiederherstellung** (`app/backup.py`, `routes/backup.py`): ZIP-Datei mit

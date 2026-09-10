@@ -46,7 +46,7 @@ NC='\033[0m'
 # Konfiguration (Vorrang: Parameter > Umgebungsvariable > Default)
 # ==============================================================================
 
-LOGBOT_VERSION="2026.09.09.22.00.00"
+LOGBOT_VERSION="2026.09.10.20.00.00"
 
 INSTALL_DIR="${LOGBOT_DIR:-/opt/logbot}"
 REPO_URL="${LOGBOT_REPO:-https://github.com/Phydran6/Logbot-Server.git}"
