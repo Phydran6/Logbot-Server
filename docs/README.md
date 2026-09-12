@@ -14,8 +14,12 @@ sortiert, nicht nach Bauteilen.
 | die Oberfläche auf Englisch stellen | [Betrieb → Sprache](operate/README.md#sprache) |
 | eine Shell auf dem Server öffnen | [Betrieb → Terminal](operate/README.md#terminal-im-browser) |
 | aktualisieren | [Updates](updates/README.md) |
+| den aktuellsten Stand per Einzeiler drüberbügeln | [Updates → Einzeiler](updates/README.md#einzeiler-auf-einen-blick) |
+| wissen, welcher Update-Weg wann passt | [Updates → Welchen Weg nehmen?](updates/README.md#welchen-weg-nehmen) |
 | auf einer bestimmten Version bleiben | [Updates → Kanal](updates/README.md#welchen-stand-soll-der-server-fahren) |
 | sofort erfahren, wenn etwas gepusht wurde | [Updates → Sofortmeldung](updates/README.md#sofortmeldung) |
+| auf einen früheren Stand zurückfallen | [Updates → Zurückfallen](updates/README.md#zurückfallen) |
+| einem fehlgeschlagenen Update nachgehen | [Updates → Fehlersuche](updates/README.md#fehlersuche) |
 | sichern und zurückspielen | [Sicherung](backup/README.md) |
 | Logs von einer KI auswerten lassen | [Integrationen → KI](integrations/README.md#ki-auswertung) |
 | Mails vom Server bekommen | [Integrationen → Mail](integrations/README.md#mail-postfix) |

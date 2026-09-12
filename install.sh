@@ -12,7 +12,7 @@
 #
 # Autor:        Phydran6
 # Kontakt:      Phydran6
-# Version:      2026.07.31.21.40.00
+# Version:      2026.09.12.12.00.00
 # Erstellt:     Januar 2026
 #
 # Beschreibung:
@@ -30,6 +30,8 @@
 #   curl -sSL <RAW-URL>/install.sh | sudo bash            # One-Liner
 #   curl -sSL <RAW-URL>/install.sh | sudo bash -s -- -y   # ohne Rueckfragen
 #   sudo bash install.sh update|uninstall|uninstall-purge
+#   curl -sSL <RAW-URL>/install.sh | sudo bash -s -- update -y
+#   curl -sSL <RAW-URL>/install.sh | sudo bash -s -- update -y --ref v2026.09.10
 #
 # ==============================================================================
 
@@ -51,6 +53,10 @@ LOGBOT_VERSION="2026.09.10.20.00.00"
 INSTALL_DIR="${LOGBOT_DIR:-/opt/logbot}"
 REPO_URL="${LOGBOT_REPO:-https://github.com/Phydran6/Logbot-Server.git}"
 REPO_BRANCH="${LOGBOT_BRANCH:-main}"
+# Welcher Stand geholt wird. Leer = der Kopf von REPO_BRANCH. Sonst ein Release,
+# ein Tag oder ein Commit - damit laesst sich ein Server auf einer bestimmten
+# Version halten (dieselbe Bedeutung wie --ref im Wartungsskript).
+REF="${LOGBOT_REF:-}"
 PROMPT_TIMEOUT="${LOGBOT_TIMEOUT:-5}"
 
 ACTION="install"
@@ -150,6 +156,8 @@ Optionen (auch als Umgebungsvariable LOGBOT_*):
   --dir <pfad>       Installationsverzeichnis   (LOGBOT_DIR)    [${INSTALL_DIR}]
   --repo <url>       Git-Repository             (LOGBOT_REPO)   [${REPO_URL}]
   --branch <name>    Branch                     (LOGBOT_BRANCH) [${REPO_BRANCH}]
+  --ref <punkt>      Release, Tag oder Commit statt des Branch-Kopfes
+                     (LOGBOT_REF) - z.B. --ref v2026.09.10
   --with <liste>     Zusatzdienste, komma-getrennt (LOGBOT_ADDONS)
                      Möglich: ${ALL_ADDONS// /, }
                      Beispiel: --with portainer,watchtower
@@ -189,6 +197,8 @@ parse_args() {
             --repo=*)               REPO_URL="${1#*=}" ;;
             --branch)               REPO_BRANCH="${2:-}"; shift ;;
             --branch=*)             REPO_BRANCH="${1#*=}" ;;
+            --ref)                  REF="${2:-}"; shift ;;
+            --ref=*)                REF="${1#*=}" ;;
             --timeout)              PROMPT_TIMEOUT="${2:-5}"; shift ;;
             --timeout=*)            PROMPT_TIMEOUT="${1#*=}" ;;
             --with)                 ADDONS="${2:-}"; shift ;;
@@ -394,10 +404,19 @@ resolve_source() {
     fi
 
     # One-Liner-Fall (curl | bash): Quellen selbst holen.
+    local target="${REF:-$REPO_BRANCH}"
     TMP_CLONE="$(mktemp -d /tmp/logbot-src.XXXXXX)"
-    log_info "Quelle: $REPO_URL (Branch $REPO_BRANCH) wird geklont..."
-    git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$TMP_CLONE/repo" \
-        || fail "git clone fehlgeschlagen - Repo/Branch/Netzwerk prüfen."
+    log_info "Quelle: $REPO_URL ($target) wird geklont..."
+    # --branch nimmt auch ein Tag entgegen; ein Commit dagegen nicht - dafuer
+    # der zweite Versuch mit vollem Clone und anschliessendem Auschecken.
+    if ! git clone --depth 1 --branch "$target" "$REPO_URL" "$TMP_CLONE/repo" 2>/dev/null; then
+        log_warn "Flacher Clone von '$target' fehlgeschlagen - versuche vollen Clone."
+        rm -rf "$TMP_CLONE/repo"
+        git clone "$REPO_URL" "$TMP_CLONE/repo" \
+            || fail "git clone fehlgeschlagen - Repo/Branch/Netzwerk prüfen."
+        git -C "$TMP_CLONE/repo" checkout --force "$target" \
+            || fail "'$target' gibt es im Repository nicht (Release, Tag oder Commit prüfen)."
+    fi
     [[ -f "$TMP_CLONE/repo/docker-compose.yml" ]] \
         || fail "Im geklonten Repo fehlt docker-compose.yml."
     SRC_DIR="$TMP_CLONE/repo"
@@ -591,16 +610,50 @@ install_logbot() {
     log_success "LogBot v${LOGBOT_VERSION} installiert nach $INSTALL_DIR"
 }
 
+# Setzt ein vorhandenes Git-Verzeichnis auf einen bestimmten Punkt (Release, Tag
+# oder Commit). Reihenfolge beim Aufloesen wie im Wartungsskript: Tag, Zweig auf
+# dem Server, roher Commit - so gewinnt ein Tag, der wie ein Zweig heisst, nicht
+# zufaellig.
+checkout_ref() {
+    local resolved="" candidate
+    log_info "Hole Stand '$REF' per git..."
+    git -C "$INSTALL_DIR" fetch --tags --prune --force origin \
+        "+refs/heads/*:refs/remotes/origin/*" || return 1
+    for candidate in "refs/tags/$REF" "origin/$REF" "$REF"; do
+        if git -C "$INSTALL_DIR" rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null 2>&1; then
+            resolved="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$resolved" ]]; then
+        log_warn "'$REF' ist im Repository nicht auffindbar."
+        return 1
+    fi
+    git -C "$INSTALL_DIR" reset --hard "$resolved" || return 1
+    log_success "Stand gesetzt auf $resolved ($(git -C "$INSTALL_DIR" rev-parse --short HEAD))"
+    return 0
+}
+
 update_logbot() {
     [[ -d "$INSTALL_DIR" ]] || fail "$INSTALL_DIR existiert nicht - erst installieren."
 
     local updated="false"
     if [[ -d "$INSTALL_DIR/.git" ]]; then
-        log_info "Aktualisiere per git pull..."
-        if git -C "$INSTALL_DIR" pull --ff-only; then
-            updated="true"
+        # Git meckert sonst ueber "dubious ownership", wenn root ein fremdes Repo anfasst.
+        git config --global --add safe.directory "$INSTALL_DIR" >/dev/null 2>&1 || true
+        if [[ -n "$REF" ]]; then
+            if checkout_ref; then
+                updated="true"
+            else
+                log_warn "'$REF' konnte nicht gesetzt werden - kopiere stattdessen die Quellen."
+            fi
         else
-            log_warn "git pull fehlgeschlagen - kopiere stattdessen die Quellen."
+            log_info "Aktualisiere per git pull..."
+            if git -C "$INSTALL_DIR" pull --ff-only; then
+                updated="true"
+            else
+                log_warn "git pull fehlgeschlagen - kopiere stattdessen die Quellen."
+            fi
         fi
     fi
 
@@ -722,6 +775,9 @@ print_summary() {
     echo "  In der Oberfläche unter System -> Updates (mit Rückfall-Option)"
     echo "  oder als Einzeiler:"
     echo "  curl -sSL ${REPO_URL%.git}/raw/${REPO_BRANCH}/install.sh | sudo bash -s -- update -y"
+    echo "  Mit Sicherung und selbsttätigem Rückfall:"
+    echo "  sudo bash $INSTALL_DIR/backend/scripts/logbot-update.sh apply"
+    echo "  Alles dazu: docs/updates/README.md"
     echo ""
     echo "Nützliche Befehle:"
     echo "  cd $INSTALL_DIR"
