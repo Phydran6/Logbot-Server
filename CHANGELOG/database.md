@@ -3,6 +3,22 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.12.12.00.00
+### Added
+- **`--ref` im Installer** (`install.sh`, auch als `LOGBOT_REF`): holt ein Release, Tag oder
+  Commit statt des Zweigkopfes — beim Installieren wie beim Aktualisieren. Aufgelöst wird wie
+  im Wartungsskript (Tag, dann Zweig auf dem Server, dann roher Commit), der flache Clone
+  bekommt einen vollen Clone als Rückfallebene, weil `--branch` keinen Commit annimmt.
+  *Warum:* Die Update-Seite gibt für einen festgelegten Stand den Einzeiler
+  `install.sh … update -y --ref <tag>` aus. Den Schalter kannte bisher nur das Wartungsskript —
+  der Installer verwarf ihn mit einer Warnung und aktualisierte trotzdem auf den Zweigkopf.
+
+### Changed
+- `install.sh`: Der Abschluss nennt zusätzlich das Wartungsskript (Sicherung und selbsttätiger
+  Rückfall) und verweist auf `docs/updates/README.md`.
+- `install.sh`: setzt vor Git-Zugriffen `safe.directory` für das Installationsverzeichnis —
+  sonst bricht `git pull` als root mit „dubious ownership“ ab.
+
 ## 2026.09.09.22.00.00
 ### Added
 - **`deploy/optional.yml`**: Portainer, Watchtower, n8n und Postfix, je hinter einem eigenen

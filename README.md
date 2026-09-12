@@ -85,6 +85,41 @@ curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.
 
 ---
 
+## Updates
+
+In der Oberfläche unter *System → Updates*: prüfen, Release wählen, einspielen,
+zurückfallen — mit Sicherung davor und selbsttätigem Rückfall, wenn etwas
+schiefgeht. Wer will, bekommt die Meldung über einen neuen Stand in dem Moment,
+in dem gepusht wird.
+
+Auf der Kommandozeile reicht ein Einzeiler. **Den aktuellsten Stand
+drüberbügeln** — mit Sicherung, Gesundheitsprüfung und Rückfall im Fehlerfall:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/backend/scripts/logbot-update.sh \
+  | sudo bash -s -- apply --dir /opt/logbot
+```
+
+Dasselbe über den Installer — der zieht dabei auch neue `.env`-Schlüssel nach:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh \
+  | sudo bash -s -- update -y
+```
+
+| Ich will … | Befehl |
+|---|---|
+| ein bestimmtes Release | `sudo bash /opt/logbot/backend/scripts/logbot-update.sh apply --ref v2026.09.10` |
+| zurückfallen | `sudo bash /opt/logbot/backend/scripts/logbot-update.sh rollback` |
+| wissen, was gerade läuft | `sudo bash /opt/logbot/backend/scripts/logbot-update.sh status` |
+| das Protokoll mitlesen | `sudo tail -f /opt/logbot/data/update.log` |
+| rohe Gewalt, ohne Netz | `cd /opt/logbot && sudo git fetch --all --tags --prune && sudo git reset --hard origin/main && sudo docker compose build --pull && sudo docker compose up -d --remove-orphans` |
+
+→ Alles dazu — Kanäle, Sofortmeldung, Ablauf, Pfade, Schalter, API,
+Fehlersuche: **[Updates](docs/updates/README.md)**
+
+---
+
 ## Dokumentation
 
 | | |
