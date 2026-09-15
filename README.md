@@ -1,4 +1,4 @@
-﻿# LogBot v2026.08.14.14.00.00
+﻿# LogBot v2026.09.15.20.00.00
 Zentraler Log-Server für Linux/Windows-Systeme und Netzwerkgeräte.
 
 Entwickelt von Phydran6
@@ -306,6 +306,10 @@ sudo bash install.sh
 ```
 
 ## Changelog
+### v2026.09.15.20.00.00 (2026-09-15)
+- FIX: **Linux-Agent erschien als „Windows-Agent“ mit einer Docker-IP wie `172.18.0.3`.** Die IP gehörte zu Caddy, weil das Backend die Adresse des Proxys statt der des Geräts nahm. Der Typ fiel mangels Angabe auf „Windows“ zurück. Der Server nimmt jetzt die echte Absender-IP. Die Agents melden Geräteart und eigene IP selbst, das funktioniert auch hinter NPM. Schon vorhandene falsche Karten korrigiert der Server beim nächsten Eingang von selbst.
+- SICHERHEIT: Login- und Webhook-Rate-Limits zählten für alle Nutzer gemeinsam (alle kamen „von Caddy“). Jetzt zählen sie pro Client.
+
 ### v2026.08.14.14.00.00 (2026-08-14)
 - FIX: **Systemzustand zeigte die Datenbank rot, obwohl sie verbunden war.** Die vier Kacheln teilten sich eine Farbregel, die für Auslastung gedacht ist (ab 80 % rot) — die Datenbank-Kachel setzte bei „verbunden" aber 100 als vollen Balken. Reiner Anzeigefehler, der Zustand war immer korrekt. Jede Kachel bringt ihre Farbe jetzt selbst mit; die Datenbank steht auf grün/„Verbunden" bzw. rot/„Nicht erreichbar".
 

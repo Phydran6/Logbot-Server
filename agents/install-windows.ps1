@@ -2,9 +2,9 @@
 ==============================================================================
 Name:        Phydran6
 Kontakt:     Phydran6
-Version:     2026.02.20.19.00.09
+Version:     2026.09.15.20.00.00
 Changelog:   ../CHANGELOG/agents.md
-Beschreibung: LogBot Agent v2026.02.20.19.00.09 - Windows Installer
+Beschreibung: LogBot Agent v2026.09.15.20.00.00 - Windows Installer
               Start per Menue: 1=Install/Update, 2=Tests senden,
               3=Vollstaendig deinstallieren (Task + Daten, PS1 bleibt)
               Modi: UDP Syslog (klassisch) oder HTTPS (verschluesselt + auth)
@@ -25,7 +25,7 @@ $ErrorActionPreference = "Stop"
 $INSTALL_DIR = "$env:ProgramData\LogBot-Agent"
 $SCRIPT_NAME = "LogBotAgent.ps1"
 $TASK_NAME = "LogBotAgent"
-$AGENT_VERSION = "2026.02.20.19.00.09"
+$AGENT_VERSION = "2026.09.15.20.00.00"
 
 # ==============================================================================
 # Hilfsfunktionen
@@ -245,6 +245,7 @@ function Send-LogBatch {
 
     $body = @{
         hostname = $Hostname
+        device_type = "windows_agent"
         events = $Events
     } | ConvertTo-Json -Depth 3
 
@@ -600,6 +601,7 @@ function Send-TestMessage {
 
         $body = @{
             hostname = $Hostname
+            device_type = "windows_agent"
             events = @(
                 @{ level = "info"; source = "logbot-test"; message = "LogBot Agent Test - Info Nachricht" },
                 @{ level = "warning"; source = "logbot-test"; message = "LogBot Agent Test - Warning Nachricht" },

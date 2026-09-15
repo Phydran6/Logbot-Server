@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.08.14.12.00.00
+# Version:     2026.09.15.20.00.00
 # Changelog:   ../../CHANGELOG/backend.md
 # Beschreibung: LogBot - FastAPI Hauptanwendung
 # ==============================================================================
@@ -28,7 +28,7 @@ from . import archiving
 from . import fritzbox
 from .config import settings, validate_security_settings
 from .database import get_db, async_session, engine
-from .limiter import limiter
+from .limiter import limiter, client_ip as real_client_ip
 from .models import Webhook, Log, Agent, AgentToken
 from sqlalchemy import func
 from .schemas import LogResponse, LogDetailResponse, LogIngestRequest, LogIngestResponse
@@ -396,6 +396,25 @@ def _dedup_key(hostname: str, timestamp: datetime, event_id: Optional[int], mess
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _agent_type_fallback(token_type: Optional[str], user_agent: Optional[str]) -> str:
+    """Geraeteart, wenn der Agent selbst keine mitschickt (Agents vor 2026.09.15).
+
+    Reihenfolge: Typ des Tokens, dann der User-Agent (der Linux-Agent sendet per
+    Python-urllib, der Windows-Agent per PowerShell), sonst "unknown". Frueher
+    stand hier stur "windows_agent" - ein Linux-Agent mit dem global-agent-Token
+    tauchte dadurch als Windows-Agent auf.
+    """
+    mapped = {"linux": "linux_agent", "windows": "windows_agent"}.get(token_type or "")
+    if mapped:
+        return mapped
+    ua = (user_agent or "").lower()
+    if "powershell" in ua:
+        return "windows_agent"
+    if "python-urllib" in ua:
+        return "linux_agent"
+    return "unknown"
+
+
 @app.post("/api/agents/ingest", response_model=LogIngestResponse, tags=["Agent Ingest"])
 async def ingest_logs(
     data: LogIngestRequest,
@@ -424,23 +443,38 @@ async def ingest_logs(
     if not agent_token:
         raise HTTPException(status_code=401, detail="Ungültiger Agent-Token")
 
-    client_ip = request.client.host if request.client else "unknown"
-    device_ip = (data.ip_address or "").strip() or client_ip
+    device_ip = (data.ip_address or "").strip() or real_client_ip(request)
+    proxy_ip = request.client.host if request.client else None
+    device_type = data.device_type or _agent_type_fallback(
+        agent_token.device_type, request.headers.get("user-agent"))
 
     result = await db.execute(
         select(Agent).where(Agent.hostname == data.hostname, Agent.ip_address == device_ip)
     )
-    agent = result.scalar_one_or_none()
+    agent = result.scalars().first()
+
+    if agent is None and proxy_ip and proxy_ip != device_ip:
+        # Altbestand: bis 2026.09.15 wurde bei HTTPS-Agents die IP von Caddy
+        # gespeichert statt der Geraete-IP. Solche Eintraege uebernehmen (IP und
+        # Typ korrigieren), statt eine zweite Karte fuer dasselbe Geraet anzulegen.
+        result = await db.execute(
+            select(Agent).where(Agent.hostname == data.hostname, Agent.ip_address == proxy_ip)
+        )
+        agent = result.scalars().first()
+        if agent:
+            agent.ip_address = device_ip
+            if device_type != "unknown":
+                agent.device_type = device_type
+
     if agent:
         agent.last_seen = datetime.utcnow()
-        if data.device_type and agent.device_type in (None, "unknown"):
+        if data.device_type:
             agent.device_type = data.device_type
+        elif agent.device_type in (None, "unknown"):
+            agent.device_type = device_type
     else:
-        # device_type aus dem Payload, sonst aus dem Token (linux/windows) ableiten
-        _dt_map = {"linux": "linux_agent", "windows": "windows_agent"}
         agent = Agent(
-            hostname=data.hostname, ip_address=device_ip,
-            device_type=data.device_type or _dt_map.get(agent_token.device_type, "windows_agent"),
+            hostname=data.hostname, ip_address=device_ip, device_type=device_type,
             extra_data={"auth": "token", "token_name": agent_token.name})
         db.add(agent)
         await db.flush()

@@ -2,6 +2,12 @@
 
 Installer & Log-Forwarder für Linux/Windows (`agents/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.15.20.00.00
+### Fixed
+- **Linux-Agent erschien als „Windows-Agent“ mit Docker-IP (z. B. `172.18.0.3`).** Der Agent schickte weder Geräteart noch eigene IP mit. Jetzt sendet der Linux-Agent (Dienst **und** Installationstest) `device_type: "linux_agent"` und seine eigene IP (`ip_address`, die Schnittstelle Richtung Server). Die IP stimmt damit auch hinter einem vorgeschalteten Reverse Proxy wie NPM. Ein fester Wert geht über `"ip_address"` in `/opt/logbot-agent/config.json`.
+- Windows-Agent sendet ebenfalls `device_type: "windows_agent"`, statt sich auf den Token-Typ zu verlassen.
+- Bestehende Installationen: Agent einmal neu installieren (One-Liner erneut ausführen), damit der neue Dienst geschrieben wird. Die falsche Karte korrigiert der Server aber auch ohne Neuinstallation (siehe Backend).
+
 ## 2026.07.18.18.30.00
 ### Fixed
 - **Linux-Installer: Tastatureingabe wurde beim One-Liner ignoriert.** Vorher hatte jede Abfrage einen eigenen 5-s-Timeout – bei `curl … | bash` rauschten die Abfragen durch und eine Eingabe innerhalb der 5 s lief ins Leere. Jetzt gibt es **einen** Countdown am Anfang (`interactive_gate`): Wird eine Taste gedrückt, schaltet der Installer auf **manuell** und fragt ab da **alle** Werte blockierend ab (kein Timeout, Eingabe wird abgewartet). Ohne Tastendruck / ohne Terminal (Pipe/cron) läuft alles automatisch mit Standardwerten. Der Tastaturpuffer wird nach dem Aufweck-Tastendruck geleert, damit die erste echte Abfrage nicht sofort den Default nimmt.

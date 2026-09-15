@@ -2,6 +2,15 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.15.20.00.00
+### Fixed
+- **HTTPS-Agents bekamen die IP von Caddy statt der Geräte-IP** (z. B. `172.18.0.3`). Das Backend hängt hinter Caddy und nahm `request.client.host`. Neue Funktion `client_ip()` in `app/limiter.py`: Sie liest den letzten Eintrag aus `X-Forwarded-For`, den Caddy setzt und den ein Client nicht fälschen kann. Vorrang hat weiterhin eine vom Agent gemeldete `ip_address`.
+- **Altbestand wird übernommen, nicht verdoppelt.** Findet der Ingest kein Gerät mit Hostname + echter IP, aber eines mit Hostname + Caddy-IP, bekommt dieser Eintrag die richtige IP und Geräteart. So entsteht keine zweite Karte, und die Logs bleiben am Gerät.
+- **Linux-Agents erschienen als „Windows-Agent“.** Ohne `device_type` im Payload und mit untypisiertem Token (z. B. `global-agent`) galt stur `windows_agent`. Jetzt gilt diese Reihenfolge: Payload → Token-Typ → User-Agent (`Python-urllib` = Linux-Agent, `PowerShell` = Windows-Agent) → `unknown`. Eine vom Agent gemeldete Geräteart überschreibt einen gespeicherten falschen Wert.
+
+### Security
+- **Rate-Limits griffen für alle Nutzer gemeinsam.** slowapi zählte pro Caddy-IP. Damit konnten zehn Fehlversuche irgendeines Nutzers den Login für alle sperren, und ein Angreifer sah das Limit nur als Summe aller Nutzer. Das Limit zählt jetzt pro echter Client-IP.
+
 ## 2026.08.14.12.00.00
 ### Added
 - **Systemcheck** (`app/diagnostics.py`, `routes/diagnostics.py`): prüft das System in einem

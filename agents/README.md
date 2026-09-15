@@ -1,4 +1,4 @@
-# LogBot Agent v2026.07.18.18.30.00
+# LogBot Agent v2026.09.15.20.00.00
 
 Log-Forwarder für Linux und Windows – keine zusätzlichen Abhängigkeiten.
 Zwei Modi je Plattform: **Syslog** (rsyslog/UDP-TCP) oder **HTTPS** (verschlüsselt + Token, DNS/FQDN).

@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.18.18.30.00
+# Version:     2026.09.15.20.00.00
 # Changelog:   ../CHANGELOG/agents.md
 # Beschreibung: LogBot Linux Agent - Installer (teilautomatisch)
 #
@@ -48,7 +48,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-AGENT_VERSION="2026.07.18.18.30.00"
+AGENT_VERSION="2026.09.15.20.00.00"
 
 # --- Pfade: Syslog-Modus (rsyslog) ---
 CONFIG_FILE="/etc/rsyslog.d/99-logbot.conf"
@@ -467,6 +467,35 @@ def ingest_url():
     return "https://%s:%d/api/agents/ingest" % (host, SERVER_PORT)
 
 
+def local_ip():
+    # Eigene IP Richtung Server melden: steht ein Reverse Proxy (NPM, Caddy)
+    # dazwischen, sieht der Server sonst nur dessen IP. UDP-connect verschickt
+    # nichts, es waehlt nur die ausgehende Schnittstelle.
+    if (CFG.get("ip_address") or "").strip():
+        return CFG["ip_address"].strip()
+    host = target_host()
+    if not host:
+        return ""
+    try:
+        family, _, _, _, addr = socket.getaddrinfo(host, SERVER_PORT, 0, socket.SOCK_DGRAM)[0]
+        s = socket.socket(family, socket.SOCK_DGRAM)
+        try:
+            s.connect(addr)
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return ""
+
+
+def payload(events):
+    body = {"hostname": HOSTNAME, "device_type": "linux_agent", "events": events}
+    ip = local_ip()
+    if ip:
+        body["ip_address"] = ip
+    return json.dumps(body).encode("utf-8")
+
+
 def send(events):
     if not events:
         return True
@@ -474,7 +503,7 @@ def send(events):
     if not url:
         log("Kein Ziel (FQDN/IP) konfiguriert")
         return False
-    body = json.dumps({"hostname": HOSTNAME, "events": events}).encode("utf-8")
+    body = payload(events)
     req = urllib.request.Request(url, data=body, method="POST", headers={
         "Authorization": "Bearer " + TOKEN,
         "Content-Type": "application/json",
@@ -755,11 +784,26 @@ url = "https://%s/api/agents/ingest" % host if port == 443 else "https://%s:%d/a
 ctx = ssl.create_default_context()
 if skip:
     ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
-body = json.dumps({"hostname": hostname, "events": [
+def local_ip():
+    try:
+        family, _, _, _, addr = socket.getaddrinfo(host, port, 0, socket.SOCK_DGRAM)[0]
+        s = socket.socket(family, socket.SOCK_DGRAM)
+        try:
+            s.connect(addr); return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return ""
+
+data = {"hostname": hostname, "device_type": "linux_agent", "events": [
     {"level": "info", "source": "logbot-test", "message": "LogBot Agent v%s - Installation erfolgreich" % version},
     {"level": "warning", "source": "logbot-test", "message": "LogBot Agent v%s - Test Warning" % version},
     {"level": "error", "source": "logbot-test", "message": "LogBot Agent v%s - Test Error" % version},
-]}).encode("utf-8")
+]}
+ip_addr = (cfg.get("ip_address") or "").strip() or local_ip()
+if ip_addr:
+    data["ip_address"] = ip_addr
+body = json.dumps(data).encode("utf-8")
 req = urllib.request.Request(url, data=body, method="POST", headers={
     "Authorization": "Bearer " + token, "Content-Type": "application/json"})
 try:
