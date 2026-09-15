@@ -21,7 +21,7 @@
 
 ## Aktuelle Stände
 
-**Projekt-/Release-Version:** `2026.09.15.20.00.00`
+**Projekt-/Release-Version:** `2026.09.15.20.30.00`
 
 Sie steht an fünf Stellen und muss bei jedem Release überall mitwandern:
 

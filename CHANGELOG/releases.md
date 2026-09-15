@@ -11,6 +11,34 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.09.15.20.30.00 (2026-09-15)
+
+Erstes Release seit `v2026.09.10.20.00.00`. Es enthält auch die Stände
+`2026.09.12.12.00.00` und `2026.09.15.20.00.00` (unten), die nicht einzeln
+veröffentlicht wurden.
+
+### Geändert
+
+- **Doku zum Kopieren gebaut.** In allen READMEs steht jeder Befehl in einem
+  eigenen Codeblock, die Erklärung als Text darüber. Der Kopier-Knopf nimmt damit
+  immer genau einen lauffähigen Befehl mit, ohne Kommentare. `.env`- und
+  rsyslog-Ausschnitte enthalten nur die einzutragenden Zeilen, die Liste der
+  Log-Endpunkte in der API-Doku ist eine Tabelle.
+- **Agents deinstallieren als Einzeiler.** Die Agents-README beginnt den Abschnitt
+  mit den fertigen Befehlen für Linux und Windows („komplett“ oder „nur hier“)
+  und einer Tabelle, was jeweils entfernt wird. Die Technik der Zuordnung auf dem
+  Server ist eingeklappt.
+
+### Aus 2026.09.12.12.00.00
+
+- **`--ref` im Installer:** `install.sh` holt ein bestimmtes Release, Tag oder
+  Commit, beim Installieren wie beim Aktualisieren. Vorher verwarf der Installer
+  den Schalter und aktualisierte trotzdem auf den neuesten Stand. Die Update-Seite
+  gibt genau diesen Einzeiler aus.
+- `install.sh` setzt `safe.directory` vor Git-Zugriffen. Sonst bricht `git pull`
+  als root mit „dubious ownership“ ab.
+- README und `docs/updates` mit allen Update-Einzeilern an einem Ort.
+
 ## v2026.09.15.20.00.00 (2026-09-15)
 
 ### Neu
