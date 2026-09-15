@@ -54,11 +54,28 @@ Schlüssel fallen auf Deutsch zurück.
 
 ## Entwickeln
 
+In das Verzeichnis wechseln:
+
 ```bash
 cd frontend
+```
+
+Abhängigkeiten installieren:
+
+```bash
 npm install
-npm run dev      # Vite auf :5173, API-Aufrufe siehe vite.config.js
-npm run build    # nach dist/
+```
+
+Entwicklungsserver starten (Vite auf :5173, API-Aufrufe siehe `vite.config.js`):
+
+```bash
+npm run dev
+```
+
+Für den Betrieb bauen (nach `dist/`):
+
+```bash
+npm run build
 ```
 
 Änderungen gehören ins [Changelog](../CHANGELOG/frontend.md).

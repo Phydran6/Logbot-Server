@@ -32,8 +32,9 @@ nicht auflösenden FQDN aussperrt, kommt über die IP auf Port 80 zurück ins UI
 
 **Notausstieg ohne UI.** Wenn TLS kaputt ist und gar nichts mehr geht:
 
-```bash
-# .env
+In die `.env` eintragen:
+
+```
 CADDY_FORCE_HTTP=true
 ```
 

@@ -145,13 +145,13 @@ ablesen, was dieser Server kann, statt es auszuprobieren.
 
 ## Logs lesen und filtern
 
-```bash
-GET /api/logs?hostname=srv01&min_severity=error&page=1&page_size=100
-GET /api/logs/filter-options          # verfügbare Werte für die Filter
-GET /api/logs/{id}/parsed             # eine Zeile zerlegt: Felder, Abzeichen
-GET /api/logs/export?format=csv       # oder json, mit denselben Filtern
-GET /api/logs/stats
-```
+| Anfrage | Liefert |
+|---|---|
+| `GET /api/logs?hostname=srv01&min_severity=error&page=1&page_size=100` | Logs, gefiltert und seitenweise |
+| `GET /api/logs/filter-options` | verfügbare Werte für die Filter |
+| `GET /api/logs/{id}/parsed` | eine Zeile zerlegt: Felder, Abzeichen |
+| `GET /api/logs/export?format=csv` | Export, auch `json`, mit denselben Filtern |
+| `GET /api/logs/stats` | Statistik |
 
 ---
 

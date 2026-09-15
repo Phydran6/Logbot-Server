@@ -13,9 +13,21 @@ Hier liegen die Varianten, die man dazuschaltet.
 
 ## Verwendung
 
+Externe Datenbank:
+
 ```bash
 docker compose -f docker-compose.yml -f deploy/external-db.yml up -d
+```
+
+Gehärtet, ohne erweiterte Container-Rechte:
+
+```bash
 docker compose -f docker-compose.yml -f deploy/hardened.yml up -d
+```
+
+Mit Zusatzdiensten (hier Portainer):
+
+```bash
 docker compose -f docker-compose.yml -f deploy/optional.yml --profile portainer up -d
 ```
 

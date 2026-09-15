@@ -97,8 +97,9 @@ Auffälligkeiten.
 Eine echte Shell auf dem Server, **als root**. Wer sie erreicht, hat den Server.
 Deshalb ist sie standardmäßig **aus**:
 
-```bash
-# in der .env
+In die `.env` eintragen:
+
+```
 LOGBOT_WEBSHELL=true
 ```
 
@@ -121,15 +122,46 @@ statt einen Cursor zu führen. Für solche Fälle: SSH.
 
 ## Befehle auf dem Server
 
+Zuerst ins Installationsverzeichnis wechseln:
+
 ```bash
 cd /opt/logbot
+```
 
-docker compose ps                # Status
-docker compose logs -f           # Protokolle
-docker compose logs -f backend   # nur das Backend
-docker compose restart           # Neustart
-docker compose down              # stoppen
-docker compose up -d             # starten
+Status:
+
+```bash
+docker compose ps
+```
+
+Protokolle:
+
+```bash
+docker compose logs -f
+```
+
+Nur das Backend:
+
+```bash
+docker compose logs -f backend
+```
+
+Neustart:
+
+```bash
+docker compose restart
+```
+
+Stoppen:
+
+```bash
+docker compose down
+```
+
+Starten:
+
+```bash
+docker compose up -d
 ```
 
 ---

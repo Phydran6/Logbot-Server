@@ -47,8 +47,15 @@ Ein Image-Tausch allein reicht also nie.
 Läuft der Container nach einem Update in eine Fehlerschleife, hilft eine Zeile —
 ohne Datenverlust:
 
+In der `.env` auf PostgreSQL 16 zurückstellen:
+
 ```bash
 echo "POSTGRES_VERSION=16" >> .env
+```
+
+Neu starten:
+
+```bash
 docker compose up -d
 ```
 
@@ -56,10 +63,22 @@ Danach in Ruhe migrieren.
 
 ### Weg 1 — Daten behalten
 
+Ziel = POSTGRES_VERSION aus .env:
+
 ```bash
-sudo bash db/migrate.sh          # Ziel = POSTGRES_VERSION aus .env
-sudo bash db/migrate.sh 18       # andere Zielversion
-sudo bash db/migrate.sh 17 -y    # ohne Rückfrage
+sudo bash db/migrate.sh
+```
+
+Andere Zielversion:
+
+```bash
+sudo bash db/migrate.sh 18
+```
+
+Ohne Rückfrage:
+
+```bash
+sudo bash db/migrate.sh 17 -y
 ```
 
 Als Einzeiler, findet `/opt/logbot` selbst:
@@ -74,9 +93,16 @@ danach als `.dump` liegen.
 
 ### Weg 2 — Daten nicht nötig
 
+Löscht die Volumes samt alter DB:
+
 ```bash
-docker compose down -v           # löscht die Volumes samt alter DB
-docker compose up -d --build     # frische DB, init.sql läuft neu
+docker compose down -v
+```
+
+Frische DB, init.sql läuft neu:
+
+```bash
+docker compose up -d --build
 ```
 
 Anmeldung danach wieder `admin`/`admin`.
@@ -85,8 +111,15 @@ Anmeldung danach wieder `admin`/`admin`.
 
 Siehe [`deploy/`](../deploy/README.md). Kurz:
 
+Schema auf der externen Datenbank anlegen:
+
 ```bash
 psql "postgresql://user:pw@db.example.com:5432/logbot" -f db/init.sql
+```
+
+LogBot damit starten:
+
+```bash
 docker compose -f docker-compose.yml -f deploy/external-db.yml up -d
 ```
 
@@ -98,7 +131,15 @@ Docker-Netz steht.
 - **Im Web-UI:** [System → Sicherung](../docs/backup/README.md) — granular, als
   ZIP, optional verschlüsselt.
 - **Klassisch:**
+
+  Sichern:
+
   ```bash
   docker compose exec postgres pg_dump -U logbot logbot > backup.sql
+  ```
+
+  Einspielen:
+
+  ```bash
   docker compose exec -T postgres psql -U logbot logbot < backup.sql
   ```

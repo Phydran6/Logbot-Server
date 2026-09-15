@@ -151,8 +151,9 @@ sie überstehen damit einen Neubau der Container, und genau dafür sind sie da.
 
 Aufgehoben werden standardmäßig die letzten 10:
 
-```bash
-# .env
+In die `.env` eintragen:
+
+```
 LOGBOT_KEEP_BACKUPS=10
 ```
 
@@ -169,11 +170,15 @@ woanders.
 
 Die klassischen Wege bleiben:
 
-```bash
-# Datenbank sichern
-docker compose exec postgres pg_dump -U logbot logbot > backup.sql
+Datenbank sichern:
 
-# Datenbank einspielen
+```bash
+docker compose exec postgres pg_dump -U logbot logbot > backup.sql
+```
+
+Datenbank einspielen:
+
+```bash
 docker compose exec -T postgres psql -U logbot logbot < backup.sql
 ```
 

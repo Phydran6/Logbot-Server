@@ -43,8 +43,9 @@ Ergebnis: rund 2 statt 96 Datenbankvorgänge pro Sekunde.
 ## Geräte anbinden
 
 **Linux (rsyslog):**
+In `/etc/rsyslog.d/logbot.conf` eintragen:
+
 ```
-# /etc/rsyslog.d/logbot.conf
 *.* @LOGBOT-IP:514
 ```
 

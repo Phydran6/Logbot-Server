@@ -98,8 +98,15 @@ Dienste zu oder ab.
 
 ### Ein bestimmtes Release
 
+Über das Wartungsskript:
+
 ```bash
 sudo bash /opt/logbot/backend/scripts/logbot-update.sh apply --ref v2026.09.10
+```
+
+Über den Installer:
+
+```bash
 curl -sSL RAW/install.sh | sudo bash -s -- update -y --ref v2026.09.10
 ```
 
@@ -130,12 +137,34 @@ Gedacht für den Fall, dass die anderen Wege klemmen — und für Testmaschinen.
 
 ### Stand und Protokoll ansehen
 
+Zustandsdatei als JSON:
+
 ```bash
-sudo bash /opt/logbot/backend/scripts/logbot-update.sh status   # Zustandsdatei als JSON
-sudo tail -f /opt/logbot/data/update.log                        # Protokoll des Laufs
-cd /opt/logbot && sudo docker compose ps                        # laufen alle Container?
-cat /opt/logbot/VERSION                                         # welcher Stand liegt hier?
-curl -s http://127.0.0.1/api/health                             # antwortet die Anwendung?
+sudo bash /opt/logbot/backend/scripts/logbot-update.sh status
+```
+
+Protokoll des Laufs:
+
+```bash
+sudo tail -f /opt/logbot/data/update.log
+```
+
+Laufen alle Container?
+
+```bash
+cd /opt/logbot && sudo docker compose ps
+```
+
+Welcher Stand liegt hier?
+
+```bash
+cat /opt/logbot/VERSION
+```
+
+Antwortet die Anwendung?
+
+```bash
+curl -s http://127.0.0.1/api/health
 ```
 
 ---
@@ -208,8 +237,9 @@ Neues da ist, gibt es eine Meldung — nicht bei jeder Abfrage. Ist der Server
 wieder gleichauf (etwa nach dem Update), wird der Hinweis von selbst
 zurückgezogen.
 
-```bash
-# .env
+In die `.env` eintragen:
+
+```
 LOGBOT_UPDATE_WATCH=true
 LOGBOT_UPDATE_WATCH_INTERVAL=120
 ```
@@ -383,8 +413,9 @@ der Webhook weist sich per HMAC-Signatur aus.
 | `POST /api/updates/apply` | Update starten — `confirm: "UPDATE"` und beantwortete Sicherungsfrage |
 | `POST /api/updates/rollback` | Rückfall starten — `confirm: "ROLLBACK"` und beantwortete Sicherungsfrage |
 
+Beispiel, Stand abfragen:
+
 ```bash
-# Beispiel: Stand abfragen
 curl -s -H "Authorization: Bearer $TOKEN" https://logbot.example.com/api/updates/status
 ```
 
@@ -399,10 +430,22 @@ Einzelheiten: [API](../api/README.md) und `/api/docs` am laufenden Server.
 Zeigt die Sicherungen des Wartungsskripts (Dateien, optional Datenbankabzug).
 Auch hier läuft vorher die Sicherungsfrage. Auf der Kommandozeile:
 
+Auf die letzte Sicherung zurück:
+
 ```bash
 sudo bash /opt/logbot/backend/scripts/logbot-update.sh rollback
+```
+
+Auf eine bestimmte Sicherung zurück:
+
+```bash
 sudo bash /opt/logbot/backend/scripts/logbot-update.sh rollback --backup 20260910-120000
-ls -1 /opt/logbot-backups                     # welche Sicherungen gibt es?
+```
+
+Welche Sicherungen gibt es?
+
+```bash
+ls -1 /opt/logbot-backups
 ```
 
 > **Achtung:** Enthält die gewählte Sicherung einen Datenbankabzug, wird er
@@ -443,17 +486,31 @@ Verzeichnis zeigt, in dem keine `docker-compose.yml` liegt.
 Ein Image-Tausch reicht **nicht** — Datenverzeichnisse sind zwischen
 Major-Versionen nicht kompatibel. Der Weg mit Datenerhalt:
 
+Ziel = POSTGRES_VERSION aus der .env:
+
 ```bash
-sudo bash /opt/logbot/db/migrate.sh        # Ziel = POSTGRES_VERSION aus der .env
-sudo bash /opt/logbot/db/migrate.sh 18 -y  # Ziel-Major und ohne Rückfrage
+sudo bash /opt/logbot/db/migrate.sh
+```
+
+Ziel-Major und ohne Rückfrage:
+
+```bash
+sudo bash /opt/logbot/db/migrate.sh 18 -y
 ```
 
 Einzelheiten: [Datenbank](../../db/README.md).
 
 Notbremse, falls schon aktualisiert und die Datenbank nicht mehr startet:
 
+In der `.env` auf PostgreSQL 16 zurückstellen:
+
 ```bash
 echo "POSTGRES_VERSION=16" >> /opt/logbot/.env
+```
+
+Neu starten:
+
+```bash
 cd /opt/logbot && sudo docker compose up -d
 ```
 
@@ -501,9 +558,21 @@ LogBot-Update.
 
 ## Nach dem Update prüfen
 
+Welcher Stand ist installiert?
+
 ```bash
 cat /opt/logbot/VERSION
+```
+
+Laufen alle Container?
+
+```bash
 cd /opt/logbot && sudo docker compose ps
+```
+
+Antwortet die Anwendung?
+
+```bash
 curl -s http://127.0.0.1/api/health
 ```
 

@@ -5,11 +5,27 @@
 [`preflight.sh`](preflight.sh) beantwortet eine Frage: **Trägt dieser Rechner
 LogBot — und die Zusatzdienste, die man dazuhaben will?**
 
-```bash
-sudo bash install/preflight.sh                  # nur LogBot
-sudo bash install/preflight.sh portainer n8n    # mit Zusatzdiensten
-sudo bash install/preflight.sh all              # alles
+Nur LogBot:
 
+```bash
+sudo bash install/preflight.sh
+```
+
+Mit Zusatzdiensten:
+
+```bash
+sudo bash install/preflight.sh portainer n8n
+```
+
+Alles:
+
+```bash
+sudo bash install/preflight.sh all
+```
+
+Ohne Repository, direkt von GitHub:
+
+```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install/preflight.sh | sudo bash
 ```
 

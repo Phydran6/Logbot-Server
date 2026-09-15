@@ -139,10 +139,11 @@ fasst sie deshalb **nicht** an (`WATCHTOWER_LABEL_ENABLE`) — sonst kämen sich
 zwei Update-Wege in die Quere. Zuständig ist es für die fertigen Images:
 PostgreSQL, Caddy, n8n, Portainer, Postfix.
 
-```bash
-# .env
-WATCHTOWER_INTERVAL=86400        # einmal täglich
-WATCHTOWER_MONITOR_ONLY=false    # true = nur melden, nicht tauschen
+In die `.env` eintragen. `86400` Sekunden heißt einmal täglich; `WATCHTOWER_MONITOR_ONLY=true` würde nur melden statt tauschen:
+
+```
+WATCHTOWER_INTERVAL=86400
+WATCHTOWER_MONITOR_ONLY=false
 ```
 
 ---

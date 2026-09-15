@@ -43,9 +43,7 @@ curl -sSL … /install.sh | sudo bash -s -- --with portainer,watchtower --yes
 Aus einem geklonten Repository:
 
 ```bash
-git clone https://github.com/Phydran6/Logbot-Server.git
-cd Logbot-Server
-sudo bash install.sh
+git clone https://github.com/Phydran6/Logbot-Server.git && cd Logbot-Server && sudo bash install.sh
 ```
 
 ---
@@ -54,12 +52,28 @@ sudo bash install.sh
 
 Läuft von selbst mit — und auch allein:
 
-```bash
-sudo bash install/preflight.sh                      # nur LogBot
-sudo bash install/preflight.sh portainer n8n        # mit Zusatzdiensten
-sudo bash install/preflight.sh all                  # alles
+Nur LogBot:
 
-curl -sSL …/install/preflight.sh | sudo bash        # ohne Repository
+```bash
+sudo bash install/preflight.sh
+```
+
+Mit Zusatzdiensten:
+
+```bash
+sudo bash install/preflight.sh portainer n8n
+```
+
+Alles:
+
+```bash
+sudo bash install/preflight.sh all
+```
+
+Ohne Repository:
+
+```bash
+curl -sSL …/install/preflight.sh | sudo bash
 ```
 
 Geprüft werden Architektur, Kernel, Betriebssystem, Rechte, RAM, Platte,
@@ -113,11 +127,16 @@ Vier Dienste stehen bereit. Keiner läuft, bevor er ausgewählt wird.
 | **n8n** | Automatisierung, u. a. für die KI-Auswertung | eigene Oberfläche, eigene Anmeldung |
 | **Postfix** | Mailversand vom Server | konfiguriert wird er später im Web-UI |
 
-Bei der Installation:
+Bei der Installation mit Zusatzdiensten:
 
 ```bash
 sudo bash install.sh --with portainer,watchtower
-sudo bash install.sh --no-addons        # ausdrücklich ohne
+```
+
+Ausdrücklich ohne:
+
+```bash
+sudo bash install.sh --no-addons
 ```
 
 Nachträglich jederzeit im Web-UI unter **System → Zusatzdienste** —
@@ -164,14 +183,21 @@ Datenbank-Passwort nicht mehr zum bestehenden PostgreSQL-Volume.
 
 Die Compose-Varianten liegen in [`deploy/`](../../deploy/README.md):
 
+Externe Datenbank:
+
 ```bash
-# Externe Datenbank
 docker compose -f docker-compose.yml -f deploy/external-db.yml up -d
+```
 
-# Ohne erweiterte Container-Rechte
+Ohne erweiterte Container-Rechte:
+
+```bash
 docker compose -f docker-compose.yml -f deploy/hardened.yml up -d
+```
 
-# Mit Zusatzdiensten
+Mit Zusatzdiensten:
+
+```bash
 docker compose -f docker-compose.yml -f deploy/optional.yml --profile portainer up -d
 ```
 

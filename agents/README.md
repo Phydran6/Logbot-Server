@@ -60,8 +60,15 @@ curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/i
 
 Alles liegt unter `/opt/logbot-agent/`, der Dienst heißt `logbot-agent`:
 
+Status des Dienstes:
+
 ```bash
 systemctl status logbot-agent
+```
+
+Protokoll live mitlesen:
+
+```bash
 journalctl -u logbot-agent -f
 ```
 
@@ -129,21 +136,29 @@ Keine Rückfragen, Adresse und Token nimmt der Agent aus seiner eigenen Konfigur
 
 ### Linux
 
-```bash
-# Komplett: Agent weg + Gerät und Logs auf dem Server gelöscht
-curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall-purge --yes
+Komplett: Agent weg + Gerät und Logs auf dem Server gelöscht:
 
-# Nur hier: Agent weg, Gerät und Logs bleiben auf dem Server
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall-purge --yes
+```
+
+Nur hier: Agent weg, Gerät und Logs bleiben auf dem Server:
+
+```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall --yes
 ```
 
 ### Windows (PowerShell als Administrator)
 
-```powershell
-# Komplett: Agent weg + Gerät und Logs auf dem Server gelöscht
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -PurgeServer -Yes
+Komplett: Agent weg + Gerät und Logs auf dem Server gelöscht:
 
-# Nur hier: Agent weg, Gerät und Logs bleiben auf dem Server
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -PurgeServer -Yes
+```
+
+Nur hier: Agent weg, Gerät und Logs bleiben auf dem Server:
+
+```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -Yes
 ```
 

@@ -68,10 +68,27 @@ Schreibzugriffe blockiert.
 
 ## Entwickeln
 
+In das Verzeichnis wechseln:
+
 ```bash
 cd backend
+```
+
+Abhängigkeiten installieren:
+
+```bash
 pip install -r requirements.txt
+```
+
+Umgebung setzen (im selben Terminal):
+
+```bash
 export DB_HOST=127.0.0.1 DB_USER=logbot DB_PASSWORD=… JWT_SECRET=$(openssl rand -hex 32)
+```
+
+Starten:
+
+```bash
 uvicorn app.main:app --reload --port 8000
 ```
 

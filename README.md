@@ -104,15 +104,22 @@ Rückfrage durch, also auch per Automatisierung. Ohne `--yes` läuft ein
 
 **Server**
 
-```bash
-# Nur LogBot, Standardwerte
-curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- --yes
+Nur LogBot, Standardwerte:
 
-# Mit Zusatzdiensten (portainer, watchtower, n8n, postfix)
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- --yes
+```
+
+Mit Zusatzdiensten (portainer, watchtower, n8n, postfix):
+
+```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh \
   | sudo bash -s -- --with portainer,watchtower --yes
+```
 
-# Bestimmtes Release in eigenes Verzeichnis
+Bestimmtes Release in eigenes Verzeichnis:
+
+```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh \
   | sudo bash -s -- --ref v2026.09.10 --dir /srv/logbot --yes
 ```
@@ -122,12 +129,16 @@ Optionen: `--dir` · `--branch` · `--ref` · `--with` · `--no-addons` ·
 
 **Linux-Agent**
 
+HTTPS mit Token (empfohlen, auch übers Internet):
+
 ```bash
-# HTTPS mit Token (empfohlen, auch übers Internet)
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh \
   | sudo bash -s -- --fqdn logbot.example.com --token DEIN-AGENT-TOKEN --yes
+```
 
-# Syslog im eigenen Netz (UDP oder TCP)
+Syslog im eigenen Netz (UDP oder TCP):
+
+```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh \
   | sudo bash -s -- --mode syslog --fqdn logbot.example.com --port 514 --proto tcp --yes
 ```
@@ -168,11 +179,15 @@ Am einfachsten über den [Setup-Assistenten](#schnellstart), Punkt 3/4 (Server) 
 | Gebaute Images, Docker selbst | bleiben | bleiben |
 | Zurückholen | `cd /opt/logbot && sudo docker compose up -d` | nicht möglich |
 
-```bash
-# Deinstallieren, Daten bleiben
-curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- uninstall --yes
+Deinstallieren, Daten bleiben:
 
-# Komplett entfernen, inkl. aller Logs
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- uninstall --yes
+```
+
+Komplett entfernen, inkl. aller Logs:
+
+```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- uninstall-purge --yes
 ```
 
@@ -190,10 +205,22 @@ Bei eigenem Verzeichnis `--dir <pfad>` anhängen.
 
 **Reste nach `uninstall-purge` wegräumen** (optional):
 
+Sicherungen vor Updates:
+
 ```bash
-sudo rm -rf /opt/logbot-backups                                   # Sicherungen vor Updates
-sudo docker image rm logbot-backend logbot-frontend logbot-syslog  # gebaute Images*
-sudo docker image prune                                           # nicht mehr genutzte Images
+sudo rm -rf /opt/logbot-backups
+```
+
+Gebaute Images*:
+
+```bash
+sudo docker image rm logbot-backend logbot-frontend logbot-syslog
+```
+
+Nicht mehr genutzte Images:
+
+```bash
+sudo docker image prune
 ```
 
 <sub>* Der Namensanfang entspricht dem Installationsverzeichnis. Bei `--dir /srv/logbot` also
@@ -209,11 +236,15 @@ weiter geht es mit `sudo docker compose start`.
 | Dienst `logbot-agent`, `/opt/logbot-agent`, rsyslog-Weiterleitung | entfernt | entfernt |
 | Gerät und seine Logs auf dem Server | **bleiben** | **gelöscht**, dazu alle weiteren Einträge mit diesem Hostnamen |
 
-```bash
-# Nur auf diesem Rechner
-curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall --yes
+Nur auf diesem Rechner:
 
-# Inkl. Gerät und Logs auf dem Server
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall --yes
+```
+
+Inkl. Gerät und Logs auf dem Server:
+
+```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall-purge --yes
 ```
 
@@ -227,11 +258,15 @@ Web-UI unter *Geräte* löschen.
 
 PowerShell als Administrator:
 
-```powershell
-# Nur auf diesem Rechner
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -Yes
+Nur auf diesem Rechner:
 
-# Inkl. Gerät und Logs auf dem Server
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -Yes
+```
+
+Inkl. Gerät und Logs auf dem Server:
+
+```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -PurgeServer -Yes
 ```
 
@@ -323,9 +358,16 @@ Jedes Verzeichnis hat seine eigene README mit den Einzelheiten.
 
 Ob die Maschine reicht, sagt die Systemprüfung:
 
+Nur LogBot:
+
 ```bash
-sudo bash install/preflight.sh              # nur LogBot
-sudo bash install/preflight.sh portainer n8n  # mit Zusatzdiensten
+sudo bash install/preflight.sh
+```
+
+Mit Zusatzdiensten:
+
+```bash
+sudo bash install/preflight.sh portainer n8n
 ```
 
 ---
