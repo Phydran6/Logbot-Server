@@ -52,8 +52,7 @@ curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/i
 | Aktion | Befehl |
 |--------|--------|
 | Testnachrichten senden | `sudo bash install-linux.sh test` |
-| Deinstallieren (nur lokal) | `sudo bash install-linux.sh uninstall` |
-| Deinstallieren **inkl. Server-Eintrag und Logs** | `sudo bash install-linux.sh uninstall-purge` |
+| Deinstallieren | → [Einzeiler zum Deinstallieren](#deinstallieren--einzeiler) |
 
 **Optionen:** `--fqdn` · `--token` · `--ip` · `--port` · `--mode https\|syslog` ·
 `--proto udp\|tcp` *(Syslog)* · `--min-level info\|warning\|error` · `--insecure` · `--yes` · `--timeout <s>`
@@ -90,8 +89,7 @@ PowerShell **als Administrator**:
 | Aktion | Befehl |
 |--------|--------|
 | Testnachrichten | `-Action test` |
-| Deinstallieren (nur lokal) | `-Action uninstall -Yes` |
-| Deinstallieren **inkl. Server-Eintrag und Logs** | `-Action uninstall -PurgeServer -Yes` |
+| Deinstallieren | → [Einzeiler zum Deinstallieren](#deinstallieren--einzeiler) |
 
 **Parameter:** `-Action install\|test\|uninstall` · `-Fqdn` · `-ServerIP` ·
 `-ServerPort` · `-Token` · `-Mode https\|syslog` · `-MinLevel` · `-Insecure` ·
@@ -124,33 +122,56 @@ sperrt sofort alle Agents, die ihn benutzen.
 
 ---
 
-## Deinstallieren — was passiert auf dem Server?
+## Deinstallieren — Einzeiler
 
-Das war lange die unangenehme Stelle: Der Agent verschwand vom Rechner, auf dem
-Server blieb das Gerät samt Logs stehen.
+Einfach kopieren und auf dem Rechner ausführen, von dem der Agent weg soll.
+Keine Rückfragen, Adresse und Token nimmt der Agent aus seiner eigenen Konfiguration.
 
-Jetzt merkt sich jeder Agent beim ersten Senden die **Gerätenummer**, die der
-Server zurückmeldet (`/opt/logbot-agent/agent_id` bzw.
-`%ProgramData%\LogBot-Agent\agent_id`). Beim vollständigen Deinstallieren nennt
-er genau diese Nummer — der Server räumt dann **exakt diesen Eintrag** ab und
-nicht den eines gleichnamigen Rechners.
+### Linux
 
-Zusätzlich gehen alle weiteren Einträge desselben Hostnamens mit. Das ist
-Absicht: Wechselt ein Rechner die IP (DHCP, NAT, Umzug), legt der Server jedes
-Mal einen neuen Eintrag an. Ohne diesen Schritt blieben die alten als
-Karteileichen liegen.
+```bash
+# Komplett: Agent weg + Gerät und Logs auf dem Server gelöscht
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall-purge --yes
 
-Die Zuordnung läuft vom Genauesten zum Ungenauesten — welcher Weg gegriffen hat,
-steht in der Antwort (`matched_by`):
+# Nur hier: Agent weg, Gerät und Logs bleiben auf dem Server
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall --yes
+```
 
-1. `agent_id` — die gemerkte Nummer
-2. `mac_address`
-3. `hostname` + `ip_address`
-4. `hostname` allein
+### Windows (PowerShell als Administrator)
 
-Ist der Server beim Deinstallieren nicht erreichbar, wird **nicht gewartet**
-(20 s Zeitlimit) — es kommt ein Hinweis, das Gerät im Web-UI unter *Geräte* von
-Hand zu löschen.
+```powershell
+# Komplett: Agent weg + Gerät und Logs auf dem Server gelöscht
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -PurgeServer -Yes
+
+# Nur hier: Agent weg, Gerät und Logs bleiben auf dem Server
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -Yes
+```
+
+### Was wird entfernt?
+
+| | Komplett | Nur hier |
+|---|---|---|
+| Dienst bzw. geplante Aufgabe, Agent-Verzeichnis, Konfiguration mit Token | ✔ | ✔ |
+| Gerät auf dem Server, **auch ältere Einträge mit demselben Hostnamen** | ✔ | – |
+| Logs dieses Geräts auf dem Server | ✔ | – |
+
+**Gut zu wissen**
+
+- **Server nicht erreichbar?** Der Agent wird trotzdem lokal entfernt (nach höchstens 20 s).
+  Das Gerät dann im Web-UI unter *Geräte* von Hand löschen.
+- **Syslog-Agent (Linux):** Er hat keinen Token. Für „komplett“ deshalb Adresse und
+  Token mitgeben: `… uninstall-purge --fqdn logbot.example.com --port 443 --token DEIN-AGENT-TOKEN --yes`
+- **Lieber mit Menü?** Unter Linux den [Setup-Assistenten](../README.md#schnellstart)
+  nehmen (Punkt 7/8). Unter Windows den Einzeiler ohne Parameter starten (Punkt 3).
+
+<details>
+<summary>Wie findet der Server das richtige Gerät?</summary>
+
+Der Agent merkt sich beim ersten Senden seine Gerätenummer
+(`/opt/logbot-agent/agent_id` bzw. `%ProgramData%\LogBot-Agent\agent_id`) und nennt
+sie beim Abmelden. Fehlt sie, sucht der Server nach MAC, dann Hostname + IP, dann
+Hostname allein. Welcher Weg gegriffen hat, steht in der Antwort (`matched_by`).
+</details>
 
 ---
 
