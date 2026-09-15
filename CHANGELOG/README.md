@@ -43,7 +43,7 @@ Sie steht an fünf Stellen und muss bei jedem Release überall mitwandern:
 | Backend | 2026.09.15.20.00.00 |
 | Frontend | 2026.09.09.22.00.00 |
 | Syslog | 2026.05.13.20.58.33 |
-| Datenbank / Deployment | 2026.09.12.12.00.00 |
+| Datenbank / Deployment | 2026.09.15.20.00.00 |
 
 ---
 

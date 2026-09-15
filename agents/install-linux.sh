@@ -77,6 +77,7 @@ PORT="${LOGBOT_PORT:-${PLACEHOLDER_PORT:-}}"
 TOKEN="${LOGBOT_TOKEN:-${PLACEHOLDER_TOKEN:-}}"
 MINLEVEL="${LOGBOT_MINLEVEL:-${PLACEHOLDER_MINLEVEL:-info}}"
 INSECURE="${LOGBOT_INSECURE:-false}"
+PROTO="${LOGBOT_PROTO:-udp}"            # nur Syslog-Modus: udp | tcp
 
 # ==============================================================================
 # Hilfsfunktionen
@@ -163,6 +164,7 @@ Optionen (auch als Umgebungsvariable LOGBOT_*):
   --token <token>     Agent-Token (Bearer)  (LOGBOT_TOKEN)  [Pflicht bei https]
   --mode <https|syslog>  Modus (Standard https)  (LOGBOT_MODE)
   --port <n>          Port (https=443, syslog=514)  (LOGBOT_PORT)
+  --proto <udp|tcp>   Protokoll im Syslog-Modus (Standard udp)  (LOGBOT_PROTO)
   --ip <ip>           Optionale IP als Fallback     (LOGBOT_IP)
   --min-level <info|warning|error>            (LOGBOT_MINLEVEL)
   --insecure          Selbstsignierte TLS-Zerts akzeptieren  (LOGBOT_INSECURE=true)
@@ -190,6 +192,8 @@ parse_args() {
             --ip=*)          IPFB="${1#*=}" ;;
             --port)          PORT="${2:-}"; shift ;;
             --port=*)        PORT="${1#*=}" ;;
+            --proto)         PROTO="${2:-}"; shift ;;
+            --proto=*)       PROTO="${1#*=}" ;;
             --mode)          MODE="${2:-}"; shift ;;
             --mode=*)        MODE="${1#*=}" ;;
             --min-level)     MINLEVEL="${2:-}"; shift ;;
@@ -316,8 +320,8 @@ configure_syslog() {
     [[ -z "$PORT" ]] && PORT="514"
     ask PORT "LogBot Server Port" "$PORT"
 
-    local proto="udp"
-    ask proto "Protokoll (udp/tcp)" "udp"
+    local proto="$PROTO"
+    ask proto "Protokoll (udp/tcp)" "$PROTO"
     case "$proto" in tcp|TCP|2) proto="tcp" ;; *) proto="udp" ;; esac
 
     if resolve_host "$FQDN"; then

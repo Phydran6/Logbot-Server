@@ -56,7 +56,7 @@ curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/i
 | Deinstallieren **inkl. Server-Eintrag und Logs** | `sudo bash install-linux.sh uninstall-purge` |
 
 **Optionen:** `--fqdn` · `--token` · `--ip` · `--port` · `--mode https\|syslog` ·
-`--min-level info\|warning\|error` · `--insecure` · `--yes` · `--timeout <s>`
+`--proto udp\|tcp` *(Syslog)* · `--min-level info\|warning\|error` · `--insecure` · `--yes` · `--timeout <s>`
 (alle auch als `LOGBOT_*`-Umgebungsvariable).
 
 Alles liegt unter `/opt/logbot-agent/`, der Dienst heißt `logbot-agent`:

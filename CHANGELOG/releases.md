@@ -13,6 +13,16 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ## v2026.09.15.20.00.00 (2026-09-15)
 
+### Neu
+
+- **Setup-Assistent** für Linux: `curl -sSL …/setup.sh | sudo bash`. Ein Menü für Server
+  und Linux-Agent (installieren, aktualisieren, testen, deinstallieren, komplett
+  entfernen) plus Systemprüfung. Alle Optionen werden abgefragt, und vor dem Start
+  steht der passende direkte Einzeiler.
+- README: **Deinstallieren** als eigener Abschnitt, mit einer Tabelle, was bleibt und was
+  gelöscht wird, für Server, Linux- und Windows-Agent.
+- Linux-Agent: `--proto udp|tcp` für den Syslog-Modus.
+
 ### Behoben
 
 - **Linux-Agent erschien als „Windows-Agent“ mit einer Docker-IP wie `172.18.0.3`.**

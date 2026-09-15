@@ -6,6 +6,15 @@
 
 ## Der kurze Weg
 
+Mit Führung: Der Setup-Assistent fragt jede Option ab und zeigt vor dem Start
+den passenden Einzeiler.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/setup.sh | sudo bash
+```
+
+Oder direkt der Installer:
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash
 ```
@@ -137,9 +146,12 @@ Installieren sieht, ist zwei Wochen später verloren.
 | `install` *(Standard)* | Installiert; eine vorhandene Installation wird auf Wunsch aktualisiert |
 | `update` | Holt den neuen Stand und startet neu gebaute Container |
 | `uninstall` | Stoppt und entfernt die Container — **Daten bleiben** |
-| `uninstall-purge` | Löscht zusätzlich Volumes, **alle Logs** und `/opt/logbot` |
+| `uninstall-purge` | Löscht zusätzlich Volumes, **alle Logs**, die Sicherungs-ZIPs und `/opt/logbot` |
 
-**Optionen:** `--dir` · `--repo` · `--branch` · `--with` · `--no-addons` ·
+Was genau bleibt und was weg ist, dazu die Reste danach:
+[Deinstallieren](../../README.md#deinstallieren).
+
+**Optionen:** `--dir` · `--repo` · `--branch` · `--ref` · `--with` · `--no-addons` ·
 `--skip-preflight` · `--no-build` · `--yes` · `--timeout`
 (alle auch als `LOGBOT_*`-Umgebungsvariable).
 

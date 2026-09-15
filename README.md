@@ -61,27 +61,183 @@ keiner läuft ungefragt.
 
 ## Schnellstart
 
+**Ein Befehl für alles auf Linux** — der Setup-Assistent:
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/setup.sh | sudo bash
 ```
 
-Der Installer prüft zuerst, ob das System passt, fragt dann, was mitinstalliert
-werden soll, und rechnet die Anforderungen gegen die Maschine. Nach ein paar
-Minuten:
+Er zeigt, was auf dem Rechner schon installiert ist, und bietet an:
+
+| | LogBot-Server | Linux-Agent |
+|---|---|---|
+| **Installieren** | Verzeichnis, Zusatzdienste, Release, Systemprüfung | HTTPS oder Syslog, Adresse, Port, Token, Schweregrad, Zertifikat |
+| **Aktualisieren / Testen** | Release, Zusatzdienste ändern, neu bauen ja/nein | Testnachrichten senden |
+| **Deinstallieren** | Container weg, Daten bleiben | nur auf diesem Rechner |
+| **Komplett entfernen** | inkl. aller Logs und Sicherungen | inkl. Gerät und Logs auf dem Server |
+
+Dazu kommt eine reine **Systemprüfung**: Reicht der Rechner, auch mit Zusatzdiensten?
+
+Jede Option wird abgefragt, Enter nimmt den Standard. **Vor dem Start zeigt der
+Assistent den passenden direkten Einzeiler** — den kann man sich für den
+nächsten Rechner merken. Löschen muss man ausdrücklich mit `LÖSCHEN` bestätigen.
+
+**Windows-Agent** — PowerShell als Administrator, ohne Parameter mit Menü:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1)))
+```
+
+Nach der Server-Installation:
 
 - **Oberfläche:** `http://SERVER-IP` — Anmeldung `admin` / `admin`
   *(bitte sofort ändern; HTTPS danach unter Einstellungen → Netzwerk einschalten)*
 - **API-Doku:** `http://SERVER-IP/api/docs`
 - **Syslog:** Port 514 (UDP/TCP)
+- **Agent-Token** für die Agents: Einstellungen → Agent-Token
 
-Ohne jede Rückfrage, mit Zusatzdiensten:
+### Wenn du schon weißt, was drauf soll
+
+Dieselben Schritte direkt, ohne Assistent. Mit `--yes` bzw. `-Yes` läuft alles ohne
+Rückfrage durch, also auch per Automatisierung. Ohne `--yes` läuft ein
+5-Sekunden-Countdown: Wer eine Taste drückt, bekommt die Rückfragen.
+
+**Server**
 
 ```bash
+# Nur LogBot, Standardwerte
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- --yes
+
+# Mit Zusatzdiensten (portainer, watchtower, n8n, postfix)
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh \
   | sudo bash -s -- --with portainer,watchtower --yes
+
+# Bestimmtes Release in eigenes Verzeichnis
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh \
+  | sudo bash -s -- --ref v2026.09.10 --dir /srv/logbot --yes
 ```
 
-→ Ausführlich: **[Installation](docs/install/README.md)**
+Optionen: `--dir` · `--branch` · `--ref` · `--with` · `--no-addons` ·
+`--skip-preflight` · `--no-build` · `--yes` · `--timeout` · `--help`
+
+**Linux-Agent**
+
+```bash
+# HTTPS mit Token (empfohlen, auch übers Internet)
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh \
+  | sudo bash -s -- --fqdn logbot.example.com --token DEIN-AGENT-TOKEN --yes
+
+# Syslog im eigenen Netz (UDP oder TCP)
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh \
+  | sudo bash -s -- --mode syslog --fqdn logbot.example.com --port 514 --proto tcp --yes
+```
+
+Optionen: `--fqdn` · `--token` · `--port` · `--mode https|syslog` · `--proto udp|tcp` ·
+`--ip` · `--min-level info|warning|error` · `--insecure` · `--yes` · `--help`
+
+**Windows-Agent**
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action install -Fqdn logbot.example.com -Token DEIN-AGENT-TOKEN -Yes
+```
+
+→ Ausführlich: **[Installation](docs/install/README.md)** · **[Agents](agents/README.md)**
+
+---
+
+## Deinstallieren
+
+Am einfachsten über den [Setup-Assistenten](#schnellstart), Punkt 3/4 (Server) oder
+7/8 (Linux-Agent). Er zeigt vorher genau an, was entfernt wird und was bleibt.
+
+> **Alles abbauen? Dann in dieser Reihenfolge:** erst die Agents auf den anderen
+> Rechnern, dann den Server. Andersherum senden die Agents ins Leere weiter.
+> Wird der Server ohnehin komplett entfernt, reicht bei den Agents
+> „nur lokal“.
+
+### Server
+
+| | `uninstall` | `uninstall-purge` |
+|---|---|---|
+| Container (auch Zusatzdienste) | entfernt | entfernt |
+| Logs, Einstellungen, Benutzer, Zertifikate *(Docker-Volumes)* | **bleiben** | **gelöscht** |
+| Sicherungs-ZIPs aus *System → Sicherung* *(Volume `backup_data`)* | **bleiben** | **gelöscht** |
+| Daten von n8n und Portainer | **bleiben** | **gelöscht** |
+| `/opt/logbot` samt `.env` (Passwörter) | **bleibt** | **gelöscht** |
+| Update-Sicherungen in `/opt/logbot-backups/` | bleiben | bleiben |
+| Gebaute Images, Docker selbst | bleiben | bleiben |
+| Zurückholen | `cd /opt/logbot && sudo docker compose up -d` | nicht möglich |
+
+```bash
+# Deinstallieren, Daten bleiben
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- uninstall --yes
+
+# Komplett entfernen, inkl. aller Logs
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- uninstall-purge --yes
+```
+
+Aus dem Installationsverzeichnis geht dasselbe mit `sudo bash /opt/logbot/install.sh uninstall`.
+Bei eigenem Verzeichnis `--dir <pfad>` anhängen.
+
+> ⚠️ **Vor `uninstall-purge`:** Werden die Daten noch gebraucht, zuerst im Web-UI unter
+> *System → Sicherung* eine Sicherung erstellen **und herunterladen**. Die Sicherungen
+> liegen in einem Docker-Volume und werden mitgelöscht.
+>
+> **Ohne `--yes`** fragt `uninstall-purge` nach, aber nur nach einem Tastendruck im
+> 5-Sekunden-Countdown. Ohne Tastendruck bricht es ab und löscht **nichts**.
+>
+> **Externe Datenbank:** Die Daten auf dem fremden Datenbankserver bleiben unberührt.
+
+**Reste nach `uninstall-purge` wegräumen** (optional):
+
+```bash
+sudo rm -rf /opt/logbot-backups                                   # Sicherungen vor Updates
+sudo docker image rm logbot-backend logbot-frontend logbot-syslog  # gebaute Images*
+sudo docker image prune                                           # nicht mehr genutzte Images
+```
+
+<sub>* Der Namensanfang entspricht dem Installationsverzeichnis. Bei `--dir /srv/logbot` also
+ebenfalls `logbot-…`. Im Zweifel zeigt `sudo docker images` die Namen.</sub>
+
+**Nur anhalten statt deinstallieren:** `cd /opt/logbot && sudo docker compose stop`,
+weiter geht es mit `sudo docker compose start`.
+
+### Linux-Agent
+
+| | `uninstall` | `uninstall-purge` |
+|---|---|---|
+| Dienst `logbot-agent`, `/opt/logbot-agent`, rsyslog-Weiterleitung | entfernt | entfernt |
+| Gerät und seine Logs auf dem Server | **bleiben** | **gelöscht**, dazu alle weiteren Einträge mit diesem Hostnamen |
+
+```bash
+# Nur auf diesem Rechner
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall --yes
+
+# Inkl. Gerät und Logs auf dem Server
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash -s -- uninstall-purge --yes
+```
+
+Zum Abmelden am Server nimmt `uninstall-purge` Adresse und Token aus der
+Agent-Konfiguration. Ein **Syslog-Agent** hat keinen Token, dann beides mitgeben:
+`--fqdn logbot.example.com --port 443 --token DEIN-AGENT-TOKEN`.
+Ist der Server nicht erreichbar, wird lokal trotzdem entfernt. Das Gerät dann im
+Web-UI unter *Geräte* löschen.
+
+### Windows-Agent
+
+PowerShell als Administrator:
+
+```powershell
+# Nur auf diesem Rechner
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -Yes
+
+# Inkl. Gerät und Logs auf dem Server
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -PurgeServer -Yes
+```
+
+Entfernt werden die geplante Aufgabe `LogBotAgent` und `%ProgramData%\LogBot-Agent`.
+Ohne `-Yes` fragt das Skript, ob auch der Server-Eintrag weg soll. Im Menü ist es
+Punkt 3.
 
 ---
 
@@ -149,7 +305,9 @@ Logbot-Server/
 ├── install/      Systemprüfung vor der Installation
 ├── n8n/          Fertige Workflows
 ├── docs/         Diese Dokumentation
-└── CHANGELOG/    Änderungen je Bereich
+├── CHANGELOG/    Änderungen je Bereich
+├── setup.sh      Setup-Assistent: Server und Linux-Agent, alle Optionen
+└── install.sh    Server-Installer (install, update, uninstall, uninstall-purge)
 ```
 
 Jedes Verzeichnis hat seine eigene README mit den Einzelheiten.

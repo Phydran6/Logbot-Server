@@ -3,6 +3,27 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.15.20.00.00
+### Added
+- **Setup-Assistent `setup.sh`** im Wurzelverzeichnis, als Einzeiler startbar
+  (`curl -sSL …/setup.sh | sudo bash`). Ein Menü für alles, was auf einem Linux-Rechner
+  geht: Server installieren, aktualisieren, deinstallieren, komplett entfernen; Linux-Agent
+  installieren, testen, deinstallieren, komplett entfernen; Systemprüfung. Jede Option wird
+  abgefragt, der Token verdeckt. Vor dem Start zeigt der Assistent den passenden direkten
+  Einzeiler und ruft dann `install.sh` bzw. `agents/install-linux.sh` mit `--yes` auf.
+  *Warum ein eigenes Skript:* Der bisherige Einzeiler läuft ohne Tastendruck mit
+  Standardwerten durch. Das ist richtig für Automatisierung, aber als Einstieg zeigt es die
+  Möglichkeiten nicht. Ein Menü im Installer hätte dieses Verhalten geändert.
+  Löschen verlangt die Eingabe `LÖSCHEN`. Die Token der Agents gehen per Umgebung weiter,
+  nicht über die Kommandozeile.
+
+### Changed
+- README: Schnellstart mit dem Assistenten, darunter die direkten Einzeiler für Server,
+  Linux- und Windows-Agent. Neuer Abschnitt **Deinstallieren** mit Tabelle, was bleibt und
+  was gelöscht wird. Wichtig daran: `uninstall-purge` löscht auch die Sicherungs-ZIPs
+  (Volume `backup_data`), und ohne `--yes` bricht es ohne Tastendruck ab. Dazu die Reste
+  (`/opt/logbot-backups`, Images) und die richtige Reihenfolge (erst Agents, dann Server).
+
 ## 2026.09.12.12.00.00
 ### Added
 - **`--ref` im Installer** (`install.sh`, auch als `LOGBOT_REF`): holt ein Release, Tag oder

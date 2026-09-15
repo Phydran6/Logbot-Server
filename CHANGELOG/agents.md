@@ -3,6 +3,10 @@
 Installer & Log-Forwarder für Linux/Windows (`agents/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
 ## 2026.09.15.20.00.00
+### Added
+- **`--proto udp|tcp`** (auch `LOGBOT_PROTO`) für den Syslog-Modus des Linux-Agents. Das
+  Protokoll ließ sich bisher nur interaktiv wählen; mit `--yes` war es immer UDP.
+
 ### Fixed
 - **Linux-Agent erschien als „Windows-Agent“ mit Docker-IP (z. B. `172.18.0.3`).** Der Agent schickte weder Geräteart noch eigene IP mit. Jetzt sendet der Linux-Agent (Dienst **und** Installationstest) `device_type: "linux_agent"` und seine eigene IP (`ip_address`, die Schnittstelle Richtung Server). Die IP stimmt damit auch hinter einem vorgeschalteten Reverse Proxy wie NPM. Ein fester Wert geht über `"ip_address"` in `/opt/logbot-agent/config.json`.
 - Windows-Agent sendet ebenfalls `device_type: "windows_agent"`, statt sich auf den Token-Typ zu verlassen.
