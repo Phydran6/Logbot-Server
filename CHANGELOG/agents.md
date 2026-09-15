@@ -7,6 +7,39 @@ Installer & Log-Forwarder für Linux/Windows (`agents/`). Versionsformat: `YYYY.
 - **Linux-Agent erschien als „Windows-Agent“ mit Docker-IP (z. B. `172.18.0.3`).** Der Agent schickte weder Geräteart noch eigene IP mit. Jetzt sendet der Linux-Agent (Dienst **und** Installationstest) `device_type: "linux_agent"` und seine eigene IP (`ip_address`, die Schnittstelle Richtung Server). Die IP stimmt damit auch hinter einem vorgeschalteten Reverse Proxy wie NPM. Ein fester Wert geht über `"ip_address"` in `/opt/logbot-agent/config.json`.
 - Windows-Agent sendet ebenfalls `device_type: "windows_agent"`, statt sich auf den Token-Typ zu verlassen.
 - Bestehende Installationen: Agent einmal neu installieren (One-Liner erneut ausführen), damit der neue Dienst geschrieben wird. Die falsche Karte korrigiert der Server aber auch ohne Neuinstallation (siehe Backend).
+## 2026.09.09.22.00.00
+### Added
+- **Windows-Agent als Einzeiler.** `install-windows.ps1` nimmt jetzt Parameter entgegen
+  (`-Action`, `-Fqdn`, `-Token`, `-Mode`, `-MinLevel`, `-Insecure`, `-Yes`, `-PurgeServer`)
+  und läuft ohne Menü durch:
+  `& ([scriptblock]::Create((irm <URL>))) -Action install -Fqdn … -Token … -Yes`
+  *Warum nicht `irm | iex`:* Eine Pipeline reicht nur Text weiter, Parameter kommen dabei
+  nicht an. `[scriptblock]::Create` macht daraus einen echten Skriptblock.
+- **Server-Aufräumen unter Windows** (`Remove-ServerEntry`): meldet den Agent beim
+  Deinstallieren ab, wie es der Linux-Agent schon konnte.
+- **Gerätenummer merken.** Beide Agents speichern die `agent_id`, die der Server bei der
+  ersten Lieferung zurückmeldet (`/opt/logbot-agent/agent_id` bzw.
+  `%ProgramData%\LogBot-Agent\agent_id`), und nennen sie beim Abmelden.
+
+### Fixed
+- **Installer blieb an Rückfragen stehen.** `ask` wartete unbegrenzt auf Eingabe. Über eine
+  Pipe (`curl | sudo bash`), per SSH ohne Terminal oder aus einem Automatismus heraus blieb
+  das Skript damit an der ersten Frage hängen. Jetzt: 60 s Zeitlimit
+  (`LOGBOT_ASK_TIMEOUT`), und ohne nutzbares Terminal wird gar nicht erst gefragt.
+- **Deinstallation hing an mehreren Stellen.**
+  `systemctl stop` bekommt 20 s, danach wird der Dienst per `SIGKILL` beendet;
+  `disable`, `daemon-reload` und der rsyslog-Neustart bekommen ebenfalls Zeitlimits.
+  Der Aufruf an den Server hatte **gar kein** Zeitlimit — jetzt 8 s zum Verbinden, 20 s
+  insgesamt. Beim Abmelden wird nur noch gefragt, was tatsächlich fehlt.
+- **Aufräumen auf dem Server traf womöglich den falschen Eintrag.** Der HTTPS-Agent meldete
+  eine MAC, die der Server nie gespeichert hatte, und eine lokale IP, die hinter NAT nicht
+  zur gespeicherten passte — übrig blieb der Abgleich über den Hostnamen allein. Jetzt geht
+  die gemerkte Gerätenummer mit, und `all_for_hostname` räumt zusätzlich alle weiteren
+  Einträge desselben Hostnamens ab (nach einem IP-Wechsel blieben sonst Karteileichen samt
+  Logs liegen).
+- Windows: eingefügte Adressen mit `https://` und Pfad werden auf den reinen FQDN gekürzt;
+  ein nicht erreichbarer Server bricht die Einrichtung nicht mehr ab (der Agent versucht es
+  zur Laufzeit ohnehin erneut).
 
 ## 2026.07.18.18.30.00
 ### Fixed

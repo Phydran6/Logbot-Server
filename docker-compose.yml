@@ -102,10 +102,32 @@ services:
       LOGBOT_BRANCH: ${LOGBOT_BRANCH:-main}
       # Optional: hebt das Limit der anonymen GitHub-Abfragen an.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Sofortmeldung bei neuem Stand: Takt des eigenen Beobachters und das
+      # Secret fuer den GitHub-Webhook (ohne Secret nimmt der Server keine
+      # Webhook-Meldung an). Siehe app/updater.py.
+      LOGBOT_UPDATE_WATCH: ${LOGBOT_UPDATE_WATCH:-true}
+      LOGBOT_UPDATE_WATCH_INTERVAL: ${LOGBOT_UPDATE_WATCH_INTERVAL:-120}
+      LOGBOT_WEBHOOK_SECRET: ${LOGBOT_WEBHOOK_SECRET:-}
+      # Sicherungen: Ablageort im Container (haengt am Volume unten) und wie
+      # viele aufgehoben werden.
+      LOGBOT_BACKUP_DIR: /backups
+      LOGBOT_KEEP_BACKUPS: ${LOGBOT_KEEP_BACKUPS:-10}
+      # Terminal im Browser (System -> Terminal). Bewusst standardmaessig AUS:
+      # es oeffnet eine Root-Shell auf dem HOST. Siehe app/shell.py.
+      LOGBOT_WEBSHELL: ${LOGBOT_WEBSHELL:-false}
+      LOGBOT_WEBSHELL_MAX_SESSIONS: ${LOGBOT_WEBSHELL_MAX_SESSIONS:-3}
+      LOGBOT_WEBSHELL_IDLE_TIMEOUT: ${LOGBOT_WEBSHELL_IDLE_TIMEOUT:-900}
+      # Sprache der Oberflaeche, wenn ein Browser nichts anderes verlangt.
+      LOGBOT_DEFAULT_LANGUAGE: ${LOGBOT_DEFAULT_LANGUAGE:-de}
     expose:
       - "8000"
     volumes:
       - caddy_certs:/caddy-certs
+      # Sicherungen liegen in einem eigenen Volume: so ueberstehen sie einen
+      # Neubau der Container - und genau dafuer sind sie da.
+      - backup_data:/backups
+      # Branding-Dateien und die erzeugte Postfix-Konfiguration.
+      - app_data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,17 +163,26 @@ services:
     networks:
       - logbot
 
-# HINWEIS: Bewusst KEINE Fremd-/Management-Systeme (z. B. Portainer-Agent) in
-# diesem Stack. LogBot bleibt eigenstaendig; Verwaltungswerkzeuge werden – falls
-# gewuenscht – getrennt vom Nutzer betrieben. Der frueher hier enthaltene
-# portainer-agent (Port 9001, mountete /var/run/docker.sock) wurde entfernt:
-# der Docker-Socket im Stack ist faktisch Root-Zugriff auf den Host.
+# HINWEIS zu Zusatzdiensten: In DIESEM Stack laeuft bewusst nichts Fremdes.
+# Portainer, Watchtower, n8n und Postfix liegen in deploy/optional.yml und
+# haengen dort je an einem eigenen Profil - eingeschaltet wird bewusst, in der
+# Oberflaeche unter System -> Zusatzdienste oder beim Installieren.
+#
+# Der Grund fuer die Trennung: Portainer und Watchtower brauchen den
+# Docker-Socket, und wer darauf schreiben kann, ist faktisch root auf diesem
+# Server. Genau deshalb wurde der frueher hier enthaltene portainer-agent
+# entfernt. Wer die Dienste will, bekommt sie - aber nicht nebenbei.
+#
+#   docker compose -f docker-compose.yml -f deploy/optional.yml \
+#     --profile portainer up -d
 
 volumes:
   postgres_data:
   caddy_data:
   caddy_config:
   caddy_certs:
+  backup_data:
+  app_data:
 
 networks:
   logbot:

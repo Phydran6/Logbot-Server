@@ -2,24 +2,90 @@
 ==============================================================================
 Name:        Phydran6
 Kontakt:     Phydran6
-Version:     2026.09.15.20.00.00
 Changelog:   ../CHANGELOG/agents.md
-Beschreibung: LogBot Agent v2026.09.15.20.00.00 - Windows Installer
-              Start per Menue: 1=Install/Update, 2=Tests senden,
-              3=Vollstaendig deinstallieren (Task + Daten, PS1 bleibt)
-              Modi: UDP Syslog (klassisch) oder HTTPS (verschluesselt + auth)
+
+LogBot Agent - Windows Installer
+================================
+Zwei Betriebsarten:
+
+  * HTTPS (Standard, empfohlen): verschluesselt + Token, laeuft auch ueber das
+    Internet. Ziel ist https://<FQDN>/api/agents/ingest.
+  * Syslog (UDP): klassisch, unverschluesselt, nur im eigenen Netz sinnvoll.
+
+EINZEILER (PowerShell als Administrator)
+----------------------------------------
+Vollautomatisch, mit FQDN und Token:
+
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action install -Fqdn logbot.example.com -Token DEIN-TOKEN -Yes
+
+Deinstallieren (raeumt auf Wunsch auch den Server-Eintrag ab):
+
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action uninstall -PurgeServer -Yes
+
+Ohne -Action erscheint wie bisher das Menue.
+
+WARUM DIESE SCHREIBWEISE
+------------------------
+`irm ... | iex` kann keine Parameter uebergeben - die Pipeline reicht nur den
+Text weiter. Mit [scriptblock]::Create wird der geholte Text zu einem echten
+Skriptblock, und der nimmt Parameter entgegen wie eine normale Funktion.
 ==============================================================================
 #>
 
 #Requires -RunAsAdministrator
 
 param(
-    [string]$ServerFqdn = "",
+    # install | test | uninstall | menu (leer = Menue)
+    [ValidateSet("", "install", "test", "uninstall", "menu")]
+    [string]$Action = "",
+
+    # Server
+    [string]$Fqdn = "",
+    [string]$ServerFqdn = "",          # alter Name, bleibt gueltig
     [string]$ServerIP = "",
-    [int]$ServerPort = 0
+    [int]$ServerPort = 0,
+
+    # HTTPS-Betrieb
+    [string]$Token = "",
+    [ValidateSet("", "https", "syslog")]
+    [string]$Mode = "",
+    [switch]$Insecure,                 # selbstsignierte Zertifikate annehmen
+
+    # Verhalten
+    [ValidateSet("", "info", "warning", "error")]
+    [string]$MinLevel = "",
+    [switch]$Yes,                      # keine Rueckfragen, Standardwerte nehmen
+    [switch]$PurgeServer               # beim Deinstallieren auch auf dem Server abraeumen
 )
 
 $ErrorActionPreference = "Stop"
+
+# -Fqdn und -ServerFqdn meinen dasselbe; der kuerzere gewinnt.
+if ([string]::IsNullOrWhiteSpace($ServerFqdn) -and -not [string]::IsNullOrWhiteSpace($Fqdn)) {
+    $ServerFqdn = $Fqdn
+}
+
+# Unbeaufsichtigt laeuft es, sobald -Yes gesetzt ist ODER kein Mensch davorsitzt
+# (Aufruf aus einem Skript, per Fernwartung, aus der Aufgabenplanung). Dann wird
+# nie gefragt, sondern immer der Standardwert genommen - sonst bliebe der Lauf
+# an der ersten Rueckfrage stehen.
+$script:Unattended = $Yes.IsPresent -or -not [Environment]::UserInteractive
+
+# Read-Host mit Standardwert, das im unbeaufsichtigten Betrieb nicht fragt.
+function Read-Answer {
+    param(
+        [Parameter(Mandatory = $true)][string]$Prompt,
+        [string]$Default = ""
+    )
+    if ($script:Unattended) {
+        Write-Host "  $Prompt -> $(if ($Default) { $Default } else { '(leer)' })"
+        return $Default
+    }
+    $label = if ($Default) { "$Prompt [$Default]" } else { $Prompt }
+    $answer = Read-Host $label
+    if ([string]::IsNullOrWhiteSpace($answer)) { return $Default }
+    return $answer.Trim()
+}
 
 # Konfiguration
 $INSTALL_DIR = "$env:ProgramData\LogBot-Agent"
@@ -236,6 +302,23 @@ function Get-IngestUrl {
     return $null
 }
 
+# Merkt sich, welcher Geraeteeintrag auf dem Server zu diesem Rechner gehoert.
+# Beim Deinstallieren wird genau dieser abgeraeumt - und nicht der eines
+# gleichnamigen Rechners.
+function Save-AgentId {
+    param($Response)
+    if (-not $Response -or -not $Response.agent_id) { return }
+    $file = Join-Path $PSScriptRoot "agent_id"
+    try {
+        if ((Test-Path $file) -and ((Get-Content $file -Raw).Trim() -eq "$($Response.agent_id)")) { return }
+        Set-Content -Path $file -Value "$($Response.agent_id)" -NoNewline -Encoding ascii
+        Write-Host "Geraetenummer auf dem Server: $($Response.agent_id)"
+    } catch {
+        # Kein Grund abzubrechen: ohne die Nummer greift beim Abmelden der
+        # ungenauere Weg ueber den Hostnamen.
+    }
+}
+
 function Send-LogBatch {
     param([array]$Events)
     if ($Events.Count -eq 0) { return }
@@ -250,7 +333,8 @@ function Send-LogBatch {
     } | ConvertTo-Json -Depth 3
 
     try {
-        Invoke-RestMethod -Uri $url -Method POST -Headers $Headers -Body $body @script:TlsParam | Out-Null
+        $response = Invoke-RestMethod -Uri $url -Method POST -Headers $Headers -Body $body @script:TlsParam
+        Save-AgentId -Response $response
     } catch {
         Write-Warning "Sendefehler ($url): $_"
         # URL zuruecksetzen fuer naechsten Versuch (Fallback-Logik)
@@ -342,37 +426,44 @@ function Install-Agent {
     }
 
     # --- Modus-Auswahl ---
-    Write-Host ""
-    Write-Host "Verbindungsmodus:"
-    Write-Host "  1) Standard (UDP Syslog) - unverschluesselt"
-    Write-Host "  2) Agent-basiert (HTTPS) - verschluesselt + authentifiziert"
-    $ModeChoice = Read-Host "Auswahl [1]"
-
-    $Mode = if ($ModeChoice -eq "2") { "https" } else { "syslog" }
+    # Standard ist HTTPS: verschluesselt, mit Token, funktioniert auch ueber das
+    # Internet. Syslog bleibt fuer das eigene Netz waehlbar.
+    if ([string]::IsNullOrWhiteSpace($Mode)) {
+        Write-Host ""
+        Write-Host "Verbindungsmodus:"
+        Write-Host "  1) Agent-basiert (HTTPS) - verschluesselt + Token, auch ueber das Internet"
+        Write-Host "  2) Syslog (UDP) - unverschluesselt, nur im eigenen Netz"
+        $ModeChoice = Read-Answer -Prompt "Auswahl" -Default "1"
+        $Mode = if ($ModeChoice -eq "2") { "syslog" } else { "https" }
+    }
+    Write-LogInfo "Modus: $Mode"
 
     # --- Server-Adressen ---
     Write-Host ""
-    if ([string]::IsNullOrEmpty($ServerFqdn)) {
-        $ServerFqdn = Read-Host "LogBot Server FQDN (z.B. logbot.example.com)"
+    if ([string]::IsNullOrWhiteSpace($ServerFqdn)) {
+        $ServerFqdn = Read-Answer -Prompt "LogBot Server FQDN (z.B. logbot.example.com)"
     }
-    if ([string]::IsNullOrEmpty($ServerIP)) {
-        $ServerIP = Read-Host "LogBot Server IP als Fallback (z.B. 192.168.1.10)"
+    if ([string]::IsNullOrWhiteSpace($ServerIP)) {
+        $ServerIP = Read-Answer -Prompt "LogBot Server IP als Fallback (leer = keine)"
     }
 
-    if ([string]::IsNullOrEmpty($ServerFqdn) -and [string]::IsNullOrEmpty($ServerIP)) {
-        Write-LogError "Mindestens FQDN oder IP muss angegeben werden!"
+    # FQDN aufraeumen: aus einer eingefuegten Adresse wird sonst nie ein Ziel.
+    $ServerFqdn = $ServerFqdn -replace '^https?://', '' -replace '/.*$', ''
+
+    if ([string]::IsNullOrWhiteSpace($ServerFqdn) -and [string]::IsNullOrWhiteSpace($ServerIP)) {
+        Write-LogError "Mindestens FQDN oder IP muss angegeben werden."
+        Write-LogInfo  "Einzeiler-Beispiel: ... -Fqdn logbot.example.com -Token DEIN-TOKEN -Yes"
         exit 1
+    }
+    if ($Mode -eq "https" -and [string]::IsNullOrWhiteSpace($ServerFqdn)) {
+        Write-LogWarn "HTTPS ohne FQDN: das Zertifikat passt dann meist nicht zur IP."
     }
 
     # --- Port ---
     if ($ServerPort -eq 0) {
         $DefaultPort = if ($Mode -eq "https") { 443 } else { 514 }
-        $PortInput = Read-Host "Server Port [$DefaultPort]"
-        if ([string]::IsNullOrEmpty($PortInput)) {
-            $ServerPort = $DefaultPort
-        } else {
-            $ServerPort = [int]$PortInput
-        }
+        $PortInput = Read-Answer -Prompt "Server Port" -Default "$DefaultPort"
+        $ServerPort = [int]$PortInput
     }
 
     # --- Erreichbarkeitscheck ---
@@ -394,9 +485,15 @@ function Install-Agent {
     }
 
     if (-not $FqdnOk -and -not $IpOk) {
-        Write-LogError "Server weder ueber FQDN noch IP erreichbar!"
-        $Continue = Read-Host "Trotzdem fortfahren? (j/N)"
-        if ($Continue -ne "j") { exit 1 }
+        # Kein Abbruch: ein Rechner wird oft eingerichtet, bevor die Firewall
+        # offen ist oder der DNS-Eintrag steht. Der Agent versucht es zur
+        # Laufzeit ohnehin immer wieder.
+        Write-LogWarn "Der Server ist derzeit weder ueber FQDN noch ueber IP erreichbar."
+        $Continue = Read-Answer -Prompt "Trotzdem einrichten? (j/n)" -Default "j"
+        if ($Continue -notmatch '^(j|J|y|Y)') {
+            Write-LogInfo "Abgebrochen."
+            exit 1
+        }
     }
 
     # --- Modus-spezifische Konfiguration ---
@@ -405,13 +502,17 @@ function Install-Agent {
     $LogSources = @()
 
     if ($Mode -eq "https") {
-        # Token abfragen
         Write-Host ""
-        $AgentToken = Read-Host "Agent-Token (vom Admin im Web-UI erstellt)"
-        if ([string]::IsNullOrEmpty($AgentToken)) {
-            Write-LogError "Agent-Token ist erforderlich fuer HTTPS-Modus!"
+        $AgentToken = $Token
+        if ([string]::IsNullOrWhiteSpace($AgentToken)) {
+            $AgentToken = Read-Answer -Prompt "Agent-Token (im Web-UI unter Einstellungen -> Agent-Token)"
+        }
+        if ([string]::IsNullOrWhiteSpace($AgentToken)) {
+            Write-LogError "Ohne Agent-Token geht der HTTPS-Modus nicht."
+            Write-LogInfo  "Der Token steht im Web-UI unter Einstellungen -> Agent-Token."
             exit 1
         }
+        if ($Insecure.IsPresent) { $SkipTlsVerify = $true }
 
         # Token validieren
         Write-LogInfo "Validiere Token..."
@@ -429,8 +530,8 @@ function Install-Agent {
             } catch {
                 if ($_.Exception.Message -match "SSL|certificate|trust") {
                     Write-LogWarn "TLS-Zertifikat nicht vertrauenswuerdig"
-                    $SkipChoice = Read-Host "Selbstsignierte Zertifikate akzeptieren? (j/N)"
-                    if ($SkipChoice -eq "j") {
+                    $SkipChoice = Read-Answer -Prompt "Selbstsignierte Zertifikate akzeptieren? (j/n)" -Default "n"
+                    if ($SkipChoice -match '^(j|J|y|Y)') {
                         $SkipTlsVerify = $true
                         # Temporaer fuer Validierung deaktivieren
                         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
@@ -452,7 +553,7 @@ function Install-Agent {
         Write-Host "  1) Application + System (Standard)"
         Write-Host "  2) Application + System + Security"
         Write-Host "  3) Nur Application"
-        $LogChoice = Read-Host "Auswahl [1]"
+        $LogChoice = Read-Answer -Prompt "Auswahl" -Default "1"
 
         $LogSources = switch ($LogChoice) {
             "2" { @("Application", "System", "Security") }
@@ -461,19 +562,22 @@ function Install-Agent {
         }
     }
 
-    # Min-Level
-    Write-Host ""
-    Write-Host "Minimales Log-Level:"
-    Write-Host "  1) Alle (info und hoeher)"
-    Write-Host "  2) Nur Warnungen (warning und hoeher)"
-    Write-Host "  3) Nur Fehler (error und hoeher)"
-    $LevelChoice = Read-Host "Auswahl [1]"
+    # Min-Level - per Parameter vorgebbar, sonst gefragt.
+    if ([string]::IsNullOrWhiteSpace($MinLevel)) {
+        Write-Host ""
+        Write-Host "Minimales Log-Level:"
+        Write-Host "  1) Alle (info und hoeher)"
+        Write-Host "  2) Nur Warnungen (warning und hoeher)"
+        Write-Host "  3) Nur Fehler (error und hoeher)"
+        $LevelChoice = Read-Answer -Prompt "Auswahl" -Default "1"
 
-    $MinLevel = switch ($LevelChoice) {
-        "2" { "warning" }
-        "3" { "error" }
-        default { "info" }
+        $MinLevel = switch ($LevelChoice) {
+            "2" { "warning" }
+            "3" { "error" }
+            default { "info" }
+        }
     }
+    Write-LogInfo "Log-Level: $MinLevel"
 
     # --- Agent Script speichern ---
     if ($Mode -eq "https") {
@@ -694,11 +798,105 @@ function Remove-ScheduledTaskForce {
     }
 }
 
+# Meldet den Agent auf dem Server ab, damit dort nicht ewig ein Geraet steht,
+# das es gar nicht mehr gibt. Muss VOR dem Loeschen der Dateien laufen - danach
+# sind Token und Geraetenummer weg.
+function Remove-ServerEntry {
+    $ConfigFile = "$INSTALL_DIR\config.json"
+    if (-not (Test-Path $ConfigFile)) {
+        Write-LogInfo "Keine Konfiguration gefunden - auf dem Server wird nichts abgeraeumt."
+        return
+    }
+
+    try {
+        $Config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+    } catch {
+        Write-LogWarn "Konfiguration unlesbar - auf dem Server wird nichts abgeraeumt."
+        return
+    }
+
+    $ApiToken = $Config.agent_token
+    if ([string]::IsNullOrWhiteSpace($ApiToken)) {
+        Write-LogInfo "Kein Token hinterlegt (Syslog-Modus) - auf dem Server gibt es nichts abzumelden."
+        return
+    }
+
+    # Ziel bestimmen: FQDN, sonst IP.
+    $BaseUrl = $null
+    if ($Config.server_fqdn) {
+        $BaseUrl = if ($Config.server_port -eq 443) { "https://$($Config.server_fqdn)" }
+                   else { "https://$($Config.server_fqdn):$($Config.server_port)" }
+    } elseif ($Config.server_ip) {
+        $BaseUrl = if ($Config.server_port -eq 443) { "https://$($Config.server_ip)" }
+                   else { "https://$($Config.server_ip):$($Config.server_port)" }
+    }
+    if (-not $BaseUrl) {
+        Write-LogWarn "Kein Serverziel in der Konfiguration - auf dem Server wird nichts abgeraeumt."
+        return
+    }
+
+    if ($Config.skip_tls_verify) {
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    }
+
+    # Die Geraetenummer hat der Server beim ersten Senden zurueckgemeldet. Mit ihr
+    # trifft das Abraeumen genau diesen Rechner - und nicht einen gleichnamigen.
+    $AgentIdFile = "$INSTALL_DIR\agent_id"
+    $Payload = @{
+        hostname         = $env:COMPUTERNAME
+        purge            = $true
+        all_for_hostname = $true
+    }
+    if (Test-Path $AgentIdFile) {
+        $StoredId = (Get-Content $AgentIdFile -Raw).Trim()
+        if ($StoredId -match '^\d+$') { $Payload.agent_id = [int]$StoredId }
+    }
+    try {
+        $Ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+               Where-Object { $_.IPAddress -notlike "127.*" } |
+               Select-Object -First 1).IPAddress
+        if ($Ip) { $Payload.ip_address = $Ip }
+        $Mac = (Get-NetAdapter -ErrorAction SilentlyContinue |
+                Where-Object { $_.Status -eq "Up" } |
+                Select-Object -First 1).MacAddress
+        if ($Mac) { $Payload.mac_address = $Mac.Replace("-", ":").ToLower() }
+    } catch {
+        # Ohne IP/MAC greift die Zuordnung ueber Nummer bzw. Hostname.
+    }
+
+    Write-LogInfo "Melde den Agent auf dem Server ab ($BaseUrl)..."
+    try {
+        $Response = Invoke-RestMethod -Uri "$BaseUrl/api/agents/decommission" `
+            -Method POST `
+            -Headers @{ "Authorization" = "Bearer $ApiToken"; "Content-Type" = "application/json" } `
+            -Body ($Payload | ConvertTo-Json -Compress) `
+            -TimeoutSec 20
+        Write-LogSuccess "Auf dem Server abgeraeumt: $($Response.message)"
+    } catch {
+        $code = $null
+        try { $code = $_.Exception.Response.StatusCode.value__ } catch {}
+        if ($code -eq 404) {
+            Write-LogInfo "Auf dem Server gab es dazu keinen Eintrag (mehr)."
+        } else {
+            Write-LogWarn "Der Server war nicht erreichbar oder hat abgelehnt - der Eintrag bleibt stehen."
+            Write-LogInfo  "Im Web-UI unter 'Geraete' von Hand loeschen."
+        }
+    }
+}
+
 function Uninstall-Agent {
     Write-LogInfo "Deinstalliere LogBot Agent..."
 
     $taskFile = Join-Path $env:SystemRoot "System32\\Tasks\\$TASK_NAME"
     $errors = @()
+
+    # Zuerst auf dem Server abmelden - danach sind Token und Nummer weg.
+    $DoPurge = $PurgeServer.IsPresent
+    if (-not $DoPurge -and -not $script:Unattended) {
+        $answer = Read-Answer -Prompt "Auch den Eintrag samt Logs auf dem Server loeschen? (j/n)" -Default "n"
+        $DoPurge = $answer -match '^(j|J|y|Y)'
+    }
+    if ($DoPurge) { Remove-ServerEntry }
 
     # Laufende Agent-Instanzen beenden (vor Filesystem-Delete)
     Stop-AgentProcesses
@@ -790,7 +988,7 @@ function Show-MainMenu {
     Write-Host "  2) Testnachrichten senden (Installation erforderlich)"
     Write-Host "  3) Vollstaendig deinstallieren (alles ausser diesem Script wird entfernt)"
     Write-Host "  4) Abbrechen"
-    $choice = Read-Host "Auswahl [1]"
+    $choice = Read-Answer -Prompt "Auswahl" -Default "1"
 
     switch ($choice) {
         "2" { return "test" }
@@ -811,12 +1009,16 @@ Write-Host "  (PowerShell Event Log Forwarder)" -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host ""
 
-$Action = Show-MainMenu
+# Ohne -Action gibt es das Menue wie bisher. Mit -Action laeuft es direkt durch -
+# das ist der Weg fuer den Einzeiler und fuer die Verteilung per Softwarepaket.
+if ([string]::IsNullOrWhiteSpace($Action) -or $Action -eq "menu") {
+    $Action = Show-MainMenu
+}
 
 switch ($Action) {
     "uninstall" { Uninstall-Agent }
-    "test" { Send-TestMessage }
-    "install" {
+    "test"      { Send-TestMessage }
+    "install"   {
         Install-Agent
         Install-ScheduledTask
         Start-Agent

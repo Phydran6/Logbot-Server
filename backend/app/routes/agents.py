@@ -181,37 +181,94 @@ async def decommission_agent(
     if not agent_token:
         raise HTTPException(status_code=401, detail="Ung\u00fcltiger Agent-Token")
 
-    agent = None
-    if payload.mac_address:
-        agent = (await db.execute(select(Agent).where(Agent.mac_address == payload.mac_address))).scalar_one_or_none()
-    if not agent and payload.hostname and payload.ip_address:
-        agent = (await db.execute(
-            select(Agent).where(Agent.hostname == payload.hostname, Agent.ip_address == payload.ip_address)
-        )).scalar_one_or_none()
-    if not agent and payload.hostname:
-        agent = (await db.execute(select(Agent).where(Agent.hostname == payload.hostname))).scalar_one_or_none()
+    # Zuordnung, vom Genauesten zum Ungenauesten. `matched_by` wandert in die
+    # Antwort - der Agent kann dann sagen, ob wirklich sein eigener Eintrag
+    # getroffen wurde oder nur einer, der zufaellig so heisst.
+    agents: List[Agent] = []
+    matched_by = ""
 
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent nicht gefunden")
+    if payload.agent_id:
+        hit = (await db.execute(select(Agent).where(Agent.id == payload.agent_id))).scalar_one_or_none()
+        if hit:
+            agents, matched_by = [hit], "agent_id"
+
+    if not agents and payload.mac_address:
+        hit = (await db.execute(
+            select(Agent).where(Agent.mac_address == payload.mac_address)
+        )).scalar_one_or_none()
+        if hit:
+            agents, matched_by = [hit], "mac_address"
+
+    if not agents and payload.hostname and payload.ip_address:
+        hit = (await db.execute(
+            select(Agent).where(Agent.hostname == payload.hostname,
+                                Agent.ip_address == payload.ip_address)
+        )).scalar_one_or_none()
+        if hit:
+            agents, matched_by = [hit], "hostname+ip"
+
+    if not agents and payload.hostname:
+        # Ein Rechner, der die IP gewechselt hat (DHCP, NAT, Umzug), steht hier
+        # mehrfach. Beim Abraeumen sollen alle mitgehen - sonst bleiben
+        # Karteileichen mit ihren Logs liegen.
+        rows = (await db.execute(
+            select(Agent).where(Agent.hostname == payload.hostname)
+        )).scalars().all()
+        if rows:
+            agents = list(rows) if payload.all_for_hostname else [rows[0]]
+            matched_by = "hostname"
+
+    if not agents:
+        raise HTTPException(
+            status_code=404,
+            detail=("Zu dieser Angabe gibt es auf dem Server kein Geraet. "
+                    "Moeglicherweise wurde es schon entfernt."))
+
+    # Beim Deinstallieren soll wirklich alles weg sein, was zu diesem Rechner
+    # gehoert. Ein Treffer ueber die Geraetenummer ist zwar genau - er findet
+    # aber nur EINEN Eintrag. Hat der Rechner zwischendurch die IP gewechselt,
+    # steht er mehrfach in der Liste, und der Rest bliebe als Karteileiche mit
+    # seinen Logs zurueck. Also: gefundene Eintraege um die gleichnamigen ergaenzen.
+    if payload.all_for_hostname and payload.hostname:
+        known = {a.id for a in agents}
+        extra = (await db.execute(
+            select(Agent).where(Agent.hostname == payload.hostname)
+        )).scalars().all()
+        for candidate in extra:
+            if candidate.id not in known:
+                agents.append(candidate)
+                known.add(candidate.id)
+
+    ids = [a.id for a in agents]
 
     if payload.purge:
-        await db.execute(delete(Log).where(Log.agent_id == agent.id))
-        await db.delete(agent)
+        deleted_logs = 0
+        for agent in agents:
+            result = await db.execute(delete(Log).where(Log.agent_id == agent.id))
+            deleted_logs += result.rowcount or 0
+            await db.delete(agent)
         await db.commit()
-        return {"status": "purged", "agent_id": agent.id}
+        return {"status": "purged", "agent_id": ids[0], "agent_ids": ids,
+                "deleted_agents": len(ids), "deleted_logs": deleted_logs,
+                "matched_by": matched_by,
+                "message": (f"{len(ids)} Geraet(e) und {deleted_logs} Logzeilen geloescht.")}
 
-    # Markiere als decommissioned und setze last_seen zur\u00fcck
-    extra = getattr(agent, "extra_data", {}) or {}
-    extra.update({
-        "decommissioned": True,
-        "decommissioned_at": datetime.utcnow().isoformat(),
-        "decommissioned_token": agent_token.name,
-        "decommissioned_token_type": agent_token.device_type
-    })
-    agent.extra_data = extra
-    agent.last_seen = None
+    # Nur abmelden: Eintrag und Logs bleiben, das Geraet gilt aber als stillgelegt.
+    for agent in agents:
+        extra = getattr(agent, "extra_data", {}) or {}
+        extra.update({
+            "decommissioned": True,
+            "decommissioned_at": datetime.utcnow().isoformat(),
+            "decommissioned_token": agent_token.name,
+            "decommissioned_token_type": agent_token.device_type,
+        })
+        agent.extra_data = extra
+        agent.last_seen = None
     await db.commit()
-    return {"status": "decommissioned", "agent_id": agent.id}
+    return {"status": "decommissioned", "agent_id": ids[0], "agent_ids": ids,
+            "matched_by": matched_by,
+            "message": (f"{len(ids)} Geraet(e) stillgelegt. Logs und Eintrag bleiben "
+                        f"erhalten.")}
 
 @router.delete("/{agent_id}", status_code=204)
 async def delete_agent(

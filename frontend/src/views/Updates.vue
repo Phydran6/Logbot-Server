@@ -96,8 +96,8 @@
       <div class="card lg:col-span-2">
         <div class="card-header">
           <span class="card-title">Versionsstand</span>
-          <span v-if="status" class="badge" :class="status.update_available ? 'badge-warning' : 'badge-success'">
-            {{ status.update_available ? 'Update verfügbar' : 'aktuell' }}
+          <span v-if="status" class="badge" :class="stateBadge">
+            {{ stateLabel }}
           </span>
         </div>
         <div class="card-body space-y-2 text-sm">
@@ -136,6 +136,24 @@
           <p v-if="status?.reason" class="text-xs pt-1" style="color: var(--color-text-muted)">
             {{ status.reason }}
           </p>
+
+          <!-- Der Kanal zeigt auf einen aelteren Stand als den installierten.
+               Meist fehlt einfach ein Release fuer den aktuellen Stand. Hier
+               steht deshalb kein Update-Knopf, sondern was zu tun ist. -->
+          <div v-if="status?.is_downgrade" class="downgrade-note">
+            <p class="font-semibold mb-1">Einspielen wäre hier ein Rückschritt.</p>
+            <p>
+              Der eingestellte Kanal <strong>{{ channelLabel }}</strong> zeigt auf
+              <span class="font-mono">{{ status?.remote?.version || status?.target_ref }}</span> —
+              installiert ist aber schon
+              <span class="font-mono">{{ status?.local?.version }}</span>.
+            </p>
+            <p class="mt-1">Zwei Wege:</p>
+            <ul class="downgrade-list">
+              <li>Auf GitHub ein Release für den aktuellen Stand anlegen — dann stimmt „Stabil“ wieder.</li>
+              <li>Oder oben den Kanal auf <strong>Aktuell ({{ status?.remote?.branch }})</strong> stellen.</li>
+            </ul>
+          </div>
           <p v-if="status?.local?.note" class="note note-warn">{{ status.local.note }}</p>
           <p v-if="status && !status.can_update" class="note note-warn">
             Dieser Server lässt sich nicht über die Oberfläche aktualisieren – dem Backend fehlt
@@ -149,7 +167,7 @@
               @click="askUpdate"
             >
               <AppIcon name="download" :size="16" />
-              {{ status?.update_available ? 'Update einspielen' : 'Neu installieren (gleicher Stand)' }}
+              {{ applyLabel }}
             </button>
           </div>
         </div>
@@ -193,6 +211,79 @@
               Zurück
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================================
+         WELCHER STAND? (Kanal und Release)
+         ================================================================ -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <span class="card-title">Welchen Stand soll dieser Server fahren?</span>
+      </div>
+      <div class="card-body space-y-3">
+        <p class="text-sm" style="color: var(--color-text-muted)">
+          Nicht jeder will immer den letzten Commit. Hier steht, woran sich dieser
+          Server hält — die Update-Prüfung oben richtet sich danach.
+        </p>
+
+        <div class="channel-grid">
+          <label
+            v-for="option in channels"
+            :key="option.id"
+            class="channel"
+            :class="{ 'is-picked': channel.channel === option.id }"
+          >
+            <input v-model="channel.channel" type="radio" :value="option.id">
+            <span>
+              <strong>{{ option.label }}</strong>
+              <em>{{ option.hint }}</em>
+            </span>
+          </label>
+        </div>
+
+        <!-- Nur bei "festgelegte Version": welche denn? -->
+        <div v-if="channel.channel === 'pinned'">
+          <label class="label">Release oder Tag</label>
+          <select v-if="releases.length" v-model="channel.ref" class="select">
+            <option value="">– bitte wählen –</option>
+            <option v-for="release in releases" :key="release.tag" :value="release.tag">
+              {{ release.name }}{{ release.prerelease ? ' (Vorabversion)' : '' }}
+            </option>
+          </select>
+          <input v-else v-model="channel.ref" type="text" class="input"
+                 placeholder="z.B. v2026.08.14 oder ein Commit">
+          <p class="text-xs mt-1" style="color: var(--color-text-muted)">
+            Der Server bleibt auf diesem Stand stehen, bis hier etwas anderes gewählt wird.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button class="btn btn-primary btn-sm" :disabled="channelSaving" @click="saveChannel">
+            {{ channelSaving ? 'Wird gespeichert…' : 'Übernehmen' }}
+          </button>
+          <span v-if="status?.target_ref" class="text-xs" style="color: var(--color-text-muted)">
+            Zielpunkt: <code class="font-mono">{{ status.target_ref }}</code>
+          </span>
+        </div>
+
+        <!-- Sofortmeldung: wie der Server von einem Push erfährt -->
+        <div v-if="status?.webhook" class="webhook-box">
+          <p class="text-sm font-semibold" style="color: var(--color-text-primary)">
+            Sofort erfahren, wenn etwas gepusht wird
+          </p>
+          <p class="text-xs mt-1" style="color: var(--color-text-muted)">
+            Dieser Server sieht von selbst alle
+            {{ status.watcher?.interval_seconds || 120 }} Sekunden nach und meldet einen
+            neuen Stand sofort in jedes offene Fenster.
+            <template v-if="!status.webhook.configured">
+              Noch schneller geht es mit einem Webhook — {{ status.webhook.hint }}
+            </template>
+            <template v-else>
+              Der GitHub-Webhook ist eingerichtet: <code class="font-mono">{{ status.webhook.url || status.webhook.path }}</code>
+            </template>
+          </p>
         </div>
       </div>
     </div>
@@ -275,11 +366,22 @@
         <div class="modal-actions">
           <button class="btn btn-ghost" @click="dialog = null">Abbrechen</button>
           <button class="btn btn-danger" :disabled="!understood || starting" @click="confirmDialog">
-            {{ starting ? 'Wird gestartet…' : (dialog.mode === 'update' ? 'Update starten' : 'Rückfall starten') }}
+            {{ starting ? 'Wird gestartet…' : (dialog.mode === 'update' ? 'Weiter' : 'Weiter') }}
           </button>
         </div>
       </div>
     </div>
+
+    <!-- Letzter Schritt vor dem Eingriff: die Sicherungsfrage. Ohne beantwortete
+         Frage weist der Server den Aufruf ab (backend app/guard.py). -->
+    <BackupPrompt
+      :open="promptOpen"
+      :operation="promptOperation"
+      :warning="promptWarning"
+      :scopes="backupScopes"
+      @confirm="startRun"
+      @cancel="promptOpen = false"
+    />
   </div>
 </template>
 
@@ -287,8 +389,19 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import AppIcon from '../components/AppIcon.vue'
+import BackupPrompt from '../components/BackupPrompt.vue'
 
 const auth = useAuthStore()
+
+// Release-Auswahl und Sicherungsfrage
+const releases = ref([])
+const channels = ref([])
+const channel = ref({ channel: 'stable', ref: '', auto_offer: true })
+const channelSaving = ref(false)
+const backupScopes = ref([])
+const promptOpen = ref(false)
+const promptOperation = ref('')
+const promptWarning = ref('')
 
 const status = ref(null)
 const checking = ref(false)
@@ -331,10 +444,38 @@ const run = computed(() => {
   return serverRun.value
 })
 
-const canStart = computed(() => !!status.value?.can_update && !isRunning.value && !starting.value)
+const canStart = computed(() => (
+  !!status.value?.can_update && !isRunning.value && !starting.value
+  // Bei einem Rueckschritt bleibt der Knopf aus: der Server weist das ohnehin
+  // ab (HTTP 409), und ein Knopf, der nur eine Fehlermeldung erzeugt, hilft
+  // niemandem.
+  && !status.value?.is_downgrade
+))
+
+/** Drei Zustaende statt zwei: hinterher, gleichauf, oder voraus. */
+const stateBadge = computed(() => {
+  if (status.value?.is_downgrade) return 'badge-neutral'
+  return status.value?.update_available ? 'badge-warning' : 'badge-success'
+})
+
+const stateLabel = computed(() => {
+  if (status.value?.is_downgrade) return 'Server ist voraus'
+  return status.value?.update_available ? 'Update verfügbar' : 'aktuell'
+})
+
+const applyLabel = computed(() => (
+  status.value?.update_available ? 'Update einspielen' : 'Neu installieren (gleicher Stand)'
+))
+
+const channelLabel = computed(() => {
+  const key = status.value?.channel?.channel
+  return channels.value.find(c => c.id === key)?.label || key || '—'
+})
 
 onMounted(() => {
   load()
+  loadReleases()
+  loadBackupScopes()
 })
 
 onUnmounted(() => {
@@ -416,8 +557,27 @@ function askRollback(backup) {
   dialog.value = { mode: 'rollback', backup }
 }
 
-async function confirmDialog() {
+/**
+ * Der alte Dialog erklaert nur noch, was passiert. Losgeschickt wird erst nach
+ * der Sicherungsfrage - die ist Pflicht und wird auch serverseitig verlangt.
+ */
+function confirmDialog() {
   if (!dialog.value || !understood.value) return
+  const mode = dialog.value.mode
+  promptOperation.value = mode === 'update'
+    ? `Update auf ${status.value?.remote?.version || status.value?.remote?.commit_short || 'den neuen Stand'}`
+    : `Rückfall auf ${dialog.value.backup?.name || 'die letzte Sicherung'}`
+  promptWarning.value = mode === 'rollback' && dialog.value.backup?.database_dump
+    ? 'Der mitgesicherte Datenbankstand wird eingespielt — alle Logs seit dieser Sicherung gehen verloren.'
+    : ''
+  promptOpen.value = true
+}
+
+/** Startet den Lauf, sobald die Sicherungsfrage beantwortet ist. */
+async function startRun(decision) {
+  promptOpen.value = false
+  if (!dialog.value) return
+
   starting.value = true
   error.value = ''
   const mode = dialog.value.mode
@@ -425,12 +585,23 @@ async function confirmDialog() {
     if (mode === 'update') {
       await auth.api('/api/updates/apply', {
         method: 'POST',
-        body: { confirm: 'UPDATE', database_backup: databaseBackup.value },
+        body: {
+          confirm: 'UPDATE',
+          database_backup: databaseBackup.value,
+          ref: status.value?.target_ref || '',
+          backup: decision,
+        },
       })
     } else {
       await auth.api('/api/updates/rollback', {
         method: 'POST',
-        body: { confirm: 'ROLLBACK', backup: dialog.value.backup?.name || '' },
+        body: {
+          confirm: 'ROLLBACK',
+          // Die Sicherung des Wartungsskripts auf dem Host - nicht zu
+          // verwechseln mit der ZIP-Sicherung aus der Rueckfrage oben.
+          backup_dir: dialog.value.backup?.name || '',
+          backup: decision,
+        },
       })
     }
     dialog.value = null
@@ -446,6 +617,51 @@ async function confirmDialog() {
     dialog.value = null
   } finally {
     starting.value = false
+  }
+}
+
+// =============================================================================
+// Release-Auswahl
+// =============================================================================
+async function loadReleases() {
+  try {
+    const data = await auth.api('/api/updates/releases')
+    releases.value = data.releases || []
+    channels.value = data.channels || []
+    if (data.current_channel) channel.value = { ...data.current_channel }
+  } catch (e) {
+    // Ohne GitHub-Antwort bleibt die Liste leer - der Kanal laesst sich
+    // trotzdem umstellen, nur ohne Auswahlhilfe.
+    releases.value = []
+  }
+}
+
+async function saveChannel() {
+  channelSaving.value = true
+  error.value = ''
+  try {
+    const data = await auth.api('/api/updates/channel', {
+      method: 'PUT',
+      body: {
+        channel: channel.value.channel,
+        ref: channel.value.ref || '',
+        auto_offer: channel.value.auto_offer !== false,
+      },
+    })
+    status.value = data.status
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    channelSaving.value = false
+  }
+}
+
+async function loadBackupScopes() {
+  try {
+    const data = await auth.api('/api/backup/overview')
+    backupScopes.value = data.scopes
+  } catch {
+    backupScopes.value = []
   }
 }
 
@@ -486,6 +702,83 @@ function formatTime(value) {
 </script>
 
 <style scoped>
+.downgrade-note {
+  margin-top: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-warning);
+  background-color: var(--primary-soft);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+
+.downgrade-list {
+  margin-top: 0.25rem;
+  padding-left: 1.125rem;
+  list-style: disc;
+}
+
+.channel-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+
+@media (min-width: 768px) {
+  .channel-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.channel {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.channel:hover {
+  background-color: var(--hover-surface);
+}
+
+.channel.is-picked {
+  border-color: var(--color-primary);
+  background-color: var(--primary-soft);
+}
+
+.channel input {
+  margin-top: 0.1875rem;
+  flex-shrink: 0;
+}
+
+.channel span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.channel strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.channel em {
+  font-style: normal;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.webhook-box {
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius);
+  background-color: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+}
+
 .info-row {
   display: flex;
   align-items: center;

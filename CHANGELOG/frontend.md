@@ -2,6 +2,39 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.09.22.00.00
+### Added
+- **Sprachen** (`src/i18n/`): Deutsch und English, umschaltbar unten im Seitenmenü. Bewusst
+  ohne `vue-i18n` — Wörterbuch, reaktive Auswahl und `t()` sind rund fünfzig Zeilen, und der
+  Container baut so auch ohne Netz durch. Fehlende Schlüssel fallen auf Deutsch zurück; fehlt
+  er auch dort, steht der Schlüssel selbst da und fällt beim Testen auf.
+- **`BackupPrompt.vue`**: die Rückfrage vor jedem Systemeingriff. Nicht wegklickbar, zwei
+  gültige Antworten — und „nein" muss man wählen.
+- **Neue Seiten**: `Backup.vue` (sichern, herunterladen, hochladen, granular zurückspielen),
+  `AiSettings.vue`, `Stacks.vue`, `MailSettings.vue`, `Terminal.vue`.
+- **Terminal ohne xterm.js**: eigener schlanker Bildschirm mit Zeilenpuffer, ANSI-Farben und
+  der Cursorsteuerung, die eine Shell im Alltag benutzt. 300 kB Abhängigkeit für ein
+  Nebenwerkzeug wären zu viel; die Grenze (kein `top`, kein `vim`) steht in der Oberfläche.
+- **Update-Hinweis in der Kopfleiste**, gespeist aus dem Ereignisstrom des Servers — erscheint
+  ohne Neuladen, sobald etwas Neues da ist.
+- **Release-Auswahl** auf der Update-Seite: Kanal wählen, Release festnageln.
+- Icons für die neuen Bereiche in `AppIcon.vue`; LogBot-Zeichen als Standard-Favicon.
+
+### Changed
+- **Seitenmenü vollständig links, drei Ebenen.** Die Einstellungen haben ihre Unterpunkte im
+  Baum statt in einer Reiterleiste rechts im Inhalt — vorher klickte man sich in den Bereich
+  und musste dort weitersuchen. Alte Adressen wie `/settings/ldap` funktionieren weiter.
+- Kopfleiste zeigt zusätzlich den Pfad im Baum („System · Einstellungen").
+
+### Fixed
+- **Einklappen klappte nur halb ein.** Vorher wurden einzelne Elemente per `md:hidden`
+  ausgeblendet, Text und Unterpunkte blieben aber im Layout stehen. Jetzt entscheidet ein
+  einziges `isCollapsed`, das die Breite umschaltet und die Beschriftungen gar nicht erst
+  rendert — und es gilt nur am Desktop, weil die Sidebar auf dem Handy ein Overlay ist.
+- **Der Einklapp-Pfeil war nur im ausgeklappten Zustand sichtbar** und lag im eingeklappten
+  woanders. Er sitzt jetzt fest im Fussbereich, ist immer da und zeigt in die Richtung, in
+  die es geht: nach links zum Einklappen, nach rechts zum Ausklappen.
+
 ## 2026.08.14.14.00.00
 ### Fixed
 - **Systemzustand: die Kachel „Datenbank" war rot, obwohl die Datenbank verbunden war.**

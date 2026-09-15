@@ -1,126 +1,174 @@
-# LogBot Agent v2026.09.15.20.00.00
+# Agents
 
-Log-Forwarder für Linux und Windows – keine zusätzlichen Abhängigkeiten.
-Zwei Modi je Plattform: **Syslog** (rsyslog/UDP-TCP) oder **HTTPS** (verschlüsselt + Token, DNS/FQDN).
-Der Linux-Installer ist **teilautomatisch**: Standard = HTTPS. Beim Start läuft ein 5-s-Countdown – **Taste drücken = manueller Modus** (alle Werte werden abgefragt), sonst läuft alles automatisch mit Standardwerten (auch headless via Pipe/cron).
+Kleine Dienste, die Logs von einem Rechner an den LogBot-Server schicken.
+Für **Linux** und **Windows**, jeweils als Einzeiler installierbar.
 
-Entwickelt von Phydran6  
-Kontakt: Phydran6
+← [Zurück zur Übersicht](../README.md) · [Alle Dokumente](../docs/README.md)
 
-📓 Changelog: [../CHANGELOG/agents.md](../CHANGELOG/agents.md)
+---
 
-## Features
-- Linux: nutzt vorhandenes rsyslog – kein Python nötig
-- Windows: reines PowerShell – kein Python nötig
-- Schnell einsatzbereit: ein Befehl pro Plattform
-- Auto-Start: startet automatisch beim Boot
-- Keine Zusatzsoftware: nur System-Tools
+## Zwei Betriebsarten
 
-## Installation
+|                     | **Agent-basiert (HTTPS)** — Standard        | **Syslog (UDP/TCP)**              |
+|---------------------|---------------------------------------------|-----------------------------------|
+| Transport           | HTTPS an `/api/agents/ingest`               | Port 514                          |
+| Verschlüsselt       | ja                                           | nein                              |
+| Anmeldung           | Agent-Token (Bearer)                         | keine                             |
+| Über das Internet   | **ja** — dafür ist er gedacht                | nein, nur im eigenen Netz         |
+| Adressierung        | FQDN (DNS), IP als Rückfallebene             | FQDN oder IP                      |
+| Braucht auf Linux   | python3 + systemd + journald                 | rsyslog                           |
 
-### Linux (One-Liner, empfohlen)
+**Kurz:** Rechner im eigenen Netz können Syslog sprechen. Alles, was **nicht im
+gleichen Netz** hängt, geht agent-basiert — nur dort sind die Daten unterwegs
+verschlüsselt und der Absender nachweisbar.
 
-**Voll automatisch** – FQDN + Token gleich mitgeben, keine Rückfragen:
+Beide Wege funktionieren mit einem **FQDN**. Beim HTTPS-Modus ist er faktisch
+Pflicht: ein Zertifikat lautet auf einen Namen, nicht auf eine IP.
+
+---
+
+## Linux — Einzeiler
+
+**Voll automatisch** (FQDN und Token mitgeben, nichts wird gefragt):
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh \
-  | sudo bash -s -- --fqdn logbot.example.com --token DEIN-AGENT-TOKEN
+  | sudo bash -s -- --fqdn logbot.example.com --token DEIN-AGENT-TOKEN --yes
 ```
 
-**Oder Werte per Umgebungsvariable** (`sudo -E` reicht die Variablen durch):
-```bash
-curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh \
-  | LOGBOT_FQDN=logbot.example.com LOGBOT_TOKEN=xxxx sudo -E bash
-```
+**Mit Rückfragen** (5 s Countdown; eine Taste drücken schaltet auf manuell):
 
-**Interaktiv** – der Installer fragt FQDN/Token ab (jede Abfrage 5 s Timeout, sonst Default):
 ```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh | sudo bash
 ```
 
-> Token im Web-UI unter **Agent-Tokens** erstellen – am besten mit Typ **linux**, dann erscheint der Host korrekt als „Linux-Agent". Den Token nicht in Shell-History/Logs stehen lassen; wo möglich per Prompt oder Env statt Klartext-Parameter.
+**Syslog statt HTTPS:**
 
-#### Ablauf & Verhalten
-- **Standard = HTTPS**: ein schlanker **Python-systemd-Dienst** (`logbot-agent`, nur Python-Standardbibliothek) liest **alle** Logs aus journald und sendet sie verschlüsselt + Token als JSON-Batches (max. 50) an `https://<FQDN>/api/agents/ingest`. DNS-basiert (FQDN Pflicht, IP nur optionaler Laufzeit-Fallback).
-- **Teilautomatisch (ein Countdown):** Beim Start läuft ein 5-s-Countdown. **Drückst du eine Taste, schaltet der Installer auf manuell** und fragt ab da **alle** Werte blockierend ab (kein Timeout – deine Eingabe wird abgewartet). Ohne Tastendruck bzw. ohne Terminal (cron) läuft alles automatisch mit Standardwerten. Über eine SSH-Sitzung funktioniert der Tastendruck auch beim `curl | bash`-Weg (via `/dev/tty`). Countdown-Dauer via `--timeout` / `LOGBOT_TIMEOUT`.
-- **Zwingend nötig** sind bei HTTPS nur **FQDN** und **Token** – per Parameter, Env-Variable oder Platzhalter im Skript (siehe unten). Fehlen sie komplett, bricht der Installer mit klarer Meldung ab.
-- **Syslog-Alternative**: `--mode syslog` (rsyslog → UDP/TCP, Standard-Port 514) statt HTTPS.
-
-#### Parameter (Kurzform)
-| Parameter | Env-Variable | Bedeutung |
-|---|---|---|
-| `--fqdn <name>` | `LOGBOT_FQDN` | Server-FQDN (Pflicht bei https) |
-| `--token <tok>` | `LOGBOT_TOKEN` | Agent-Token (Pflicht bei https) |
-| `--mode https\|syslog` | `LOGBOT_MODE` | Modus (Standard `https`) |
-| `--port <n>` | `LOGBOT_PORT` | Port (https=443, syslog=514) |
-| `--ip <ip>` | `LOGBOT_IP` | Optionale IP als Fallback |
-| `--min-level info\|warning\|error` | `LOGBOT_MINLEVEL` | Ab welchem Level gesendet wird |
-| `--insecure` | `LOGBOT_INSECURE=true` | Selbstsignierte TLS-Zerts akzeptieren |
-| `--yes` / `--unattended` | – | Keine Rückfragen, alles Default |
-| `--timeout <sek>` | `LOGBOT_TIMEOUT` | Wartezeit je Abfrage (Standard 5) |
-
-`sudo bash install-linux.sh --help` zeigt die vollständige Übersicht.
-
-#### FQDN/Token fest im Skript hinterlegen (optional)
-Am Anfang von `install-linux.sh` stehen auskommentierte Platzhalter. Zum Aktivieren einfach das führende `#` entfernen und den Wert setzen – danach läuft `sudo bash install-linux.sh` voll automatisch ohne Eingabe:
 ```bash
-#PLACEHOLDER_FQDN="logbot.example.com"
-#PLACEHOLDER_TOKEN="hier-agent-token-eintragen"
-#PLACEHOLDER_MODE="https"
-```
-Vorrang: **Parameter > Umgebungsvariable > Platzhalter > interaktive Abfrage > Default**.
-
-> HTTPS ist auch der saubere Weg hinter einem Reverse-Proxy (z. B. Nginx Proxy Manager): rohes Syslog (514) wird von HTTP-Proxies nicht weitergeleitet, HTTPS über den FQDN dagegen schon. Für HTTPS im LogBot-Web-UI unter „Einstellungen → Reverse Proxy & TLS" FQDN + Zertifikat konfigurieren.
-
-### Windows
-1. Archiv entpacken (z.B. nach `C:\Temp\logbot-agent`)
-2. Rechtsklick auf `install-windows.bat` → „Als Administrator ausführen“
-3. Server-Adresse eingeben
-4. Fertig!
-
-Oder via PowerShell (als Admin):
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process
-.\install-windows.ps1
+curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-linux.sh \
+  | sudo bash -s -- --mode syslog --fqdn logbot.example.com --port 514 --yes
 ```
 
-## Was wird installiert?
+| Aktion | Befehl |
+|--------|--------|
+| Testnachrichten senden | `sudo bash install-linux.sh test` |
+| Deinstallieren (nur lokal) | `sudo bash install-linux.sh uninstall` |
+| Deinstallieren **inkl. Server-Eintrag und Logs** | `sudo bash install-linux.sh uninstall-purge` |
 
-### Linux
-**Syslog-Modus:**
-- Konfigurationsdatei: `/etc/rsyslog.d/99-logbot.conf`
-- Nutzt den vorhandenen rsyslog-Dienst
-- Keine zusätzliche Software
+**Optionen:** `--fqdn` · `--token` · `--ip` · `--port` · `--mode https\|syslog` ·
+`--min-level info\|warning\|error` · `--insecure` · `--yes` · `--timeout <s>`
+(alle auch als `LOGBOT_*`-Umgebungsvariable).
 
-**HTTPS-Modus (Standard):** – alles unter `/opt/logbot-agent/*`
-- Agent-Script: `/opt/logbot-agent/logbot_agent.py`
-- Konfiguration: `/opt/logbot-agent/config.json` (Rechte 600, enthält den Token)
-- Journal-Cursor: `/opt/logbot-agent/cursor`
-- systemd-Dienst: `/etc/systemd/system/logbot-agent.service` (läuft als root, liest journald)
-- Nur Python-Standardbibliothek – keine externen Pakete
+Alles liegt unter `/opt/logbot-agent/`, der Dienst heißt `logbot-agent`:
 
-### Windows
-- Installation: `C:\ProgramData\LogBot-Agent\`
-- Scheduled Task: "LogBotAgent" (läuft als SYSTEM)
-- Reines PowerShell-Script
-
-## Test
-
-### Linux
 ```bash
-# Via Installer (erkennt Syslog- bzw. HTTPS-Installation automatisch)
-sudo bash install-linux.sh test
-
-# Syslog-Modus zusätzlich manuell testbar
-logger -t test "Hallo LogBot"
-
-# HTTPS-Dienst prüfen
 systemctl status logbot-agent
 journalctl -u logbot-agent -f
 ```
 
-Hinweis: Nach einer frischen Server-Installation läuft LogBot zunächst nur über HTTP. HTTPS (Let’s Encrypt oder eigenes Zertifikat) kann im LogBot-Web-UI unter „Einstellungen → Reverse Proxy & TLS“ aktiviert werden. Für HTTPS-Agenten unbedingt FQDN + Zertifikat konfigurieren.
+---
 
-### Windows (PowerShell als Admin)
+## Windows — Einzeiler
+
+PowerShell **als Administrator**:
+
 ```powershell
-.\install-windows.ps1 -Test
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1))) -Action install -Fqdn logbot.example.com -Token DEIN-AGENT-TOKEN -Yes
 ```
+
+> **Warum diese Schreibweise und nicht `irm … | iex`?**
+> Eine Pipeline reicht nur Text weiter — Parameter kommen dabei nicht an.
+> `[scriptblock]::Create` macht aus dem geholten Text einen echten Skriptblock,
+> und der nimmt Parameter entgegen wie eine Funktion.
+
+**Ohne Parameter** erscheint das gewohnte Menü:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/install-windows.ps1)))
+```
+
+| Aktion | Befehl |
+|--------|--------|
+| Testnachrichten | `-Action test` |
+| Deinstallieren (nur lokal) | `-Action uninstall -Yes` |
+| Deinstallieren **inkl. Server-Eintrag und Logs** | `-Action uninstall -PurgeServer -Yes` |
+
+**Parameter:** `-Action install\|test\|uninstall` · `-Fqdn` · `-ServerIP` ·
+`-ServerPort` · `-Token` · `-Mode https\|syslog` · `-MinLevel` · `-Insecure` ·
+`-Yes` · `-PurgeServer`
+
+Installation unter `%ProgramData%\LogBot-Agent`, Ausführung als geplante Aufgabe
+`LogBotAgent` unter `SYSTEM`:
+
+```powershell
+Get-ScheduledTask -TaskName LogBotAgent
+```
+
+### MSI-Paket?
+
+Noch nicht dabei. Der PowerShell-Einzeiler deckt dasselbe ab und lässt sich per
+GPO, Intune oder Softwareverteilung ausrollen — ohne Signaturkette und ohne
+Paketpflege bei jeder Version. Für eine unbeaufsichtigte Verteilung genügt:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm <URL>))) -Action install -Fqdn logbot.example.com -Token XXX -Yes"
+```
+
+---
+
+## Agent-Token
+
+Im Web-UI unter **Einstellungen → Agent-Token**. Ein Token gilt für beliebig
+viele Rechner; wer sie trennen will, legt mehrere an. Ein zurückgezogener Token
+sperrt sofort alle Agents, die ihn benutzen.
+
+---
+
+## Deinstallieren — was passiert auf dem Server?
+
+Das war lange die unangenehme Stelle: Der Agent verschwand vom Rechner, auf dem
+Server blieb das Gerät samt Logs stehen.
+
+Jetzt merkt sich jeder Agent beim ersten Senden die **Gerätenummer**, die der
+Server zurückmeldet (`/opt/logbot-agent/agent_id` bzw.
+`%ProgramData%\LogBot-Agent\agent_id`). Beim vollständigen Deinstallieren nennt
+er genau diese Nummer — der Server räumt dann **exakt diesen Eintrag** ab und
+nicht den eines gleichnamigen Rechners.
+
+Zusätzlich gehen alle weiteren Einträge desselben Hostnamens mit. Das ist
+Absicht: Wechselt ein Rechner die IP (DHCP, NAT, Umzug), legt der Server jedes
+Mal einen neuen Eintrag an. Ohne diesen Schritt blieben die alten als
+Karteileichen liegen.
+
+Die Zuordnung läuft vom Genauesten zum Ungenauesten — welcher Weg gegriffen hat,
+steht in der Antwort (`matched_by`):
+
+1. `agent_id` — die gemerkte Nummer
+2. `mac_address`
+3. `hostname` + `ip_address`
+4. `hostname` allein
+
+Ist der Server beim Deinstallieren nicht erreichbar, wird **nicht gewartet**
+(20 s Zeitlimit) — es kommt ein Hinweis, das Gerät im Web-UI unter *Geräte* von
+Hand zu löschen.
+
+---
+
+## Fehlersuche
+
+| Symptom | Ursache und Abhilfe |
+|---------|---------------------|
+| Installer bleibt stehen | Behoben: Rückfragen haben jetzt ein Zeitlimit (60 s, `LOGBOT_ASK_TIMEOUT`), ohne Terminal wird gar nicht gefragt. `--yes` überspringt alles. |
+| Deinstallation hängt | Behoben: `systemctl stop` bekommt 20 s, dann wird der Dienst abgeschossen; der Server-Aufruf hat 20 s Zeitlimit. |
+| `HTTP 401` beim Senden | Token stimmt nicht oder wurde zurückgezogen. Im Web-UI neu holen. |
+| Keine Logs, Dienst läuft | `journalctl -u logbot-agent -f` ansehen. Meist DNS oder eine Firewall auf 443. |
+| Zertifikat wird abgelehnt | Bei eigener CA: `--insecure` bzw. `-Insecure`. Besser: die CA auf dem Rechner bekannt machen. |
+| Gerät steht doppelt im Web-UI | Der Rechner hat die IP gewechselt. Einmal `uninstall-purge` räumt alle Einträge des Hostnamens ab. |
+
+---
+
+## Verwandte Dokumente
+
+- [Installation des Servers](../docs/install/README.md)
+- [API und Ingest](../docs/api/README.md)
+- [Änderungen an den Agents](../CHANGELOG/agents.md)

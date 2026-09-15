@@ -1,25 +1,40 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.08.14.12.00.00
 # Changelog:   ../../../CHANGELOG/backend.md
-# Beschreibung: LogBot - Patchmanagement: Stand pruefen, Update, Rueckfall
+# Beschreibung: LogBot - Patchmanagement: Stand pruefen, Release waehlen,
+#               Update, Rueckfall, Sofortmeldung bei neuem Stand
 # ==============================================================================
 """
 Endpunkte fuer den Bereich "Updates".
 
-Alles hier ist Administratoren vorbehalten. Update und Rueckfall greifen tief
-ins System ein, deshalb muss die Oberflaeche zusaetzlich ein Bestaetigungswort
-mitschicken - ein versehentlicher Klick loest damit kein Update aus.
+Alles hier ist Administratoren vorbehalten - mit einer Ausnahme: der
+GitHub-Webhook. Der kommt von aussen und weist sich stattdessen mit einer
+HMAC-Signatur aus (Secret aus der .env). Ohne gesetztes Secret nimmt der Server
+gar keine Webhook-Meldung an.
+
+Update und Rueckfall greifen tief ins System ein. Deshalb zwei Sperren
+hintereinander:
+
+1. ein Bestaetigungswort im Rumpf ('UPDATE' / 'ROLLBACK') - gegen den
+   versehentlichen Klick;
+2. die beantwortete Sicherungsfrage (`backup`) - gegen den Datenverlust.
 """
 
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import get_current_admin
 from .. import updater
+from ..auth import admin_from_token, get_current_admin
+from ..database import get_db
+from ..events import bus
+from ..guard import BackupDecision, ensure_backup_decision
+from ..limiter import limiter
 
 logger = logging.getLogger("logbot.updates")
 
@@ -27,17 +42,38 @@ router = APIRouter(prefix="/api/updates", tags=["Updates"])
 
 
 class UpdateRequest(BaseModel):
-    """Bestaetigung und Wunsch nach einem Datenbank-Abzug."""
+    """Bestaetigung, Sicherungsentscheidung und - optional - ein Ziel-Release."""
     confirm: str = Field(..., description="Muss 'UPDATE' lauten")
+    # Der alte Schalter bleibt: er steuert den zusaetzlichen pg_dump, den das
+    # Wartungsskript auf dem Host anlegt (unabhaengig von der ZIP-Sicherung).
     database_backup: bool = True
+    ref: str = Field(default="", description="Release/Tag/Commit; leer = eingestellter Kanal")
+    allow_downgrade: bool = Field(
+        default=False,
+        description="Auch einspielen, wenn das Ziel aelter ist als der installierte Stand")
+    backup: Optional[BackupDecision] = None
 
 
 class RollbackRequest(BaseModel):
-    """Bestaetigung und - optional - die gewuenschte Sicherung."""
+    """Bestaetigung, Sicherungsentscheidung und - optional - die Sicherung."""
     confirm: str = Field(..., description="Muss 'ROLLBACK' lauten")
-    backup: str = ""
+    backup_name: str = Field(default="", alias="backup_dir",
+                             description="Name der Sicherung auf dem Host; leer = neueste")
+    backup: Optional[BackupDecision] = None
+
+    model_config = {"populate_by_name": True}
 
 
+class ChannelRequest(BaseModel):
+    channel: str = Field(..., description="stable | edge | pinned")
+    ref: str = Field(default="", description="Release/Tag bei 'pinned'")
+    auto_offer: bool = Field(default=True,
+                             description="Neuen Stand von selbst anbieten")
+
+
+# =============================================================================
+# Stand pruefen
+# =============================================================================
 @router.get("/status")
 async def get_status(force: bool = Query(False, description="GitHub erneut abfragen"),
                      _=Depends(get_current_admin)):
@@ -48,7 +84,11 @@ async def get_status(force: bool = Query(False, description="GitHub erneut abfra
 @router.post("/check")
 async def check_now(_=Depends(get_current_admin)):
     """Fragt GitHub sofort erneut ab (umgeht den Zwischenspeicher)."""
-    return await updater.update_status(force=True)
+    status = await updater.update_status(force=True)
+    # Kam bei dieser Gelegenheit etwas Neues heraus, sollen es auch die anderen
+    # offenen Fenster erfahren.
+    await updater.announce_if_new(reason="manual-check", force_check=False)
+    return status
 
 
 @router.get("/log")
@@ -57,51 +97,157 @@ async def get_log(lines: int = Query(200, ge=10, le=2000), _=Depends(get_current
     return {"lines": await updater.read_run_log(lines=lines)}
 
 
-@router.post("/apply")
-async def apply_update(data: UpdateRequest, _=Depends(get_current_admin)):
-    """Spielt den Stand von GitHub ein.
+# =============================================================================
+# Release-Auswahl
+# =============================================================================
+@router.get("/releases")
+async def releases(force: bool = Query(False), _=Depends(get_current_admin)):
+    """Welche Releases gibt es — und welches fährt dieser Server?"""
+    data = await updater.list_releases(force=force)
+    data["current_channel"] = await updater.load_channel()
+    data["target_ref"] = await updater.resolve_target_ref(data["current_channel"])
+    return data
 
-    Der eigentliche Lauf passiert auf dem Host - dieser Aufruf kehrt sofort
-    zurueck. Waehrend des Updates ist die Oberflaeche kurz nicht erreichbar.
+
+@router.put("/channel")
+async def set_channel(data: ChannelRequest, _=Depends(get_current_admin)):
+    """Legt fest, welchen Stand dieser Server fahren soll."""
+    try:
+        config = await updater.save_channel(data.channel, data.ref, data.auto_offer)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"channel": config, "status": await updater.update_status(force=True)}
+
+
+# =============================================================================
+# Sofortmeldung: Ereignisstrom und GitHub-Webhook
+# =============================================================================
+@router.get("/stream")
+async def stream(token: str = Query(..., description="Access-Token eines Admins")):
+    """Offener Kanal zur Oberfläche (Server-Sent Events).
+
+    Darüber kommt der Hinweis auf einen neuen Stand in dem Moment an, in dem der
+    Server ihn kennt — ohne dass die Seite dafür nachfragen muss.
+
+    Der Token kommt als Abfrageparameter statt im Kopf: `EventSource` im Browser
+    kann keine eigenen Kopfzeilen mitschicken. Geprüft wird er genauso streng.
+    """
+    if not await admin_from_token(token):
+        raise HTTPException(status_code=401,
+                            detail="Nicht angemeldet oder keine Administratorrechte.")
+
+    return StreamingResponse(
+        bus.stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            # Caddy puffert nicht, andere Proxys schon - das schaltet es ab.
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/webhook")
+@limiter.limit("60/minute")
+async def github_webhook(request: Request):
+    """Nimmt die Push-Meldung von GitHub entgegen.
+
+    Öffentlich erreichbar, aber nicht offen: ohne gültige HMAC-Signatur (und
+    ohne gesetztes LOGBOT_WEBHOOK_SECRET) wird nichts angenommen.
+    """
+    body = await request.body()
+    signature = request.headers.get("X-Hub-Signature-256", "")
+
+    if not updater.verify_webhook_signature(body, signature):
+        # Bewusst dieselbe Antwort für "kein Secret gesetzt" und "falsch
+        # signiert": von außen soll nicht erkennbar sein, welches von beidem.
+        raise HTTPException(status_code=401, detail="Signatur fehlt oder passt nicht.")
+
+    event = request.headers.get("X-GitHub-Event", "")
+    if event == "ping":
+        return {"accepted": True, "pong": True}
+    if event not in ("push", "release", "create"):
+        return {"accepted": False, "reason": f"Ereignis '{event}' wird nicht ausgewertet."}
+
+    logger.warning("GitHub-Webhook empfangen: %s", event)
+    result = await updater.announce_if_new(reason=f"webhook:{event}")
+    return {"accepted": True, **result}
+
+
+# =============================================================================
+# Update und Rueckfall
+# =============================================================================
+@router.post("/apply")
+async def apply_update(data: UpdateRequest, db: AsyncSession = Depends(get_db),
+                       admin=Depends(get_current_admin)):
+    """Spielt den gewählten Stand ein.
+
+    Der eigentliche Lauf passiert auf dem Host — dieser Aufruf kehrt sofort
+    zurück. Während des Updates ist die Oberfläche kurz nicht erreichbar.
     """
     if data.confirm != "UPDATE":
         raise HTTPException(status_code=400,
-                            detail="Bestaetigung fehlt: 'confirm' muss 'UPDATE' lauten.")
+                            detail="Bestätigung fehlt: 'confirm' muss 'UPDATE' lauten.")
 
     status = await updater.update_status()
     if not status["local"].get("host_access"):
         raise HTTPException(
             status_code=409,
-            detail=("Kein Zugriff auf den Host. Das Update ueber die Oberflaeche braucht ein "
+            detail=("Kein Zugriff auf den Host. Das Update über die Oberfläche braucht ein "
                     "Backend mit privileged/pid:host (Standard-docker-compose.yml). "
                     "Alternativ per Kommandozeile: " + status["oneliner"]),
         )
 
-    result = await updater.start_run("apply", database_backup=data.database_backup)
+    # Zeigt der Kanal auf einen älteren Stand als den installierten, wäre das
+    # Einspielen ein Rückschritt — meist, weil für den aktuellen Stand noch kein
+    # Release angelegt wurde. Das passiert nicht aus Versehen.
+    if status.get("is_downgrade") and not data.ref.strip() and not data.allow_downgrade:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"{status['reason']} Einspielen würde den Server zurückfahren. "
+                    f"Entweder ein Release für den aktuellen Stand anlegen, den Kanal "
+                    f"auf '{updater.REPO_BRANCH}' stellen — oder, wenn der Rückschritt "
+                    f"gewollt ist, 'allow_downgrade' setzen."),
+        )
+
+    # Erst sichern, dann anfassen. Scheitert die Sicherung, läuft nichts an.
+    pre = await ensure_backup_decision(db, data.backup, "Update", created_by=admin.username)
+
+    target = data.ref.strip() or status.get("target_ref", "")
+    result = await updater.start_run("apply", database_backup=data.database_backup, ref=target)
     if not result.get("started"):
         raise HTTPException(status_code=409, detail=result.get("error", "Start fehlgeschlagen"))
-    logger.warning("Update ueber die Oberflaeche gestartet (Datenbank-Abzug: %s)",
-                   data.database_backup)
+
+    logger.warning("Update gestartet von %s (Ziel: %s, Datenbank-Abzug: %s, Sicherung: %s)",
+                   admin.username, target or "Zweig", data.database_backup, pre.get("created"))
+    result["pre_backup"] = pre
+    result["ref"] = target
     return result
 
 
 @router.post("/rollback")
-async def rollback(data: RollbackRequest, _=Depends(get_current_admin)):
-    """Faehrt auf eine vorherige Sicherung zurueck."""
+async def rollback(data: RollbackRequest, db: AsyncSession = Depends(get_db),
+                   admin=Depends(get_current_admin)):
+    """Fährt auf eine vorherige Sicherung des Wartungsskripts zurück."""
     if data.confirm != "ROLLBACK":
         raise HTTPException(status_code=400,
-                            detail="Bestaetigung fehlt: 'confirm' muss 'ROLLBACK' lauten.")
+                            detail="Bestätigung fehlt: 'confirm' muss 'ROLLBACK' lauten.")
 
     backups = await updater.list_backups()
     if not backups:
         raise HTTPException(status_code=404,
-                            detail="Es gibt keine Sicherung, auf die zurueckgefallen werden koennte.")
-    if data.backup and data.backup not in [b["name"] for b in backups]:
-        raise HTTPException(status_code=404, detail=f"Sicherung '{data.backup}' gibt es nicht.")
+                            detail="Es gibt keine Sicherung, auf die zurückgefallen werden könnte.")
+    if data.backup_name and data.backup_name not in [b["name"] for b in backups]:
+        raise HTTPException(status_code=404, detail=f"Sicherung '{data.backup_name}' gibt es nicht.")
 
-    result = await updater.start_run("rollback", backup_name=data.backup)
+    pre = await ensure_backup_decision(db, data.backup, "Rückfall", created_by=admin.username)
+
+    result = await updater.start_run("rollback", backup_name=data.backup_name)
     if not result.get("started"):
         raise HTTPException(status_code=409, detail=result.get("error", "Start fehlgeschlagen"))
-    logger.warning("Rueckfall ueber die Oberflaeche gestartet (Sicherung: %s)",
-                   data.backup or "neueste")
+
+    logger.warning("Rückfall gestartet von %s (Sicherung: %s)",
+                   admin.username, data.backup_name or "neueste")
+    result["pre_backup"] = pre
     return result

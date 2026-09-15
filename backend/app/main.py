@@ -26,13 +26,20 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from . import archiving
 from . import fritzbox
+from . import shell
+from . import updater
 from .config import settings, validate_security_settings
 from .database import get_db, async_session, engine
 from .limiter import limiter, client_ip as real_client_ip
 from .models import Webhook, Log, Agent, AgentToken
 from sqlalchemy import func
 from .schemas import LogResponse, LogDetailResponse, LogIngestRequest, LogIngestResponse
-from .routes import auth_router, mfa_router, health_router, users_router, agents_router, agent_tokens_router, logs_router, webhooks_router, settings_router, database_router, ldap_router, archiving_router, passkey_router, diagnostics_router, updates_router, caddy as caddy_router, network as network_router
+from .routes import (auth_router, mfa_router, health_router, users_router, agents_router,
+                     agent_tokens_router, logs_router, webhooks_router, settings_router,
+                     database_router, ldap_router, archiving_router, passkey_router,
+                     diagnostics_router, updates_router, backup_router, mobile_router,
+                     ai_router, stacks_router, mail_router, shell_router,
+                     caddy as caddy_router, network as network_router)
 from .branding import branding_router
 
 # =============================================================================
@@ -101,6 +108,12 @@ app.include_router(archiving_router)
 app.include_router(passkey_router)
 app.include_router(diagnostics_router)
 app.include_router(updates_router)
+app.include_router(backup_router)
+app.include_router(mobile_router)
+app.include_router(ai_router)
+app.include_router(stacks_router)
+app.include_router(mail_router)
+app.include_router(shell_router)
 app.include_router(caddy_router.router)
 app.include_router(network_router.router)
 
@@ -534,7 +547,10 @@ async def ingest_logs(
         inserted = len((await db.execute(stmt)).scalars().all())
 
     await db.commit()
-    return LogIngestResponse(accepted=inserted, duplicates=len(data.events) - inserted)
+    # agent_id mitgeben: damit weiss der Agent, welcher Eintrag auf dem Server
+    # ihm gehoert, und kann sich beim Deinstallieren gezielt abmelden.
+    return LogIngestResponse(accepted=inserted, duplicates=len(data.events) - inserted,
+                             agent_id=agent.id)
 
 
 @app.get("/api")
@@ -778,3 +794,15 @@ async def start_background_tasks():
     asyncio.create_task(disk_monitor())
     asyncio.create_task(agent_retention_task())
     asyncio.create_task(archiving_task())
+    # Haelt Ausschau nach einem neuen Stand auf GitHub und meldet ihn sofort an
+    # alle offenen Oberflaechen (siehe app/updater.py -> watch_task).
+    asyncio.create_task(updater.watch_task())
+
+
+@app.on_event("shutdown")
+async def close_open_shells():
+    """Offene Terminal-Sitzungen beenden, damit keine Root-Shell verwaist zurueckbleibt."""
+    closed = shell.shutdown_all()
+    if closed:
+        logging.getLogger("logbot.shutdown").warning(
+            "%s offene Terminal-Sitzung(en) beim Herunterfahren beendet", closed)
