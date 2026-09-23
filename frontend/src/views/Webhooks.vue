@@ -9,7 +9,11 @@
   <div class="p-6">
     <div class="flex justify-between items-center mb-6">
       <h1 class="text-2xl font-bold" :style="{ color: 'var(--color-text-primary)' }">Webhooks</h1>
+      <!-- Anlegen und Ändern nur für Administratoren: ein Webhook gibt Logdaten
+           OHNE Anmeldung heraus, der Token in der Adresse genügt. Wer einen
+           anlegen darf, kann sich einen dauerhaften, offenen Abgriff bauen. -->
       <button
+        v-if="authStore.isAdmin"
         @click="showCreateModal = true"
         class="text-white px-4 py-2 rounded hover:opacity-90"
         :style="{ backgroundColor: 'var(--color-primary)' }"
@@ -94,9 +98,11 @@
           </div>
           <div class="flex gap-4">
             <button @click="testWebhook(webhook)" class="hover:underline" :style="{ color: 'var(--color-success)' }">Testen</button>
-            <button @click="regenerateToken(webhook)" class="hover:underline" :style="{ color: 'var(--color-warning)' }">Token erneuern</button>
-            <button @click="editWebhook(webhook)" class="hover:underline" :style="{ color: 'var(--color-primary)' }">Bearbeiten</button>
-            <button @click="deleteWebhook(webhook)" class="hover:underline" :style="{ color: 'var(--color-danger)' }">Löschen</button>
+            <template v-if="authStore.isAdmin">
+              <button @click="regenerateToken(webhook)" class="hover:underline" :style="{ color: 'var(--color-warning)' }">Token erneuern</button>
+              <button @click="editWebhook(webhook)" class="hover:underline" :style="{ color: 'var(--color-primary)' }">Bearbeiten</button>
+              <button @click="deleteWebhook(webhook)" class="hover:underline" :style="{ color: 'var(--color-danger)' }">Löschen</button>
+            </template>
           </div>
         </div>
       </div>
@@ -104,12 +110,17 @@
       <div v-if="!webhooks.length" class="rounded-lg shadow p-12 text-center" :style="cardStyle">
         <p :style="{ color: 'var(--color-text-muted)' }">Keine Webhooks vorhanden</p>
         <button
+          v-if="authStore.isAdmin"
           @click="showCreateModal = true"
           class="mt-4 hover:underline"
           :style="{ color: 'var(--color-primary)' }"
         >
           Ersten Webhook erstellen
         </button>
+        <p v-else class="mt-2 text-sm" :style="{ color: 'var(--color-text-muted)' }">
+          Anlegen darf sie ein Administrator — ein Webhook gibt Logdaten ohne
+          Anmeldung heraus.
+        </p>
       </div>
     </div>
     

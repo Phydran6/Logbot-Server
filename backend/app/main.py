@@ -9,10 +9,9 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import hashlib
-import secrets
+# secrets wird nicht mehr gebraucht: Schluessel wuerfelt app/tokens.py
 import logging
 import asyncio
-import shutil
 import os
 from fastapi import FastAPI, HTTPException, Query, Header, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,8 +24,11 @@ from sqlalchemy import select, desc, delete, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from . import archiving
+from . import diskguard
 from . import fritzbox
+from . import journal
 from . import shell
+from . import tokens
 from . import updater
 from .config import settings, validate_security_settings
 from .database import get_db, async_session, engine
@@ -39,6 +41,7 @@ from .routes import (auth_router, mfa_router, health_router, users_router, agent
                      database_router, ldap_router, archiving_router, passkey_router,
                      diagnostics_router, updates_router, backup_router, mobile_router,
                      ai_router, stacks_router, mail_router, shell_router,
+                     journal_router, containers_router, sso_router, about_router,
                      caddy as caddy_router, network as network_router)
 from .branding import branding_router
 
@@ -53,6 +56,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # Ein Reverse Proxy mit TLS davor - dann soll der Browser gar nicht erst
+        # versuchen, unverschluesselt anzuklopfen. Nur setzen, wenn die Anfrage
+        # wirklich ueber HTTPS kam: sonst sperrt man sich auf einer reinen
+        # HTTP-Installation selbst aus.
+        forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        if forwarded_proto == "https":
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return response
 
 
@@ -76,15 +87,20 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # GZip für alle Responses > 1 KB
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
-# CORS: erlaubte Origins aus Konfiguration, niemals Credentials + Wildcard
-_cors_origins = settings.cors_origins_list or ["*"]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=False,      # Bearer-Token in Header, kein Cookie-basiertes Auth
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
-)
+# CORS. Frueher stand hier als Vorgabe ein "*" - jede fremde Seite durfte damit
+# Antworten dieser API lesen. Gebraucht wird das nicht: Oberflaeche und API
+# liegen hinter demselben Caddy, also derselben Herkunft. Ohne Eintrag in
+# CORS_ORIGINS wird die Middleware deshalb gar nicht erst eingehaengt - das ist
+# die engste und zugleich die richtige Einstellung fuer den Regelfall.
+_cors_origins = settings.cors_origins_list
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=False,      # Bearer-Token in Header, kein Cookie-basiertes Auth
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+    )
 
 # Security-Headers zuletzt (werden nach CORS-Middleware eingefügt)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -114,6 +130,10 @@ app.include_router(ai_router)
 app.include_router(stacks_router)
 app.include_router(mail_router)
 app.include_router(shell_router)
+app.include_router(journal_router)
+app.include_router(containers_router)
+app.include_router(sso_router)
+app.include_router(about_router)
 app.include_router(caddy_router.router)
 app.include_router(network_router.router)
 
@@ -127,32 +147,119 @@ async def startup_security_check():
 
 
 @app.on_event("startup")
-async def ensure_default_agent_token():
+async def ensure_token_schema():
+    """Bringt die Schluesseltabelle auf den Stand dieser Fassung.
+
+    Was dabei passiert und warum es nichts kaputt macht: die neuen Spalten
+    kommen dazu, und fuer jeden vorhandenen Klartext-Schluessel wird der
+    Abdruck nachgetragen. Der Klartext bleibt zunaechst stehen - sonst waere
+    ein Schluessel, den jemand noch nirgends notiert hat, unwiederbringlich
+    weg. Die Oberflaeche zeigt solche Schluessel als "ungeschuetzt" an und
+    bietet einen Knopf zum Ueberfuehren.
+
+    Bestehende Agents merken davon nichts: ihr Schluessel gilt unveraendert.
+    """
     logger = logging.getLogger("logbot.startup")
     try:
-        async with async_session() as session:
-            # Schema-Sicherung: device_type Column hinzufügen falls fehlt
-            try:
-                await session.execute(text("ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS device_type VARCHAR(50)"))
-                await session.commit()
-            except Exception:
-                await session.rollback()
-            existing_global = await session.execute(
-                select(AgentToken.id).where(AgentToken.name == "global-agent")
-            )
-            if existing_global.scalar_one_or_none():
-                return
-            default_token = AgentToken(
-                name="global-agent",
-                token=secrets.token_hex(32),
-                device_type=None,
-                is_active=True,
-            )
-            session.add(default_token)
-            await session.commit()
-            logger.info("Default agent token created")
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            for statement in (
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS device_type VARCHAR(50)",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS token_hash VARCHAR(64)",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS prefix VARCHAR(24)",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'agent'",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS agent_id INTEGER",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS max_uses INTEGER",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS use_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS allowed_cidrs TEXT",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS last_used_ip VARCHAR(45)",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS created_by VARCHAR(50)",
+                "ALTER TABLE agent_tokens ADD COLUMN IF NOT EXISTS note TEXT",
+                # Neue Schluessel speichern keinen Klartext mehr - die Spalte
+                # muss also leer bleiben duerfen.
+                "ALTER TABLE agent_tokens ALTER COLUMN token DROP NOT NULL",
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tokens_hash ON agent_tokens(token_hash) "
+                "WHERE token_hash IS NOT NULL",
+                "CREATE INDEX IF NOT EXISTS idx_agent_tokens_agent ON agent_tokens(agent_id)",
+            ):
+                try:
+                    await conn.exec_driver_sql(statement)
+                except Exception as exc:
+                    logger.debug("Migration übersprungen (%s): %s", statement[:60], exc)
+        logger.info("agent_tokens schema ready")
     except Exception as exc:
-        logger.warning("Default agent token init skipped: %s", exc)
+        logger.warning("agent_tokens migration skipped: %s", exc)
+
+    # Abdruecke fuer den Altbestand nachtragen und den Generalschluessel
+    # kennzeichnen. Danach funktioniert die Pruefung fuer alle gleich.
+    try:
+        async with async_session() as session:
+            rows = (await session.execute(
+                select(AgentToken).where(AgentToken.token.is_not(None))
+            )).scalars().all()
+            for row in rows:
+                if not row.token_hash:
+                    row.token_hash = tokens.digest(row.token)
+                if not row.prefix:
+                    row.prefix = row.token[:10]
+                if row.name == tokens.GLOBAL_TOKEN_NAME:
+                    row.kind = "global"
+                elif not row.kind:
+                    row.kind = "agent"
+            if rows:
+                await session.commit()
+                logger.warning(
+                    "%s Schlüssel aus einer früheren Fassung gefunden. Sie gelten weiter, "
+                    "liegen aber noch im Klartext in der Datenbank — unter "
+                    "Sicherheit → Schlüssel lassen sie sich überführen.", len(rows))
+
+            _, plain = await tokens.ensure_global(session, created_by="system")
+            await session.commit()
+            if plain:
+                # Der einzige Moment, in dem ein Schluessel je im Protokoll steht:
+                # bei der Erstinstallation. Sonst kaeme niemand an den ersten
+                # Schluessel heran.
+                logger.warning(
+                    "Generalschlüssel angelegt (nur jetzt sichtbar): %s", plain)
+    except Exception as exc:
+        logger.warning("Schlüssel-Migration übersprungen: %s", exc)
+
+
+@app.on_event("startup")
+async def ensure_system_events_table():
+    """Das Systemtagebuch - eigene Tabelle, damit ein Aufraeumlauf sie nicht trifft."""
+    logger = logging.getLogger("logbot.startup")
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS system_events (
+                    id SERIAL PRIMARY KEY,
+                    at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    category VARCHAR(40) NOT NULL,
+                    level VARCHAR(20) NOT NULL DEFAULT 'info',
+                    event VARCHAR(80) NOT NULL,
+                    message TEXT NOT NULL,
+                    actor VARCHAR(100),
+                    source_ip VARCHAR(45),
+                    target VARCHAR(200),
+                    ok BOOLEAN NOT NULL DEFAULT TRUE,
+                    duration_ms INTEGER,
+                    detail JSONB DEFAULT '{}'
+                )
+            """)
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_system_events_at ON system_events(at DESC)")
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_system_events_category ON system_events(category)")
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_system_events_level ON system_events(level)")
+        logger.info("system_events ready")
+    except Exception as exc:
+        logger.warning("system_events migration skipped: %s", exc)
 
 
 @app.on_event("startup")
@@ -429,6 +536,7 @@ def _agent_type_fallback(token_type: Optional[str], user_agent: Optional[str]) -
 
 
 @app.post("/api/agents/ingest", response_model=LogIngestResponse, tags=["Agent Ingest"])
+@limiter.limit("600/minute")
 async def ingest_logs(
     data: LogIngestRequest,
     request: Request,
@@ -445,18 +553,22 @@ async def ingest_logs(
     derselben Ereignisse (die FRITZ!Box liefert immer ihren kompletten Puffer) werden
     von der Datenbank verworfen statt doppelt gespeichert.
     """
+    source_ip = real_client_ip(request)
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer Token erforderlich")
-    token_value = authorization[7:]
 
-    result = await db.execute(
-        select(AgentToken).where(AgentToken.token == token_value, AgentToken.is_active == True)
-    )
-    agent_token = result.scalar_one_or_none()
+    agent_token, deny_reason = await tokens.resolve(db, authorization[7:], source_ip)
     if not agent_token:
+        # Nach aussen immer dieselbe Antwort - von dort soll nicht erkennbar
+        # sein, ob ein Schluessel unbekannt, abgelaufen oder nur aus dem
+        # falschen Netz vorgelegt wurde. Der Grund steht im Systemtagebuch.
+        await journal.record(
+            db, category="token", event="ingest.rejected", level="warning",
+            message=f"Lieferung von '{data.hostname}' abgewiesen: {deny_reason}",
+            actor="agent", source_ip=source_ip, target=data.hostname, ok=False)
         raise HTTPException(status_code=401, detail="Ungültiger Agent-Token")
 
-    device_ip = (data.ip_address or "").strip() or real_client_ip(request)
+    device_ip = (data.ip_address or "").strip() or source_ip
     proxy_ip = request.client.host if request.client else None
     device_type = data.device_type or _agent_type_fallback(
         agent_token.device_type, request.headers.get("user-agent"))
@@ -491,6 +603,29 @@ async def ingest_logs(
             extra_data={"auth": "token", "token_name": agent_token.name})
         db.add(agent)
         await db.flush()
+
+    # Darf dieser Schluessel fuer dieses Geraet liefern? Der Generalschluessel
+    # darf fuer alle (das braucht z.B. ein Sammler, der die FRITZ!Box abfragt).
+    # Ein Geraeteschluessel darf nur fuer sein eigenes - sonst koennte ein
+    # uebernommener Arbeitsplatzrechner Logzeilen im Namen des
+    # Domaenencontrollers erfinden.
+    allowed, why = tokens.may_ingest(agent_token, data.hostname, agent.id)
+    if not allowed:
+        await db.rollback()
+        await journal.record(
+            db, category="token", event="ingest.denied", level="warning",
+            message=f"'{agent_token.name}' wollte für '{data.hostname}' liefern: {why}",
+            actor=agent_token.name, source_ip=source_ip, target=data.hostname, ok=False)
+        raise HTTPException(status_code=403, detail=why)
+
+    # Erste Lieferung eines frisch angemeldeten Geraeteschluessels: ab jetzt
+    # gehoert er zu diesem Geraet und zu keinem anderen mehr.
+    tokens.bind_to_agent(agent_token, agent.id)
+    # Sparsam: hoechstens einmal pro Minute. Bei jeder einzelnen Lieferung eine
+    # Zeile in agent_tokens zu schreiben, waere eine Schreiboperation, die
+    # niemandem nuetzt - fuer "wird dieser Schluessel noch benutzt?" reicht
+    # Minutengenauigkeit.
+    tokens.touch(agent_token, source_ip)
 
     is_fritzbox = (data.device_type or "").lower() == "fritzbox"
     now = datetime.utcnow()
@@ -559,133 +694,14 @@ async def root():
 
 
 # =============================================================================
-# Disk-Monitoring & Auto-Cleanup (3 Stufen: 80 / 90 / 95 %)
+# Plattenwaechter
 # =============================================================================
-DISK_CHECK_INTERVAL   = int(os.getenv("DISK_MONITOR_INTERVAL",        "300"))
-DISK_THRESHOLD_WARN   = float(os.getenv("DISK_USAGE_WARN",            "80"))   # Stufe 1: unnötiges bereinigen
-DISK_THRESHOLD_HIGH   = float(os.getenv("DISK_USAGE_HIGH",            "90"))   # Stufe 2: älteste Logs löschen
-DISK_THRESHOLD_CRIT   = float(os.getenv("DISK_USAGE_THRESHOLD",       "95"))   # Stufe 3: alles löschen
-DISK_MONITOR_PATH     = os.getenv("DISK_MONITOR_PATH",                "/")
-DISK_RETENTION_DAYS   = int(os.getenv("DISK_CLEANUP_RETENTION_DAYS",  "30"))
-
-
-def _current_disk_usage_pct() -> float:
-    usage = shutil.disk_usage(DISK_MONITOR_PATH)
-    return usage.used / usage.total * 100.0
-
-
-async def _vacuum(table: str, full: bool, logger: logging.Logger) -> None:
-    cmd = f"VACUUM (FULL, ANALYZE) {table}" if full else f"VACUUM (ANALYZE) {table}"
-    try:
-        async with engine.connect() as conn:
-            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
-            await conn.exec_driver_sql(cmd)
-        logger.info("Auto-cleanup: %s abgeschlossen", cmd)
-    except Exception as exc:
-        logger.error("Auto-cleanup VACUUM Fehler: %s", exc)
-
-
-# Stufe 1 – 80 %: Abgelaufene / verbrauchte App-Login-Tokens und sonstige Housekeeping-Daten löschen
-async def _cleanup_expired_tokens(logger: logging.Logger) -> int:
-    try:
-        from .models import AppLoginToken
-        async with async_session() as session:
-            r = await session.execute(
-                delete(AppLoginToken).where(
-                    (AppLoginToken.expires_at < datetime.utcnow()) |
-                    (AppLoginToken.used_at != None)  # noqa: E711
-                )
-            )
-            await session.commit()
-            n = r.rowcount or 0
-            if n:
-                logger.info("Auto-cleanup (80%%): %s abgelaufene App-Tokens gelöscht", n)
-            return n
-    except Exception as exc:
-        logger.error("Auto-cleanup Token-Cleanup Fehler: %s", exc)
-        return 0
-
-
-# Stufe 2 – 90 %: Älteste Logs löschen (nach globaler Retention-Einstellung) und Platz freigeben
-async def _cleanup_old_logs(logger: logging.Logger) -> int:
-    try:
-        async with async_session() as session:
-            # Retention-Tage aus Settings lesen (Fallback: DISK_RETENTION_DAYS)
-            from .models import Setting
-            s = (await session.execute(
-                select(Setting).where(Setting.key == "log_retention_days")
-            )).scalar_one_or_none()
-            days = DISK_RETENTION_DAYS
-            if s:
-                try:
-                    days = int(s.value)
-                except Exception:
-                    pass
-            cutoff = datetime.utcnow() - timedelta(days=days)
-            r = await session.execute(delete(Log).where(Log.timestamp < cutoff))
-            await session.commit()
-            n = r.rowcount if r.rowcount not in (None, -1) else 0
-            logger.warning("Auto-cleanup (90%%): %s Logs älter als %s Tage gelöscht", n, days)
-            return n
-    except Exception as exc:
-        logger.error("Auto-cleanup Log-Cleanup Fehler: %s", exc)
-        return 0
-
-
-# Stufe 3 – 95 %: Alle Logs per TRUNCATE löschen (schnellste Methode, gibt Speicher sofort frei)
-async def _truncate_logs(logger: logging.Logger) -> None:
-    try:
-        async with async_session() as session:
-            await session.execute(text("TRUNCATE TABLE logs RESTART IDENTITY"))
-            await session.commit()
-        logger.warning("Auto-cleanup (95%%): logs TRUNCATE ausgefuehrt")
-    except Exception as exc:
-        logger.error("Auto-cleanup TRUNCATE Fehler: %s", exc)
-
-
-async def disk_monitor():
-    logger = logging.getLogger("logbot.disk_monitor")
-    while True:
-        await asyncio.sleep(DISK_CHECK_INTERVAL)
-        try:
-            pct = _current_disk_usage_pct()
-        except Exception as exc:
-            logger.error("Disk-Check fehlgeschlagen: %s", exc)
-            continue
-
-        if pct < DISK_THRESHOLD_WARN:
-            continue
-
-        logger.warning("Disk %.1f%% – prüfe Auto-Cleanup-Stufen", pct)
-
-        # Stufe 1: ab 80 % – abgelaufene Tokens und Housekeeping-Daten löschen
-        if pct >= DISK_THRESHOLD_WARN:
-            await _cleanup_expired_tokens(logger)
-            await _vacuum("app_login_tokens", full=False, logger=logger)
-            try:
-                pct = _current_disk_usage_pct()
-            except Exception:
-                pass
-
-        # Stufe 2: ab 90 % – älteste Logs löschen + VACUUM FULL (gibt Speicher frei)
-        if pct >= DISK_THRESHOLD_HIGH:
-            await _cleanup_old_logs(logger)
-            await _vacuum("logs", full=True, logger=logger)
-            try:
-                pct = _current_disk_usage_pct()
-                logger.warning("Disk nach Stufe-2-Cleanup: %.1f%%", pct)
-            except Exception:
-                pass
-
-        # Stufe 3: ab 95 % – alles per TRUNCATE löschen + VACUUM FULL
-        if pct >= DISK_THRESHOLD_CRIT:
-            await _truncate_logs(logger)
-            await _vacuum("logs", full=True, logger=logger)
-            try:
-                pct = _current_disk_usage_pct()
-                logger.warning("Disk nach Stufe-3-Cleanup: %.1f%%", pct)
-            except Exception:
-                pass
+# Die Logik dazu steht in app/diskguard.py. Hier bleibt nur der Anschluss -
+# das Modul laesst sich so einzeln lesen und einzeln pruefen.
+#
+# Was sich gegenueber frueher geaendert hat, in einem Satz: es wird aufgeraeumt,
+# BEVOR es eng wird, in Haeppchen statt in einem Rutsch, und ein "alle Logs
+# weg" gibt es nicht mehr von selbst. Begruendung ausfuehrlich im Modul.
 
 
 # =============================================================================
@@ -754,6 +770,13 @@ async def agent_retention_task():
                 if total_deleted:
                     await session.commit()
                     logger.info("Agent-Retention: insgesamt %s Logs gelöscht", total_deleted)
+                    await journal.record(
+                        session, category="retention", event="agent.retention.auto",
+                        level="notice",
+                        message=(f"Geräte-Aufbewahrung: {total_deleted} Logzeilen von "
+                                 f"{len(agents)} Gerät(en) entfernt."),
+                        actor="system",
+                        detail={"deleted": total_deleted, "agents": len(agents)})
         except Exception as exc:
             logger.error("Agent-Retention-Task Fehler: %s", exc)
 
@@ -789,14 +812,54 @@ async def archiving_task():
             logger.error("Archivierungs-Task Fehler: %s", exc)
 
 
+async def housekeeping_task():
+    """Taeglich aufraeumen, was sonst still mitwaechst.
+
+    Bisher gab es das nur unter Druck - erst wenn die Platte voll lief. Das ist
+    die falsche Reihenfolge: Hausarbeit macht man, wenn Zeit dafuer ist.
+    """
+    logger = logging.getLogger("logbot.housekeeping")
+    while True:
+        await asyncio.sleep(24 * 3600)
+        try:
+            async with async_session() as session:
+                removed = await journal.prune(session)
+                if removed:
+                    logger.info("Systemtagebuch: %s alte Einträge entfernt", removed)
+        except Exception as exc:
+            logger.warning("Hausarbeit fehlgeschlagen: %s", exc)
+
+
+# Hintergrundaufgaben werden hier festgehalten. Ohne eine Referenz kann der
+# Garbage Collector eine laufende Aufgabe einsammeln - ein Fehler, der sich
+# erst Wochen spaeter als "der Waechter laeuft nicht mehr" zeigt.
+_background_tasks: set = set()
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 @app.on_event("startup")
 async def start_background_tasks():
-    asyncio.create_task(disk_monitor())
-    asyncio.create_task(agent_retention_task())
-    asyncio.create_task(archiving_task())
+    # Raeumt auf, BEVOR die Platte voll ist (app/diskguard.py).
+    _spawn(diskguard.watch_task())
+    _spawn(agent_retention_task())
+    _spawn(archiving_task())
+    _spawn(housekeeping_task())
     # Haelt Ausschau nach einem neuen Stand auf GitHub und meldet ihn sofort an
     # alle offenen Oberflaechen (siehe app/updater.py -> watch_task).
-    asyncio.create_task(updater.watch_task())
+    _spawn(updater.watch_task())
+
+    await journal.write(
+        category="system", event="server.started",
+        message=f"LogBot {settings.app_version} ist gestartet.",
+        actor="system",
+        detail={"version": settings.app_version,
+                "webshell": shell.ENABLED,
+                "disk_check_seconds": diskguard.CHECK_INTERVAL})
 
 
 @app.on_event("shutdown")
@@ -806,3 +869,9 @@ async def close_open_shells():
     if closed:
         logging.getLogger("logbot.shutdown").warning(
             "%s offene Terminal-Sitzung(en) beim Herunterfahren beendet", closed)
+    try:
+        await journal.write(category="system", event="server.stopped",
+                            message="LogBot fährt herunter.", actor="system",
+                            detail={"closed_shells": closed})
+    except Exception:                                               # defensiv
+        pass

@@ -26,6 +26,10 @@ from .ai import router as ai_router
 from .stacks import router as stacks_router
 from .mail import router as mail_router
 from .shell import router as shell_router
+from .journal import router as journal_router
+from .containers import router as containers_router
+from .sso import router as sso_router
+from .about import router as about_router
 from . import caddy
 from . import network
 
@@ -34,4 +38,5 @@ __all__ = ["auth_router", "mfa_router", "health_router", "users_router", "agents
            "database_router", "ldap_router", "archiving_router", "passkey_router",
            "diagnostics_router", "updates_router", "backup_router", "mobile_router",
            "ai_router", "stacks_router", "mail_router", "shell_router",
+           "journal_router", "containers_router", "sso_router", "about_router",
            "caddy", "network"]

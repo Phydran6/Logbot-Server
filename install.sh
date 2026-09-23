@@ -48,7 +48,7 @@ NC='\033[0m'
 # Konfiguration (Vorrang: Parameter > Umgebungsvariable > Default)
 # ==============================================================================
 
-LOGBOT_VERSION="2026.09.15.20.30.00"
+LOGBOT_VERSION="2026.09.23.10.00.00"
 
 INSTALL_DIR="${LOGBOT_DIR:-/opt/logbot}"
 REPO_URL="${LOGBOT_REPO:-https://github.com/Phydran6/Logbot-Server.git}"
@@ -66,12 +66,14 @@ GATE_DONE="false"
 NO_BUILD="false"                    # true => Images nicht neu bauen
 SKIP_PREFLIGHT="${LOGBOT_SKIP_PREFLIGHT:-false}"
 
-# Welche Zusatzdienste sollen mit? Komma-getrennt, z.B. "portainer,watchtower".
+# Welche Zusatzdienste sollen mit? Komma-getrennt, z.B. "portainer,tugtainer".
 # Leer = nur LogBot. Im manuellen Modus wird gefragt.
 ADDONS="${LOGBOT_ADDONS:-}"
 
 # Bekannte Zusatzdienste (muessen zu deploy/optional.yml passen).
-ALL_ADDONS="portainer watchtower n8n postfix"
+# Watchtower ist raus: es hat Container eigenmaechtig ausgetauscht. Tugtainer
+# nimmt seinen Platz ein und macht nur eines - nachsehen und melden.
+ALL_ADDONS="portainer tugtainer n8n openwebui postfix"
 
 SRC_DIR=""        # Quelle der Dateien (lokales Repo oder frischer Clone)
 TMP_CLONE=""      # temporaerer Clone, wird am Ende aufgeraeumt
@@ -160,7 +162,7 @@ Optionen (auch als Umgebungsvariable LOGBOT_*):
                      (LOGBOT_REF) - z.B. --ref v2026.09.10
   --with <liste>     Zusatzdienste, komma-getrennt (LOGBOT_ADDONS)
                      Möglich: ${ALL_ADDONS// /, }
-                     Beispiel: --with portainer,watchtower
+                     Beispiel: --with portainer,tugtainer
   --no-addons        Ausdrücklich ohne Zusatzdienste
   --skip-preflight   Systemprüfung überspringen (nicht empfohlen)
   --no-build         Images nicht neu bauen (nur starten)
@@ -168,10 +170,12 @@ Optionen (auch als Umgebungsvariable LOGBOT_*):
   --timeout <sek>    Wartezeit des Start-Gates  (LOGBOT_TIMEOUT) [${PROMPT_TIMEOUT}]
   --help, -h         Diese Hilfe
 
-Zusatzdienste:
+Zusatzdienste (alles fremde Images, laufen als logbot-ext-*):
   portainer    Container-Oberfläche im Browser
-  watchtower   hält die Images der Zusatzdienste aktuell
+  tugtainer    prüft, ob für die fremden Images Updates bereitliegen
+               (löst Watchtower ab: es meldet nur, es tauscht nicht selbst)
   n8n          Automatisierung (u.a. für die KI-Auswertung)
+  openwebui    KI-Oberfläche, auch für lokale Modelle (Ollama)
   postfix      Mailversand (konfiguriert wird er später im Web-UI)
 
   Sie laufen nur, wenn sie ausgewählt werden. Nachträglich lassen sie sich
@@ -266,9 +270,10 @@ choose_addons() {
     echo "  LogBot selbst ist gesetzt. Zusätzlich möglich:"
     echo ""
     echo "    1) Portainer    Container-Oberfläche im Browser"
-    echo "    2) Watchtower   hält die Images der Zusatzdienste aktuell"
+    echo "    2) Tugtainer    prüft, ob für die fremden Images Updates bereitliegen"
     echo "    3) n8n          Automatisierung, u.a. für die KI-Auswertung"
-    echo "    4) Postfix      Mailversand (Einstellungen später im Web-UI)"
+    echo "    4) Open WebUI   KI-Oberfläche, auch für lokale Modelle (Ollama)"
+    echo "    5) Postfix      Mailversand (Einstellungen später im Web-UI)"
     echo ""
     echo "  Mehrere Ziffern gehen: z.B. '1 2' oder '12'. Leer = nur LogBot."
     echo ""
@@ -279,9 +284,10 @@ choose_addons() {
 
     local picked=()
     [[ "$answer" == *1* ]] && picked+=("portainer")
-    [[ "$answer" == *2* ]] && picked+=("watchtower")
+    [[ "$answer" == *2* ]] && picked+=("tugtainer")
     [[ "$answer" == *3* ]] && picked+=("n8n")
-    [[ "$answer" == *4* ]] && picked+=("postfix")
+    [[ "$answer" == *4* ]] && picked+=("openwebui")
+    [[ "$answer" == *5* ]] && picked+=("postfix")
 
     # Auch Namen statt Ziffern zulassen - manche tippen lieber "portainer".
     if [[ ${#picked[@]} -eq 0 && -n "$answer" ]]; then
@@ -481,6 +487,19 @@ apply_addon_config() {
                     # gespeicherte Zugangsdaten waeren danach unlesbar.
                     set_env_value "$env_file" "N8N_ENCRYPTION_KEY" "$(generate_password)"
                     log_success "n8n-Zugang erzeugt (steht im Web-UI unter System -> Zusatzdienste)"
+                fi
+                ;;
+            tugtainer)
+                # Ohne gesetztes Geheimnis startet der Container nicht - und die
+                # Meldung von Compose hilft dabei niemandem weiter.
+                if ! grep -qE '^TUGTAINER_AGENT_SECRET=.+' "$env_file" 2>/dev/null; then
+                    set_env_value "$env_file" "TUGTAINER_AGENT_SECRET" "$(generate_password)"
+                fi
+                ;;
+            openwebui)
+                if ! grep -qE '^OPENWEBUI_SECRET_KEY=.+' "$env_file" 2>/dev/null; then
+                    set_env_value "$env_file" "OPENWEBUI_SECRET_KEY" "$(generate_password)"
+                    log_success "Open WebUI eingerichtet (erster Aufruf legt das Konto an)"
                 fi
                 ;;
             postfix)
@@ -758,8 +777,10 @@ print_summary() {
         for addon in "${SELECTED_ADDONS[@]}"; do
             case "$addon" in
                 portainer)  echo "  Portainer    http://${local_ip}:9000  (Benutzer: admin)" ;;
+                tugtainer)  echo "  Tugtainer    http://${local_ip}:9412  (prüft nur, tauscht nicht)" ;;
+                openwebui)  echo "  Open WebUI   http://${local_ip}:3000  (erster Aufruf legt das Konto an)" ;;
                 n8n)        echo "  n8n          http://${local_ip}:5678  (Benutzer: admin)" ;;
-                watchtower) echo "  Watchtower   läuft im Hintergrund, keine Oberfläche" ;;
+                watchtower) echo "  Watchtower   abgelöst durch Tugtainer - bitte entfernen" ;;
                 postfix)    echo "  Postfix      einzustellen im Web-UI unter System -> Mail" ;;
             esac
         done

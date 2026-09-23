@@ -12,21 +12,28 @@ den Namensraeumen des Host-Init gestartet - also **root auf dem Server**, nicht
 im Container. Ein Pseudo-Terminal haengt daran, und die Bytes gehen ueber einen
 WebSocket in den Browser.
 
+Das Vorbild ist die Konsole in Proxmox VE: man klickt auf "Konsole" und tippt
+Befehle auf dem System. Genau das gibt es hier, unter *System -> Konsole*.
+
 **Das ist der weitreichendste Knopf im ganzen Programm.** Wer ihn erreicht, hat
 den Server. Deshalb:
 
 * nur Administratoren, und der Token wird bei jedem Verbindungsaufbau geprueft;
 * nur, wenn der Zugriff auf den Host ueberhaupt offensteht (also nicht beim
   gehaerteten Compose - dort gibt es die Shell schlicht nicht);
-* nur, wenn er ausdruecklich eingeschaltet ist (`LOGBOT_WEBSHELL=true`), damit
-  niemand ihn aus Versehen dabeihat;
-* jede Sitzung wird protokolliert: wer, wann, wie lange;
+* jede Sitzung steht im Systemtagebuch: wer, wann, wie lange, von welcher IP;
 * Sitzungen mit einer Obergrenze, damit nicht hundert vergessene Browser-Tabs
   hundert Shells offen halten;
 * Leerlauf beendet die Sitzung von selbst.
 
-Wer das nicht will, laesst `LOGBOT_WEBSHELL` aus. Dann antwortet der Endpunkt
-mit 403 und es wird gar nichts gestartet.
+**Zur Voreinstellung.** Frueher war die Konsole ab Werk aus und musste in der
+`.env` eingeschaltet werden. Das klingt vorsichtig, war es aber nicht wirklich:
+Wer diese Oberflaeche als Administrator erreicht, kann ohnehin Updates
+einspielen, Container neu bauen und den Host neu starten - also in jedem Fall
+Code auf diesem Server ausfuehren. Ein zusaetzlicher Schalter davor hat keinen
+Angreifer aufgehalten, nur den Betreiber. Jetzt ist sie an, und wer sie nicht
+haben will, setzt `LOGBOT_WEBSHELL=false`. Dann antwortet der Endpunkt mit 403
+und es wird gar nichts gestartet.
 """
 
 from __future__ import annotations
@@ -48,8 +55,9 @@ from . import hostexec
 
 logger = logging.getLogger("logbot.shell")
 
-# Ohne diesen Schalter gibt es die Shell nicht. Bewusst standardmaessig aus.
-ENABLED = os.getenv("LOGBOT_WEBSHELL", "false").strip().lower() in ("1", "true", "yes", "on")
+# Ohne diesen Schalter gibt es die Shell nicht. Standardmaessig an - siehe die
+# Begruendung oben. Abschalten: LOGBOT_WEBSHELL=false.
+ENABLED = os.getenv("LOGBOT_WEBSHELL", "true").strip().lower() not in ("0", "false", "no", "off")
 
 # Wie viele Sitzungen gleichzeitig offen sein duerfen.
 MAX_SESSIONS = int(os.getenv("LOGBOT_WEBSHELL_MAX_SESSIONS", "3"))
@@ -72,6 +80,7 @@ class ShellSession:
     last_activity: float = field(default_factory=time.time)
     rows: int = 24
     cols: int = 80
+    source_ip: str = ""
 
     @property
     def age_seconds(self) -> float:
@@ -89,6 +98,7 @@ class ShellSession:
             "started_at": self.started_at,
             "age_seconds": round(self.age_seconds),
             "idle_seconds": round(self.idle_seconds),
+            "source_ip": self.source_ip,
             "size": {"rows": self.rows, "cols": self.cols},
         }
 
@@ -104,9 +114,9 @@ def availability() -> dict:
     if not ENABLED:
         return {
             "available": False,
-            "reason": ("Das Terminal ist abgeschaltet. Zum Einschalten "
-                       "LOGBOT_WEBSHELL=true in der .env setzen und das Backend "
-                       "neu starten. Es öffnet eine Root-Shell auf dem Server — "
+            "reason": ("Die Konsole ist abgeschaltet (LOGBOT_WEBSHELL=false in der .env). "
+                       "Zum Einschalten den Wert entfernen oder auf true setzen und das "
+                       "Backend neu starten. Sie öffnet eine Root-Shell auf dem Server — "
                        "wer sie erreicht, hat den Server."),
             "enable_hint": "LOGBOT_WEBSHELL=true",
         }
@@ -135,10 +145,11 @@ def sessions() -> list:
 # =============================================================================
 # Sitzung starten und beenden
 # =============================================================================
-def open_session(username: str, rows: int = 24, cols: int = 80) -> ShellSession:
+def open_session(username: str, rows: int = 24, cols: int = 80,
+                 source_ip: str = "") -> ShellSession:
     """Startet eine Root-Shell auf dem Host mit angehaengtem Terminal."""
     if not ENABLED:
-        raise PermissionError("Das Terminal ist abgeschaltet (LOGBOT_WEBSHELL).")
+        raise PermissionError("Die Konsole ist abgeschaltet (LOGBOT_WEBSHELL=false).")
     if not hostexec.nsenter_available():
         raise PermissionError("Kein Zugriff auf den Host — das Terminal ist hier nicht möglich.")
 
@@ -175,11 +186,29 @@ def open_session(username: str, rows: int = 24, cols: int = 80) -> ShellSession:
 
     session = ShellSession(id=uuid.uuid4().hex[:12], username=username,
                            pid=pid, fd=fd, rows=rows, cols=cols)
+    session.source_ip = source_ip
     _sessions[session.id] = session
 
     logger.warning("TERMINAL GEÖFFNET: Benutzer '%s', Sitzung %s, PID %s "
                    "— Root-Shell auf dem Host", username, session.id, pid)
+    _journal(category="shell", event="shell.opened", level="warning",
+             message="Konsole geöffnet — Root-Shell auf dem Server.",
+             actor=username, source_ip=source_ip, target=f"pid {pid}")
     return session
+
+
+def _journal(**kwargs) -> None:
+    """Eintrag ins Systemtagebuch, ohne dass dieses Modul davon abhaengt.
+
+    Bewusst spaet importiert: `shell` wird auch von Werkzeugen eingebunden, die
+    keine Datenbank haben. Faellt der Eintrag aus, laeuft die Shell trotzdem -
+    im Anwendungsprotokoll steht sie ohnehin.
+    """
+    try:
+        from . import journal
+        journal.fire(**kwargs)
+    except Exception:                                               # defensiv
+        pass
 
 
 def close_session(session_id: str, reason: str = "beendet") -> bool:
@@ -217,6 +246,10 @@ def close_session(session_id: str, reason: str = "beendet") -> bool:
 
     logger.warning("Terminal geschlossen: Sitzung %s von '%s' nach %.0fs (%s)",
                    session.id, session.username, session.age_seconds, reason)
+    _journal(category="shell", event="shell.closed",
+             message=f"Konsole geschlossen nach {session.age_seconds:.0f}s ({reason}).",
+             actor=session.username, source_ip=getattr(session, "source_ip", ""),
+             duration_ms=int(session.age_seconds * 1000))
     return True
 
 

@@ -1,232 +1,356 @@
-﻿<!-- ==============================================================================
+<!-- ==============================================================================
      Name:        Phydran6
      Kontakt:     Phydran6
-     Version:     2026.05.13.20.58.33
-     Beschreibung: LogBot - Agent Token Verwaltung (HTTPS Agents)
-     ============================================================================= -->
+     Changelog:   ../../../CHANGELOG/frontend.md
+     Beschreibung: LogBot - Zugangsschluessel fuer Agents.
+
+     Was sich gegenueber der Vorgaengerfassung geaendert hat - und warum:
+
+     * Diese Liste zeigte die Schluessel im KLARTEXT, und zwar jedem
+       angemeldeten Benutzer. Ein Konto mit reinen Leserechten kam damit an den
+       Generalschluessel. Jetzt: nur Administratoren, und der Schluessel wird
+       genau einmal angezeigt - direkt nach dem Erzeugen.
+     * Es gab genau EINEN Schluessel fuer alle Geraete. Wer einen Rechner
+       aufmachte, hatte den Schluessel fuer alle. Jetzt bekommt jedes Geraet
+       seinen eigenen; beim Installieren holt der Agent ihn sich selbst.
+     * "Einladungen" sind neu: kurzlebig, zaehlbar, duerfen nur einen
+       Geraeteschluessel anfordern. Damit muss der Generalschluessel nicht mehr
+       auf jeden Rechner kopiert werden.
+     ============================================================================== -->
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold mb-6" :style="{ color: 'var(--color-text-primary)' }">Agent Tokens</h1>
+  <div class="page">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Zugangsschlüssel</h2>
+        <p class="page-subtitle">
+          Womit sich Agenten und Sammler am Server ausweisen.
+        </p>
+      </div>
+      <button class="btn btn-secondary btn-sm" :disabled="loading" @click="load">
+        <AppIcon name="refresh" :size="16" />
+        Neu laden
+      </button>
+    </div>
 
-    <!-- Neuer Token -->
-    <div class="rounded-lg shadow p-4 mb-6" :style="cardStyle">
-      <div class="flex flex-col gap-3">
-        <div class="flex flex-col md:flex-row gap-3 items-start md:items-end">
-          <div class="flex-1 w-full">
-            <label class="block text-sm mb-1" :style="{ color: 'var(--color-text-secondary)' }">Token-Name</label>
-            <input
-              v-model="newTokenName"
-              type="text"
-              placeholder="z.B. linux-agent-prod oder windows-agent-prod"
-              class="w-full rounded px-3 py-2"
-              :style="inputStyle"
-              @keyup.enter="createToken"
-            >
-          </div>
-          <button
-            @click="createToken"
-            class="text-white rounded px-4 py-2 hover:opacity-90"
-            :style="{ backgroundColor: 'var(--color-primary)' }"
-            :disabled="creating || !newTokenName.trim()"
-          >
-            {{ creating ? 'Erstelle…' : 'Token erstellen' }}
+    <!-- Der Schlüssel, direkt nach dem Erzeugen. Danach nie wieder. -->
+    <div v-if="revealed" class="card mb-4" style="border-color: var(--color-warning)">
+      <div class="card-header">
+        <p class="card-title" style="color: var(--color-warning)">
+          Jetzt notieren — danach ist dieser Schlüssel nicht mehr lesbar
+        </p>
+      </div>
+      <div class="card-body">
+        <p class="text-sm mb-2" style="color: var(--color-text-secondary)">
+          {{ revealed.warning }}
+        </p>
+        <div class="flex gap-2">
+          <input :value="revealed.token" class="input font-mono text-sm" readonly @focus="$event.target.select()">
+          <button class="btn btn-primary btn-sm shrink-0" @click="copy(revealed.token)">
+            <AppIcon :name="copied ? 'check' : 'key'" :size="14" />
+            {{ copied ? 'Kopiert' : 'Kopieren' }}
           </button>
-        </div>
-
-        <div class="flex flex-wrap gap-2">
-          <button
-            class="px-3 py-2 rounded text-sm text-white hover:opacity-90"
-            :style="{ backgroundColor: 'var(--color-primary)' }"
-            :disabled="creating"
-            @click="quickCreate('linux-agent')"
-          >
-            {{ creating && pendingPreset === 'linux-agent' ? 'Erstelle Linux-Token…' : 'Linux-Token erstellen' }}
-          </button>
-          <button
-            class="px-3 py-2 rounded text-sm text-white hover:opacity-90"
-            :style="{ backgroundColor: 'var(--color-primary)' }"
-            :disabled="creating"
-            @click="quickCreate('windows-agent')"
-          >
-            {{ creating && pendingPreset === 'windows-agent' ? 'Erstelle Windows-Token…' : 'Windows-Token erstellen' }}
-          </button>
-          <span v-if="statusMessage" class="text-sm" :style="{ color: statusColor }">
-            {{ statusMessage }}
-          </span>
+          <button class="btn btn-ghost btn-sm shrink-0" @click="revealed = null">Verstanden</button>
         </div>
       </div>
     </div>
 
-    <!-- Token-Liste -->
-    <div class="rounded-lg shadow p-4" :style="cardStyle">
-      <div class="overflow-x-auto">
-        <table class="min-w-full text-sm">
-          <thead :style="{ color: 'var(--color-text-secondary)' }">
+    <div v-if="message" class="card mb-4" :style="{ borderColor: messageError ? 'var(--color-danger)' : 'var(--color-success)' }">
+      <div class="card-body text-sm" :style="{ color: messageError ? 'var(--color-danger)' : 'var(--color-success)' }">
+        {{ message }}
+      </div>
+    </div>
+
+    <!-- Altbestand: Schlüssel, die noch im Klartext in der Datenbank liegen -->
+    <div v-if="legacyCount" class="card mb-4" style="border-color: var(--color-warning)">
+      <div class="card-body">
+        <p class="font-semibold mb-1" style="color: var(--color-warning)">
+          {{ legacyCount }} Schlüssel aus einer früheren Fassung
+        </p>
+        <p class="text-sm mb-3" style="color: var(--color-text-secondary)">
+          Sie liegen noch im Klartext in der Datenbank — wer einen Datenbankabzug in die
+          Hände bekommt, hat sie. Das Überführen trägt die Prüfsumme nach und löscht den
+          Klartext. <strong>Die Schlüssel bleiben dabei gültig</strong>, auf den Geräten
+          ändert sich nichts. Was verloren geht, ist nur die Möglichkeit, sie hier noch
+          einmal abzulesen.
+        </p>
+        <button class="btn btn-primary btn-sm" :disabled="hardening" @click="harden">
+          <AppIcon name="lock" :size="14" />
+          {{ hardening ? 'Läuft…' : 'In den geschützten Speicher überführen' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Neu anlegen -->
+    <div class="card mb-4">
+      <div class="card-header"><p class="card-title">Neuen Schlüssel anlegen</p></div>
+      <div class="card-body space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="md:col-span-2">
+            <label class="label">Name</label>
+            <input v-model="form.name" class="input" placeholder="z.B. n8n-Sammler oder Einladung Büro"
+                   @keyup.enter="create">
+          </div>
+          <div>
+            <label class="label">Art</label>
+            <select v-model="form.kind" class="select">
+              <option value="enroll">Einladung (empfohlen)</option>
+              <option value="agent">Fester Geräteschlüssel</option>
+              <option value="global">Generalschlüssel</option>
+            </select>
+          </div>
+        </div>
+
+        <p class="hint">{{ kindHint }}</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div v-if="form.kind === 'enroll'">
+            <label class="label">Gilt für (Stunden)</label>
+            <input v-model.number="form.expires_in_hours" type="number" min="1" class="input">
+          </div>
+          <div v-if="form.kind === 'enroll'">
+            <label class="label">Wie oft einlösbar</label>
+            <input v-model.number="form.max_uses" type="number" min="1" class="input">
+          </div>
+          <div :class="form.kind === 'enroll' ? '' : 'md:col-span-3'">
+            <label class="label">Nur aus diesen Netzen (optional)</label>
+            <input v-model="form.allowed_cidrs" class="input font-mono text-sm"
+                   placeholder="10.0.0.0/8, 192.168.1.5/32">
+            <p class="hint">Leer = von überall. Besonders sinnvoll beim Generalschlüssel.</p>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-sm" :disabled="creating || !form.name.trim()" @click="create">
+          {{ creating ? 'Wird angelegt…' : 'Anlegen' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Liste -->
+    <div class="card">
+      <div class="card-body p-0">
+        <div v-if="!items.length && !loading" class="empty-state">
+          <p class="empty-state-title">Es gibt noch keinen Schlüssel.</p>
+        </div>
+
+        <table v-else class="table">
+          <thead>
             <tr>
-              <th class="text-left py-2 pr-4">Name</th>
-              <th class="text-left py-2 pr-4">OS</th>
-              <th class="text-left py-2 pr-4">Token</th>
-              <th class="text-left py-2 pr-4">Status</th>
-              <th class="text-left py-2 pr-4">Erstellt</th>
-              <th class="text-left py-2">Aktionen</th>
+              <th>Name</th>
+              <th style="width: 9rem">Art</th>
+              <th style="width: 10rem">Kennung</th>
+              <th style="width: 12rem">Zuletzt benutzt</th>
+              <th style="width: 7rem">Zustand</th>
+              <th style="width: 13rem">Aktionen</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="token in tokens" :key="token.id" class="border-t" :style="{ borderColor: 'var(--color-border)' }">
-              <td class="py-2 pr-4" :style="{ color: 'var(--color-text-primary)' }">{{ token.name }}</td>
-              <td class="py-2 pr-4" :style="{ color: 'var(--color-text-primary)' }">{{ token.device_type || '—' }}</td>
-              <td class="py-2 pr-4 font-mono break-all" :style="{ color: 'var(--color-text-primary)' }">{{ token.token }}</td>
-              <td class="py-2 pr-4">
-                <span
-                  class="px-2 py-1 text-xs rounded-full"
-                  :class="token.is_active ? 'bg-green-500 text-white' : 'bg-gray-500 text-white'"
-                >
-                  {{ token.is_active ? 'Aktiv' : 'Inaktiv' }}
+            <tr v-for="item in items" :key="item.id">
+              <td>
+                <p style="color: var(--color-text-primary)">{{ item.name }}</p>
+                <p v-if="item.agent_hostname" class="text-xs" style="color: var(--color-text-muted)">
+                  Gerät: {{ item.agent_hostname }}
+                </p>
+                <p v-if="item.warning" class="text-xs mt-0.5" style="color: var(--color-warning)">
+                  {{ item.warning }}
+                </p>
+                <p v-if="item.allowed_cidrs" class="text-xs mt-0.5 font-mono" style="color: var(--color-text-muted)">
+                  nur aus {{ item.allowed_cidrs }}
+                </p>
+              </td>
+              <td>
+                <span class="badge" :class="kindBadge(item.kind)">{{ kindLabel(item.kind) }}</span>
+                <p v-if="item.kind === 'enroll'" class="text-xs mt-1" style="color: var(--color-text-muted)">
+                  {{ item.use_count }} von {{ item.max_uses ?? '∞' }} eingelöst
+                </p>
+              </td>
+              <td class="font-mono text-xs" style="color: var(--color-text-muted)">
+                {{ item.prefix || '—' }}…
+              </td>
+              <td class="text-xs" style="color: var(--color-text-secondary)">
+                <template v-if="item.last_used_at">
+                  {{ formatTime(item.last_used_at) }}
+                  <span v-if="item.last_used_ip" class="block" style="color: var(--color-text-muted)">
+                    von {{ item.last_used_ip }}
+                  </span>
+                </template>
+                <span v-else style="color: var(--color-text-muted)">noch nie</span>
+              </td>
+              <td>
+                <span class="badge" :class="item.usable ? 'badge-success' : 'badge-neutral'">
+                  {{ item.usable ? 'gültig' : 'gesperrt' }}
                 </span>
+                <p v-if="!item.usable && item.state_reason" class="text-xs mt-1" style="color: var(--color-text-muted)">
+                  {{ item.state_reason }}
+                </p>
               </td>
-              <td class="py-2 pr-4" :style="{ color: 'var(--color-text-secondary)' }">{{ formatTime(token.created_at) }}</td>
-              <td class="py-2 flex flex-wrap gap-2">
-                <button class="text-xs px-3 py-1 rounded bg-slate-200 hover:bg-slate-300" @click="copyToken(token.token)">
-                  Kopieren
-                </button>
-                <button class="text-xs px-3 py-1 rounded bg-amber-200 hover:bg-amber-300" @click="regenerateToken(token)">
-                  Regenerieren
-                </button>
-                <button class="text-xs px-3 py-1 rounded bg-rose-200 hover:bg-rose-300" @click="deleteToken(token)">
-                  Löschen
-                </button>
+              <td>
+                <div class="flex flex-wrap gap-1">
+                  <button class="btn btn-secondary btn-sm" @click="regenerate(item)">Neu würfeln</button>
+                  <button
+                    v-if="item.kind !== 'global'"
+                    class="btn btn-danger btn-sm"
+                    @click="remove(item)"
+                  >Löschen</button>
+                </div>
               </td>
-            </tr>
-            <tr v-if="!loading && !tokens.length">
-              <td class="py-4 text-center text-sm" :colspan="5" :style="{ color: 'var(--color-text-secondary)' }">Keine Tokens vorhanden</td>
-            </tr>
-            <tr v-if="loading">
-              <td class="py-4 text-center text-sm" :colspan="5" :style="{ color: 'var(--color-text-secondary)' }">Lade…</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+
+    <p class="hint mt-3">{{ note }}</p>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import AppIcon from '../components/AppIcon.vue'
 
-const authStore = useAuthStore()
+const auth = useAuthStore()
 
-const tokens = ref([])
+const items = ref([])
+const note = ref('')
 const loading = ref(false)
 const creating = ref(false)
-const newTokenName = ref('')
-const statusMessage = ref('')
-const statusColor = ref('var(--color-text-secondary)')
-const pendingPreset = ref('')
+const hardening = ref(false)
+const revealed = ref(null)
+const copied = ref(false)
+const message = ref('')
+const messageError = ref(false)
 
-const cardStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface)',
-  borderColor: 'var(--color-border)'
-}))
-
-const inputStyle = computed(() => ({
-  backgroundColor: 'var(--color-surface-elevated)',
-  borderColor: 'var(--color-border)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border)'
-}))
-
-onMounted(() => {
-  loadTokens()
+const form = reactive({
+  name: '',
+  kind: 'enroll',
+  allowed_cidrs: '',
+  expires_in_hours: 24,
+  max_uses: 1,
 })
 
-async function loadTokens() {
+const legacyCount = computed(() => items.value.filter(item => item.legacy_plaintext).length)
+
+const KIND_HINTS = {
+  enroll: 'Eine Einladung. Der Agent tauscht sie beim Installieren gegen einen eigenen '
+    + 'Schlüssel und wirft sie weg. Nach Ablauf oder Verbrauch ist sie wertlos — '
+    + 'genau deshalb ist sie der sichere Weg, um einen Rechner anzuschließen.',
+  agent: 'Ein fester Schlüssel für genau ein Gerät. Er darf nur für dieses Gerät '
+    + 'liefern und nur sich selbst abmelden. Sinnvoll, wenn der Agent nicht selbst '
+    + 'anfragen kann.',
+  global: 'Der Generalschlüssel des Administrators: darf anmelden, für jedes Gerät '
+    + 'liefern und jedes abmelden. Den braucht man für Sammler wie n8n, die Logs '
+    + 'für fremde Geräte einliefern — und sonst möglichst nirgends. Es gibt nur einen.',
+}
+
+const kindHint = computed(() => KIND_HINTS[form.kind] || '')
+
+function kindLabel(kind) {
+  return { global: 'Generalschlüssel', agent: 'Gerät', enroll: 'Einladung' }[kind] || kind
+}
+
+function kindBadge(kind) {
+  if (kind === 'global') return 'badge-danger'
+  if (kind === 'enroll') return 'badge-primary'
+  return 'badge-neutral'
+}
+
+function formatTime(value) {
+  if (!value) return '–'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('de-DE')
+}
+
+function say(text, isError = false) {
+  message.value = text
+  messageError.value = isError
+}
+
+async function load() {
   loading.value = true
   try {
-    tokens.value = await authStore.api('/api/agent-tokens')
+    const data = await auth.api('/api/agent-tokens')
+    items.value = data.items || []
+    note.value = data.note || ''
   } catch (e) {
-    console.error('Token-Liste fehlgeschlagen', e)
+    say(e.message, true)
   } finally {
     loading.value = false
   }
 }
 
-async function createToken(deviceTypeOverride = null) {
-  if (!newTokenName.value.trim()) return
+async function create() {
+  if (!form.name.trim()) return
   creating.value = true
-  statusMessage.value = ''
+  say('')
   try {
-    const token = await authStore.api('/api/agent-tokens', {
-      method: 'POST',
-      body: {
-        name: newTokenName.value.trim(),
-        device_type: deviceTypeOverride || null
-      }
-    })
-    tokens.value = [token, ...tokens.value]
-    newTokenName.value = ''
-    statusMessage.value = `Token "${token.name}" erstellt`
-    statusColor.value = 'var(--color-success, #16a34a)'
+    const body = {
+      name: form.name.trim(),
+      kind: form.kind,
+      allowed_cidrs: form.allowed_cidrs.trim(),
+    }
+    if (form.kind === 'enroll') {
+      body.expires_in_hours = form.expires_in_hours
+      body.max_uses = form.max_uses
+    }
+    revealed.value = await auth.api('/api/agent-tokens', { method: 'POST', body })
+    form.name = ''
+    await load()
   } catch (e) {
-    alert('Erstellen fehlgeschlagen: ' + (e?.message || e))
-    statusMessage.value = 'Fehler beim Erstellen: ' + (e?.message || '')
-    statusColor.value = 'var(--color-danger, #dc2626)'
+    say(e.message, true)
   } finally {
     creating.value = false
-    pendingPreset.value = ''
   }
 }
 
-async function quickCreate(presetName) {
-  pendingPreset.value = presetName
-  newTokenName.value = presetName
-  const device = presetName.startsWith('linux') ? 'linux' : presetName.startsWith('windows') ? 'windows' : null
-  await createToken(device)
-}
+async function regenerate(item) {
+  const warning = item.kind === 'global'
+    ? 'Der Generalschlüssel wird neu gewürfelt. Alles, was ihn benutzt (z.B. n8n), '
+      + 'kommt danach nicht mehr durch, bis der neue eingetragen ist. Fortfahren?'
+    : `Schlüssel "${item.name}" neu würfeln? Geräte mit dem alten liefern danach nichts mehr.`
+  if (!confirm(warning)) return
 
-async function regenerateToken(token) {
-  if (!confirm(`Token "${token.name}" regenerieren?`)) return
   try {
-    const updated = await authStore.api(`/api/agent-tokens/${token.id}/regenerate`, { method: 'POST' })
-    tokens.value = tokens.value.map(t => t.id === token.id ? updated : t)
-    statusMessage.value = `Token "${updated.name}" regeneriert`
-    statusColor.value = 'var(--color-success, #16a34a)'
+    revealed.value = await auth.api(`/api/agent-tokens/${item.id}/regenerate`, { method: 'POST' })
+    await load()
   } catch (e) {
-    alert('Regeneration fehlgeschlagen: ' + e.message)
-    statusMessage.value = 'Fehler bei Regeneration'
-    statusColor.value = 'var(--color-danger, #dc2626)'
+    say(e.message, true)
   }
 }
 
-async function deleteToken(token) {
-  if (!confirm(`Token "${token.name}" löschen?`)) return
+async function remove(item) {
+  if (!confirm(`Schlüssel "${item.name}" löschen? Das lässt sich nicht rückgängig machen.`)) return
   try {
-    await authStore.api(`/api/agent-tokens/${token.id}`, { method: 'DELETE' })
-    tokens.value = tokens.value.filter(t => t.id !== token.id)
-    statusMessage.value = `Token "${token.name}" gelöscht`
-    statusColor.value = 'var(--color-success, #16a34a)'
+    await auth.api(`/api/agent-tokens/${item.id}`, { method: 'DELETE' })
+    await load()
+    say(`Schlüssel "${item.name}" gelöscht.`)
   } catch (e) {
-    alert('Löschen fehlgeschlagen: ' + e.message)
-    statusMessage.value = 'Fehler beim Löschen'
-    statusColor.value = 'var(--color-danger, #dc2626)'
+    say(e.message, true)
   }
 }
 
-async function copyToken(value) {
+async function harden() {
+  hardening.value = true
+  try {
+    const result = await auth.api('/api/agent-tokens/harden', { method: 'POST' })
+    say(result.message)
+    await load()
+  } catch (e) {
+    say(e.message, true)
+  } finally {
+    hardening.value = false
+  }
+}
+
+async function copy(value) {
   try {
     await navigator.clipboard.writeText(value)
-    statusMessage.value = 'Token kopiert'
-    statusColor.value = 'var(--color-success, #16a34a)'
-  } catch (e) {
-    console.warn('Clipboard fehlgeschlagen', e)
-    statusMessage.value = 'Kopieren fehlgeschlagen'
-    statusColor.value = 'var(--color-danger, #dc2626)'
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch {
+    // Ohne Zwischenablage-Recht bleibt das Feld zum Markieren stehen.
   }
 }
 
-function formatTime(ts) {
-  if (!ts) return '-'
-  return new Date(ts).toLocaleString('de-DE')
-}
+onMounted(load)
 </script>

@@ -9,10 +9,16 @@ sortiert, nicht nach Bauteilen.
 |------------|----------|
 | LogBot aufsetzen | [Installation](install/README.md) |
 | wissen, ob mein Server reicht | [Installation → Systemprüfung](install/README.md#systemprüfung) |
-| Portainer, n8n, Postfix dazunehmen | [Installation → Zusatzdienste](install/README.md#zusatzdienste) |
+| Portainer, Tugtainer, n8n, Open WebUI, Postfix dazunehmen | [Installation → Zusatzdienste](install/README.md#zusatzdienste) |
 | täglich damit arbeiten | [Betrieb](operate/README.md) |
 | die Oberfläche auf Englisch stellen | [Betrieb → Sprache](operate/README.md#sprache) |
-| eine Shell auf dem Server öffnen | [Betrieb → Terminal](operate/README.md#terminal-im-browser) |
+| eine Shell auf dem Server öffnen | [Betrieb → Konsole](operate/README.md#konsole-im-browser) |
+| wissen, wer wann was am System gemacht hat | [Betrieb → Systemtagebuch](operate/README.md#systemtagebuch) |
+| verstehen, welcher Container wem gehört | [Betrieb → Container](operate/README.md#container-und-ihre-updates) |
+| PostgreSQL, Caddy & Co. aktualisieren | [Betrieb → Container](operate/README.md#container-und-ihre-updates) |
+| verhindern, dass die Platte volläuft | [Betrieb → Platte läuft voll](operate/README.md#platte-läuft-voll) |
+| mit dem Microsoft-365-Konto anmelden | [Betrieb → Single Sign-on](operate/README.md#single-sign-on-microsoft-365-und-andere) |
+| Agents sicher anbinden | [Betrieb → Zugangsschlüssel](operate/README.md#zugangsschlüssel-für-agents) |
 | aktualisieren | [Updates](updates/README.md) |
 | den aktuellsten Stand per Einzeiler drüberbügeln | [Updates → Einzeiler](updates/README.md#einzeiler-auf-einen-blick) |
 | wissen, welcher Update-Weg wann passt | [Updates → Welchen Weg nehmen?](updates/README.md#welchen-weg-nehmen) |
@@ -22,6 +28,7 @@ sortiert, nicht nach Bauteilen.
 | einem fehlgeschlagenen Update nachgehen | [Updates → Fehlersuche](updates/README.md#fehlersuche) |
 | sichern und zurückspielen | [Sicherung](backup/README.md) |
 | Logs von einer KI auswerten lassen | [Integrationen → KI](integrations/README.md#ki-auswertung) |
+| das Ganze mit einer lokalen KI, ohne Datenabfluss | [Integrationen → Open WebUI](integrations/README.md#open-webui) |
 | Mails vom Server bekommen | [Integrationen → Mail](integrations/README.md#mail-postfix) |
 | die API benutzen | [API](api/README.md) |
 | Rechner anbinden | [Agents](../agents/README.md) |
@@ -31,7 +38,7 @@ sortiert, nicht nach Bauteilen.
 
 | Verzeichnis | Inhalt |
 |-------------|--------|
-| [`backend/`](../backend/README.md) | FastAPI: API, Auth, Patchmanagement, Sicherung, KI, Mail, Terminal |
+| [`backend/`](../backend/README.md) | FastAPI: API, Auth, Patchmanagement, Sicherung, KI, Mail, Konsole, Systemtagebuch |
 | [`frontend/`](../frontend/README.md) | Vue 3: Oberfläche, Sprachen, Design-System |
 | [`syslog/`](../syslog/README.md) | Syslog-Empfänger auf UDP/TCP 514 |
 | [`db/`](../db/README.md) | Schema, Migration, PostgreSQL-Upgrade |

@@ -102,6 +102,21 @@ PROVIDERS: Dict[str, dict] = {
         "needs_url": True,
         "default_url": "http://logbot-n8n:5678/webhook/logbot",
     },
+    "openwebui": {
+        "label": "Open WebUI — eigene KI, auch lokal",
+        "label_en": "Open WebUI — self-hosted, can be local",
+        "hint": ("Open WebUI spricht dieselbe Sprache wie OpenAI, hat dahinter aber "
+                 "das Modell, das man selbst wählt — auch ein lokales über Ollama. "
+                 "Läuft es auf diesem Server, verlässt keine Logzeile das Haus."),
+        "needs_key": True,
+        "needs_url": True,
+        "default_model": "llama3.1",
+        "default_url": "http://logbot-openwebui:8080",
+        "key_url": "",
+        "key_hint": ("In Open WebUI: Profil → Einstellungen → Konto → API-Schlüssel. "
+                     "Ein Lese-Schlüssel genügt."),
+        "local": True,
+    },
 }
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -202,7 +217,11 @@ def catalog() -> List[dict]:
          "needs_url": spec.get("needs_url", False),
          "default_model": spec.get("default_model", ""),
          "default_url": spec.get("default_url", ""),
-         "key_url": spec.get("key_url", "")}
+         "key_url": spec.get("key_url", ""),
+         "key_hint": spec.get("key_hint", ""),
+         # 'local' heisst: die Logzeilen verlassen den Server nicht, sofern der
+         # Dienst hier laeuft. Die Oberflaeche hebt das hervor.
+         "local": bool(spec.get("local"))}
         for key, spec in PROVIDERS.items()
     ]
 
@@ -319,6 +338,82 @@ async def _ask_openai(config: dict, payload: dict) -> dict:
             "usage": data.get("usage", {})}
 
 
+async def _ask_openwebui(config: dict, payload: dict) -> dict:
+    """Open WebUI - dieselbe Schnittstelle wie OpenAI, nur eben die eigene.
+
+    Der Unterschied zu `_ask_openai` ist genau einer: die Adresse. Deshalb
+    steht hier auch keine zweite Auswertung der Antwort, sondern dieselbe.
+
+    Warum das so wichtig ist: mit Open WebUI und einem lokalen Modell (Ollama)
+    bleibt die Auswertung komplett auf dem eigenen Server. Fuer Logdaten, in
+    denen Benutzernamen, interne Adressen und Fehlermeldungen stehen, ist das
+    der Unterschied zwischen "geht" und "geht nicht".
+    """
+    base = (config.get("webhook_url") or "").rstrip("/")
+    if not base:
+        raise ValueError("Für Open WebUI fehlt die Adresse.")
+    # Nachsichtig: der vollstaendige Pfad darf mit angegeben werden.
+    endpoint = base if base.endswith("/chat/completions") else f"{base}/api/chat/completions"
+
+    model = config.get("model") or PROVIDERS["openwebui"]["default_model"]
+    system = config.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
+    question = payload["question"] or "Was fällt an diesen Logs auf?"
+
+    body = {
+        "model": model,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user",
+             "content": (f"{question}\n\nHier sind {payload['count']} Logzeilen:\n\n"
+                         f"{_as_text(payload)}")},
+        ],
+    }
+    headers = {"Authorization": f"Bearer {config['api_key']}",
+               "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        response = await client.post(endpoint, json=body, headers=headers)
+        data = _json_or_error(response, "Open WebUI")
+
+    choices = data.get("choices") or [{}]
+    text = ((choices[0].get("message") or {}).get("content") or "").strip()
+    if not text:
+        raise RuntimeError("Open WebUI hat geantwortet, aber ohne Text. Stimmt der "
+                           "Modellname? Die verfügbaren Modelle stehen dort unter "
+                           "Einstellungen → Modelle.")
+    return {"answer": text, "model": data.get("model", model),
+            "usage": data.get("usage", {})}
+
+
+async def list_openwebui_models(config: dict) -> list:
+    """Welche Modelle bietet dieses Open WebUI an?
+
+    Damit man den Modellnamen nicht abtippen muss - und vor allem nicht raet.
+    """
+    base = (config.get("webhook_url") or "").rstrip("/")
+    key = config.get("api_key") or ""
+    if not base or not key:
+        return []
+    url = base if base.endswith("/models") else f"{base}/api/models"
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(url, headers={"Authorization": f"Bearer {key}"})
+            if response.status_code >= 400:
+                return []
+            data = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.info("Modellliste von Open WebUI nicht abrufbar: %s", exc)
+        return []
+
+    entries = data.get("data") if isinstance(data, dict) else data
+    models = []
+    for entry in entries or []:
+        if isinstance(entry, dict) and entry.get("id"):
+            models.append({"id": entry["id"], "label": entry.get("name") or entry["id"]})
+    return models
+
+
 async def _ask_n8n(config: dict, payload: dict) -> dict:
     """Schickt die Auswahl an einen n8n-Webhook und nimmt entgegen, was zurueckkommt.
 
@@ -407,6 +502,7 @@ async def ask(config: dict, logs: List[Any], question: str = "") -> dict:
     handlers = {
         "anthropic": _ask_anthropic,
         "openai": _ask_openai,
+        "openwebui": _ask_openwebui,
         "n8n_external": _ask_n8n,
         "n8n_local": _ask_n8n,
     }

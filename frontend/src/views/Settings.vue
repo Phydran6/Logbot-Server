@@ -501,12 +501,23 @@
       <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Passwort ändern</h2>
       <form @submit.prevent="changePassword" class="max-w-md space-y-4">
         <div>
+          <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Aktuelles Passwort</label>
+          <input v-model="currentPassword" type="password" required autocomplete="current-password" class="w-full rounded px-3 py-2" :style="inputStyle">
+          <p class="text-xs mt-1" :style="{ color: 'var(--color-text-muted)' }">
+            Wer sein eigenes Passwort ändert, muss das alte nennen — eine offene
+            Sitzung allein reicht nicht.
+          </p>
+        </div>
+        <div>
           <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Neues Passwort</label>
-          <input v-model="newPassword" type="password" required minlength="6" class="w-full rounded px-3 py-2" :style="inputStyle">
+          <input v-model="newPassword" type="password" required minlength="8" autocomplete="new-password" class="w-full rounded px-3 py-2" :style="inputStyle">
+          <p class="text-xs mt-1" :style="{ color: 'var(--color-text-muted)' }">
+            Mindestens 8 Zeichen, mit Groß- und Kleinbuchstabe und einer Ziffer.
+          </p>
         </div>
         <div>
           <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Passwort bestätigen</label>
-          <input v-model="confirmPassword" type="password" required minlength="6" class="w-full rounded px-3 py-2" :style="inputStyle">
+          <input v-model="confirmPassword" type="password" required minlength="8" autocomplete="new-password" class="w-full rounded px-3 py-2" :style="inputStyle">
         </div>
         <button type="submit" class="text-white px-4 py-2 rounded hover:opacity-90" :style="{ backgroundColor: 'var(--color-primary)' }">
           Passwort ändern
@@ -556,35 +567,34 @@ const router = useRouter()
 
 // Reiter, nach Themen gruppiert. Die id ist zugleich der Teil in der Adresse
 // (/settings/ldap) - damit funktionieren die frueheren Links weiter.
+// Die Reiter sind nach denselben Fragen gruppiert wie das linke Menue - wer
+// dort "Zugang & Sicherheit" anklickt, findet die Reiter hier unter derselben
+// Ueberschrift wieder. Vorher hiessen die Gruppen anders als die Menuepunkte,
+// und man musste zweimal suchen.
 const tabGroups = [
   {
-    title: 'Betrieb',
+    title: 'Daten & Aufbewahrung',
     tabs: [
-      { id: 'general', label: 'Allgemein' },
       { id: 'retention', label: 'Aufbewahrung' },
-      { id: 'agents', label: 'Agent-Token' },
       { id: 'archiving', label: 'Archivierung', adminOnly: true },
-    ],
-  },
-  {
-    title: 'Infrastruktur',
-    tabs: [
-      { id: 'network', label: 'Netzwerk', adminOnly: true },
       { id: 'database', label: 'Datenbank', adminOnly: true },
-      { id: 'maintenance', label: 'Neustart', adminOnly: true },
     ],
   },
   {
-    title: 'Konto & Anmeldung',
+    title: 'Zugang & Sicherheit',
     tabs: [
       { id: 'password', label: 'Passwort' },
       { id: 'security', label: 'Anmeldesicherheit' },
       { id: 'ldap', label: 'Verzeichnis (LDAP)', adminOnly: true },
+      { id: 'agents', label: 'Zugangsschlüssel', adminOnly: true },
     ],
   },
   {
-    title: 'Darstellung',
+    title: 'System',
     tabs: [
+      { id: 'general', label: 'Allgemein' },
+      { id: 'network', label: 'Netzwerk', adminOnly: true },
+      { id: 'maintenance', label: 'Neustart', adminOnly: true },
       { id: 'branding', label: 'Erscheinungsbild' },
     ],
   },
@@ -609,6 +619,7 @@ const settings = ref({
 
 const retentionDays = ref(90)
 const retentionPreview = ref(null)
+const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
 const dbSettings = ref(null)
@@ -1209,12 +1220,24 @@ async function changePassword() {
     return
   }
   
+  if (!currentPassword.value) {
+    alert('Bitte das aktuelle Passwort eingeben.')
+    return
+  }
+
   try {
+    // Das aktuelle Passwort muss mit: eine gültige Sitzung allein reicht nicht
+    // mehr aus, um das Passwort zu setzen. Sonst könnte jemand, der sich einen
+    // Token beschafft hat, den rechtmäßigen Besitzer aussperren.
     await authStore.api(`/api/users/${authStore.user.id}`, {
       method: 'PUT',
-      body: { password: newPassword.value }
+      body: {
+        current_password: currentPassword.value,
+        password: newPassword.value,
+      }
     })
     alert('Passwort geändert!')
+    currentPassword.value = ''
     newPassword.value = ''
     confirmPassword.value = ''
   } catch (e) {

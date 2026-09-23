@@ -82,8 +82,13 @@ class BrandingConfig(BaseModel):
     
     # Allgemein
     company_name: str = "LogBot"
-    tagline: str = "Centralized Log Management"
-    footer_text: str = "© 2026 LogBot. All rights reserved."
+    tagline: str = "Zentraler Log-Server"
+    # Frueher stand hier "© 2026 LogBot. All rights reserved." Das war schlicht
+    # falsch: LogBot steht unter der MIT-Lizenz, die Rechte sind also gerade
+    # NICHT vorbehalten, sondern eingeraeumt. Und es beantwortete keine einzige
+    # Frage, die ein Betreiber tatsaechlich hat - dafuer gibt es jetzt den
+    # Bereich "Über LogBot" (app/routes/about.py).
+    footer_text: str = "LogBot · Freie Software unter MIT-Lizenz"
     support_email: str = "support@example.com"
     
     # Assets

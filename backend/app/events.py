@@ -130,5 +130,8 @@ bus = EventBus()
 # =============================================================================
 UPDATE_AVAILABLE = "update.available"     # Auf GitHub liegt etwas Neues
 UPDATE_STATE = "update.state"             # Ein Wartungslauf aendert seinen Zustand
+UPDATE_OUTPUT = "update.output"           # Neue Zeilen aus dem laufenden Wartungslauf
 BACKUP_DONE = "backup.done"               # Eine Sicherung wurde fertig
 STACK_CHANGED = "stack.changed"           # Zusatz-Container gestartet/gestoppt
+SYSTEM_EVENT = "system.event"             # Neue Zeile im Systemtagebuch
+DISK_PRESSURE = "disk.pressure"           # Die Platte laeuft voll, es wird aufgeraeumt

@@ -8,17 +8,25 @@
  *
  * LogBot Vue Router - Navigation und Route-Definitionen
  * ======================================================
- * Drei Bereiche: Überwachung, Verwaltung, System.
+ * Fünf Bereiche, und jeder beantwortet eine andere Frage:
  *
- * Alles, was zu den Einstellungen gehört (Netzwerk, Datenbank, Verzeichnis,
- * Archivierung, Erscheinungsbild, Anmeldesicherheit), liegt unter /settings als
- * Reiter. Die alten Adressen wie /settings/ldap funktionieren weiter: der Teil
- * hinter /settings wählt den Reiter aus. Angesteuert werden diese Reiter jetzt
- * aus dem linken Menü — die Reiterleiste rechts ist nur noch der zweite Weg.
+ *   Überwachung   Was ist im Netz passiert?        Dashboard, Logs, Geräte, Zustand
+ *   Auswertung    Was mache ich damit?             KI, Webhooks, App
+ *   Verwaltung    Wer darf was, und wie lange?     Benutzer, Zugang, Daten
+ *   System        Womit läuft das hier?            Container, Updates, Konsole, …
+ *   Hilfe         Was ist das eigentlich?          Über LogBot & FAQ
  *
- * Eigene Seiten unter System: Sicherung, KI-Auswertung, Zusatzdienste, Mail und
- * Terminal. Die stehen bewusst nicht unter /settings: es sind eigene Werkzeuge,
- * keine Einstellungen.
+ * Die Trennlinie zwischen „Verwaltung" und „System" ist bewusst diese: in der
+ * Verwaltung geht es um Menschen und Daten, im System um die Maschine.
+ *
+ * Einstellungen, die keine eigene Seite verdienen, liegen weiter unter
+ * /settings als Reiter. Die alten Adressen wie /settings/ldap funktionieren
+ * unverändert: der Teil hinter /settings wählt den Reiter. Angesteuert werden
+ * sie aus dem linken Menü — die Reiterleiste rechts ist nur der zweite Weg.
+ *
+ * Was eine eigene Seite hat, hat sie, weil es ein eigenes Werkzeug ist und
+ * keine Einstellung: Container, Systemtagebuch, Sicherung, Konsole,
+ * KI-Auswertung, Single Sign-on, Speicherplatz, Über LogBot.
  *
  * ==============================================================================
  */
@@ -69,16 +77,38 @@ const routes = [
         component: () => import('../views/DeviceLogs.vue')
       },
 
-      // --- Verwaltung --------------------------------------------------------
+      // --- Auswertung --------------------------------------------------------
       {
         path: 'webhooks',
         name: 'Webhooks',
         component: () => import('../views/Webhooks.vue')
       },
       {
+        path: 'app',
+        name: 'AppQR',
+        component: () => import('../views/AppQR.vue')
+      },
+
+      // --- Verwaltung --------------------------------------------------------
+      {
         path: 'users',
         name: 'Users',
         component: () => import('../views/Users.vue'),
+        meta: { admin: true }
+      },
+      // Single Sign-on hat eine eigene Seite statt eines Reiters: dort steht
+      // eine Einrichtungsanleitung mit Rückadresse zum Kopieren, und das
+      // braucht Platz.
+      {
+        path: 'sso',
+        name: 'SsoSettings',
+        component: () => import('../views/SsoSettings.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'storage',
+        name: 'Storage',
+        component: () => import('../views/Storage.vue'),
         meta: { admin: true }
       },
 
@@ -130,6 +160,27 @@ const routes = [
         name: 'Terminal',
         component: () => import('../views/Terminal.vue'),
         meta: { admin: true }
+      },
+      {
+        path: 'containers',
+        name: 'Containers',
+        component: () => import('../views/Containers.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'journal',
+        name: 'Journal',
+        component: () => import('../views/Journal.vue'),
+        meta: { admin: true }
+      },
+
+      // --- Hilfe -------------------------------------------------------------
+      // Bewusst für alle erreichbar, nicht nur für Administratoren: die Frage
+      // "was ist das hier eigentlich und wo kommt es her?" hat jeder Benutzer.
+      {
+        path: 'about',
+        name: 'About',
+        component: () => import('../views/About.vue')
       },
     ]
   },

@@ -30,7 +30,8 @@ from ..schemas import (
     LoginMFARequired,
     MFALoginRequest,
 )
-from .. import ldap_auth
+from .. import journal, ldap_auth
+from ..limiter import client_ip as real_client_ip
 from ..auth import (
     verify_password,
     get_password_hash,
@@ -113,11 +114,23 @@ async def login(
         # Zweiter Versuch über das Verzeichnis, falls eingerichtet.
         user = await _login_via_ldap(db, form_data.username, form_data.password)
 
+    source_ip = real_client_ip(request)
+
     # Gleiche Fehlermeldung für "User existiert nicht" und "Passwort falsch"
     # verhindert User-Enumeration
     if not user:
+        # Ins Systemtagebuch gehoert der Fehlversuch trotzdem: dort faellt eine
+        # Reihe von Versuchen aus demselben Netz sofort auf.
+        await journal.record(
+            db, category="auth", event="login.failed", level="warning",
+            message=f"Fehlgeschlagene Anmeldung für '{form_data.username}'.",
+            actor=form_data.username, source_ip=source_ip, ok=False)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Falsche Anmeldedaten")
     if not user.is_active:
+        await journal.record(
+            db, category="auth", event="login.disabled", level="warning",
+            message=f"Anmeldung abgelehnt: '{user.username}' ist deaktiviert.",
+            actor=user.username, source_ip=source_ip, ok=False)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Benutzer deaktiviert")
 
     # MFA aktiv → kein Vollzugriffs-Token, sondern Pending-Token zurückgeben
@@ -132,6 +145,11 @@ async def login(
             expires_in_seconds=MFA_PENDING_TOKEN_MINUTES * 60,
         )
 
+    await journal.record(
+        db, category="auth", event="login.ok",
+        message=f"'{user.username}' hat sich angemeldet.",
+        actor=user.username, source_ip=source_ip,
+        detail={"role": user.role, "source": user.auth_source or "local", "mfa": False})
     return Token(access_token=create_access_token(data={"sub": user.username}))
 
 
@@ -158,10 +176,19 @@ async def login_mfa(
     if not await consume_totp_or_backup(db, user, data.code):
         register_mfa_failure(user)
         await db.commit()
+        await journal.record(
+            db, category="auth", event="mfa.failed", level="warning",
+            message=f"Falscher Zweitfaktor für '{user.username}'.",
+            actor=user.username, source_ip=real_client_ip(request), ok=False)
         raise HTTPException(status_code=401, detail="Code ungültig")
 
     clear_mfa_failures(user)
     await db.commit()
+    await journal.record(
+        db, category="auth", event="login.ok",
+        message=f"'{user.username}' hat sich angemeldet (mit Zweitfaktor).",
+        actor=user.username, source_ip=real_client_ip(request),
+        detail={"role": user.role, "mfa": True})
     return Token(access_token=create_access_token(data={"sub": user.username}))
 
 

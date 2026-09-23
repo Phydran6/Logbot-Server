@@ -30,7 +30,6 @@ Bewertung:
 import asyncio
 import logging
 import os
-import shutil
 import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
@@ -45,6 +44,7 @@ from .config import settings
 from .database import async_session, engine
 from .models import Agent, Log, Setting, User
 from . import archiving as archiving_module
+from . import diskguard
 from . import hostexec
 from . import ldap_auth
 from . import updater
@@ -286,14 +286,23 @@ async def check_database_indexes() -> Check:
 
 
 async def check_disk() -> Check:
-    usage = shutil.disk_usage(os.getenv("DISK_MONITOR_PATH", "/"))
-    percent = usage.used / usage.total * 100
-    free_gb = usage.free / 1024 ** 3
+    """Wie voll ist die Platte - und zwar so gerechnet, wie `df` es tut.
+
+    Die frueher hier benutzte Rechnung `used/total` zaehlt die fuer root
+    reservierten Bloecke als frei und meldet deshalb zu wenig: eine Platte, die
+    `df` mit 95 % ausweist, stand hier mit 90 %. Genau in diesem Bereich
+    entscheidet sich aber, ob der Waechter rechtzeitig anfaengt.
+    """
+    info = diskguard.usage(os.getenv("DISK_MONITOR_PATH", "/"))
+    percent = info["percent"]
+    free_gb = info["free_bytes"] / 1024 ** 3
     detail = (f"{percent:.1f} % belegt, {free_gb:.1f} GB frei von "
-              f"{usage.total / 1024 ** 3:.1f} GB.")
-    hint = ("Platz schaffen: Aufbewahrung verkuerzen (Einstellungen -> Aufbewahrung), "
-            "alte Logs loeschen oder Archivierung einschalten. Ab 80 % raeumt LogBot "
-            "selbst auf, ab 95 % werden alle Logs geloescht.")
+              f"{info['total_bytes'] / 1024 ** 3:.1f} GB.")
+    hint = (f"Der Plattenwächter räumt ab {diskguard.THRESHOLD_WARN:.0f} % von selbst auf "
+            f"und hält die Belegung Richtung {diskguard.TARGET_USAGE:.0f} %. Die letzten "
+            f"{diskguard.MIN_KEEP_HOURS} h Logs bleiben dabei immer stehen. Wer mehr Luft "
+            f"will: Aufbewahrung verkürzen (Einstellungen → Aufbewahrung) oder "
+            f"Archivierung einschalten.")
     if percent >= DISK_FAIL:
         return _fail("disk", "Speicherplatz", "Kern", f"Kritisch voll ({percent:.1f} %)",
                      detail, hint, percent=round(percent, 1), free_gb=round(free_gb, 1))

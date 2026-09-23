@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import stacks
+from .. import journal, stacks
 from ..auth import get_current_admin
 from ..database import get_db
 from ..events import STACK_CHANGED, bus
@@ -131,6 +131,11 @@ async def toggle(stack: str, data: ToggleRequest, db: AsyncSession = Depends(get
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     result["pre_backup"] = pre
+    await journal.record(
+        db, category="container", event="stack.toggled", level="warning",
+        message=f"Zusatzdienst '{label}' {'eingeschaltet' if data.enable else 'ausgeschaltet'}.",
+        actor=admin.username, target=stack,
+        detail={"enabled": data.enable, "backup": pre.get("created")})
     bus.publish(STACK_CHANGED, {"stack": stack, "enabled": data.enable}, sticky=False)
     return result
 

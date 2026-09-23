@@ -254,8 +254,11 @@
         <router-view />
       </div>
 
-      <footer v-if="footerText" class="app-footer">
-        <span>{{ footerText }}</span>
+      <!-- Die Fusszeile verweist auf die Herkunft statt einen Rechtevorbehalt
+           zu behaupten, den es bei einer MIT-Lizenz gar nicht gibt. -->
+      <footer class="app-footer">
+        <span v-if="footerText">{{ footerText }}</span>
+        <router-link to="/about" class="footer-link">{{ t('nav.about') }}</router-link>
       </footer>
     </main>
   </div>
@@ -352,27 +355,54 @@ const roleLabel = computed(() => (
 // bei denen ein Eintrag als aktiv gilt (z.B. die Geräte-Ansicht unter "Geräte").
 // `tab` zeigt auf einen Reiter der Einstellungsseite - so hängen auch die
 // Einstellungen komplett am linken Baum statt an einer Leiste rechts.
+//
+// Der Aufbau folgt Fragen, nicht Technik. Jeder Bereich beantwortet genau eine:
+//
+//   Überwachung   Was ist im Netz passiert?
+//   Auswertung    Was mache ich damit?
+//   Verwaltung    Wer darf was, und wie lange werden Daten aufgehoben?
+//   System        Womit läuft das hier, und was tut es gerade?
+//   Hilfe         Was ist das eigentlich, und wo kommt es her?
+//
+// Die Trennlinie zwischen Verwaltung und System ist bewusst diese: Verwaltung
+// handelt von Menschen und Daten, System von der Maschine. Vorher lagen
+// Passwort, LDAP, Datenbank, Netzwerk und Erscheinungsbild alle im selben
+// Reiterstapel unter „Einstellungen" — richtig zu raten, wo etwas steckt, war
+// Glückssache.
 const navGroups = computed(() => {
   const admin = auth.isAdmin
 
-  const settingsChildren = [
-    { to: '/settings/general', name: 'Settings', tab: 'general', label: t('nav.general') },
-    { to: '/settings/retention', name: 'Settings', tab: 'retention', label: t('nav.retention') },
-    { to: '/settings/agents', name: 'Settings', tab: 'agents', label: t('nav.agentTokens') },
-    ...(admin ? [
-      { to: '/settings/archiving', name: 'Settings', tab: 'archiving', label: t('nav.archiving') },
-      { to: '/settings/network', name: 'Settings', tab: 'network', label: t('nav.network') },
-      { to: '/settings/database', name: 'Settings', tab: 'database', label: t('nav.database') },
-    ] : []),
+  // --- Verwaltung -> Zugang & Sicherheit --------------------------------------
+  const accessChildren = [
     { to: '/settings/password', name: 'Settings', tab: 'password', label: t('nav.password') },
     { to: '/settings/security', name: 'Settings', tab: 'security', label: t('nav.security') },
     ...(admin ? [
+      { to: '/sso', name: 'SsoSettings', label: t('nav.sso') },
       { to: '/settings/ldap', name: 'Settings', tab: 'ldap', label: t('nav.ldap') },
+      { to: '/settings/agents', name: 'Settings', tab: 'agents', label: t('nav.agentTokens') },
     ] : []),
-    { to: '/settings/branding', name: 'Settings', tab: 'branding', label: t('nav.branding') },
+  ]
+
+  // --- Verwaltung -> Daten & Aufbewahrung -------------------------------------
+  const dataChildren = [
+    { to: '/settings/retention', name: 'Settings', tab: 'retention', label: t('nav.retention') },
     ...(admin ? [
-      { to: '/settings/maintenance', name: 'Settings', tab: 'maintenance', label: t('nav.maintenance') },
+      { to: '/storage', name: 'Storage', label: t('nav.storage') },
+      { to: '/settings/archiving', name: 'Settings', tab: 'archiving', label: t('nav.archiving') },
+      { to: '/settings/database', name: 'Settings', tab: 'database', label: t('nav.database') },
     ] : []),
+  ]
+
+  // --- System -> Container ----------------------------------------------------
+  const containerChildren = [
+    { to: '/containers', name: 'Containers', label: t('nav.containerOverview') },
+    { to: '/stacks', name: 'Stacks', label: t('nav.stacks') },
+  ]
+
+  // --- System -> Netzwerk & Zustellung ----------------------------------------
+  const networkChildren = [
+    { to: '/settings/network', name: 'Settings', tab: 'network', label: t('nav.network') },
+    { to: '/mail', name: 'Mail', label: t('nav.mail') },
   ]
 
   return [
@@ -384,6 +414,17 @@ const navGroups = computed(() => {
         { key: 'dashboard', to: '/', name: 'Dashboard', icon: 'dashboard', label: t('nav.dashboard') },
         { key: 'logs', to: '/logs', name: 'Logs', icon: 'logs', label: t('nav.logs') },
         { key: 'agents', to: '/agents', name: 'Agents', icon: 'agents', label: t('nav.devices'), match: ['DeviceLogs'] },
+        { key: 'health', to: '/health', name: 'Health', icon: 'health', label: t('nav.health') },
+      ],
+    },
+    {
+      key: 'analysis',
+      title: t('nav.analysis'),
+      icon: 'ai',
+      items: [
+        ...(admin ? [{ key: 'ai', to: '/ai', name: 'AiSettings', icon: 'ai', label: t('nav.ai') }] : []),
+        { key: 'webhooks', to: '/webhooks', name: 'Webhooks', icon: 'webhooks', label: t('nav.webhooks') },
+        { key: 'app', to: '/app', name: 'AppQR', icon: 'mobile', label: t('nav.app') },
       ],
     },
     {
@@ -391,8 +432,9 @@ const navGroups = computed(() => {
       title: t('nav.management'),
       icon: 'users',
       items: [
-        { key: 'webhooks', to: '/webhooks', name: 'Webhooks', icon: 'webhooks', label: t('nav.webhooks') },
         ...(admin ? [{ key: 'users', to: '/users', name: 'Users', icon: 'users', label: t('nav.users') }] : []),
+        { key: 'access', icon: 'shield', label: t('nav.access'), children: accessChildren },
+        { key: 'data', icon: 'database', label: t('nav.data'), children: dataChildren },
       ],
     },
     {
@@ -400,16 +442,27 @@ const navGroups = computed(() => {
       title: t('nav.system'),
       icon: 'settings',
       items: [
-        { key: 'settings', icon: 'settings', label: t('nav.settings'), children: settingsChildren },
-        { key: 'health', to: '/health', name: 'Health', icon: 'health', label: t('nav.health') },
         ...(admin ? [
+          { key: 'containers', icon: 'stacks', label: t('nav.containers'), children: containerChildren },
           { key: 'updates', to: '/updates', name: 'Updates', icon: 'download', label: t('nav.updates') },
+          { key: 'journal', to: '/journal', name: 'Journal', icon: 'logs', label: t('nav.journal') },
           { key: 'backup', to: '/backup', name: 'Backup', icon: 'backup', label: t('nav.backup') },
-          { key: 'ai', to: '/ai', name: 'AiSettings', icon: 'ai', label: t('nav.ai') },
-          { key: 'stacks', to: '/stacks', name: 'Stacks', icon: 'stacks', label: t('nav.stacks') },
-          { key: 'mail', to: '/mail', name: 'Mail', icon: 'mail', label: t('nav.mail') },
-          { key: 'terminal', to: '/terminal', name: 'Terminal', icon: 'terminal', label: t('nav.terminal') },
+          { key: 'terminal', to: '/terminal', name: 'Terminal', icon: 'terminal', label: t('nav.console') },
+          { key: 'network', icon: 'globe', label: t('nav.connectivity'), children: networkChildren },
         ] : []),
+        { key: 'branding', to: '/settings/branding', name: 'Settings', tab: 'branding', icon: 'branding', label: t('nav.branding') },
+        ...(admin ? [
+          { key: 'general', to: '/settings/general', name: 'Settings', tab: 'general', icon: 'settings', label: t('nav.general') },
+          { key: 'maintenance', to: '/settings/maintenance', name: 'Settings', tab: 'maintenance', icon: 'power', label: t('nav.maintenance') },
+        ] : []),
+      ],
+    },
+    {
+      key: 'help',
+      title: t('nav.help'),
+      icon: 'help',
+      items: [
+        { key: 'about', to: '/about', name: 'About', icon: 'help', label: t('nav.about') },
       ],
     },
   ]
@@ -924,6 +977,16 @@ function handleLogout() {
   color: var(--color-text-muted);
   border-top: 1px solid var(--color-border);
   background-color: var(--color-surface);
+}
+
+.footer-link {
+  margin-left: auto;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.footer-link:hover {
+  text-decoration: underline;
 }
 
 /* ---------------------------------------------------------------- Übergang */

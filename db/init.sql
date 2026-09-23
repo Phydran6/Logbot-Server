@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS webauthn_credentials (
 );
 CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id);
 
--- Herkunft eines Kontos: 'local' oder 'ldap'
+-- Herkunft eines Kontos: 'local', 'ldap' oder 'sso' (Microsoft 365 / OIDC)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source VARCHAR(20) NOT NULL DEFAULT 'local';
 
 -- Webhooks-Tabelle
@@ -120,16 +120,65 @@ ON CONFLICT (username) DO NOTHING;
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS retention_max_logs INTEGER;
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS retention_days INTEGER;
 
--- Agent-Tokens für authentifizierten HTTPS-Modus
+-- Zugangsschlüssel für die Maschinen-Schnittstelle (HTTPS-Agents, Sammler).
+--
+-- Drei Arten, und die Art entscheidet, was der Schlüssel darf:
+--   global  Generalschlüssel des Administrators — darf alles.
+--   agent   gehört genau einem Gerät, darf nur für dieses liefern.
+--   enroll  Einladung: kurzlebig, zählbar, darf nur einen Geräteschlüssel holen.
+--
+-- Gespeichert wird NIE der Schlüssel selbst, nur sein SHA-256-Abdruck
+-- (token_hash). Die Spalte `token` gibt es nur noch für Bestände aus früheren
+-- Fassungen; neue Schlüssel lassen sie leer. Deshalb ist sie nullable.
 CREATE TABLE IF NOT EXISTS agent_tokens (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    token VARCHAR(64) UNIQUE NOT NULL,
+    token VARCHAR(64) UNIQUE,
+    token_hash VARCHAR(64),
+    prefix VARCHAR(24),
+    kind VARCHAR(20) NOT NULL DEFAULT 'agent',
     device_type VARCHAR(50),
+    agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE,
+    max_uses INTEGER,
+    use_count INTEGER NOT NULL DEFAULT 0,
+    allowed_cidrs TEXT,
+    expires_at TIMESTAMP,
+    revoked_at TIMESTAMP,
+    last_used_at TIMESTAMP,
+    last_used_ip VARCHAR(45),
+    created_by VARCHAR(50),
+    note TEXT,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tokens_hash
+    ON agent_tokens(token_hash) WHERE token_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_tokens_agent ON agent_tokens(agent_id);
+
+-- Systemtagebuch: was LogBot SELBST getan hat.
+--
+-- Bewusst eine eigene Tabelle und nicht `logs`: der Aufräumlauf kürzt `logs`,
+-- und ausgerechnet der Eintrag "Aufräumlauf hat 4,2 Mio. Zeilen gelöscht" darf
+-- dabei nicht mit verschwinden. Die Zeilen hier sind klein und selten — sie
+-- überleben problemlos Jahre.
+CREATE TABLE IF NOT EXISTS system_events (
+    id SERIAL PRIMARY KEY,
+    at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    category VARCHAR(40) NOT NULL,
+    level VARCHAR(20) NOT NULL DEFAULT 'info',
+    event VARCHAR(80) NOT NULL,
+    message TEXT NOT NULL,
+    actor VARCHAR(100),
+    source_ip VARCHAR(45),
+    target VARCHAR(200),
+    ok BOOLEAN NOT NULL DEFAULT TRUE,
+    duration_ms INTEGER,
+    detail JSONB DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_system_events_at ON system_events(at DESC);
+CREATE INDEX IF NOT EXISTS idx_system_events_category ON system_events(category);
+CREATE INDEX IF NOT EXISTS idx_system_events_level ON system_events(level);
 
 -- App-Login-Tokens (für QR-Code-Authentifizierung der Android-App)
 CREATE TABLE IF NOT EXISTS app_login_tokens (

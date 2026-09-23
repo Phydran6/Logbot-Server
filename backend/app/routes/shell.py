@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 
 from .. import shell
 from ..auth import admin_from_token, get_current_admin
+from ..limiter import client_ip as real_client_ip
 
 logger = logging.getLogger("logbot.routes.shell")
 
@@ -80,7 +81,8 @@ async def terminal(websocket: WebSocket,
     await websocket.accept()
 
     try:
-        session = shell.open_session(user.username, rows=rows, cols=cols)
+        session = shell.open_session(user.username, rows=rows, cols=cols,
+                                     source_ip=real_client_ip(websocket))
     except (PermissionError, RuntimeError) as exc:
         await websocket.send_json({"type": "error", "message": str(exc)})
         await websocket.close(code=1011)

@@ -74,13 +74,26 @@ BACKUP="logbot-db-backup-${STAMP}.dump"
 command -v docker >/dev/null 2>&1 || { err "docker nicht gefunden."; exit 1; }
 docker compose version >/dev/null 2>&1 || { err "docker compose nicht verfuegbar."; exit 1; }
 
-if ! docker inspect logbot-postgres >/dev/null 2>&1; then
-    err "Container 'logbot-postgres' laeuft nicht. Bitte zuerst 'docker compose up -d postgres'."
+# Der Container heisst seit 2026.09 'logbot-ext-postgres' - das 'ext' sagt, dass
+# PostgreSQL ein FREMDES Image ist und nicht zu LogBot gehoert. Aeltere
+# Installationen haben noch den alten Namen; beide werden akzeptiert.
+PG_CONTAINER=""
+for candidate in logbot-ext-postgres logbot-postgres; do
+    if docker inspect "$candidate" >/dev/null 2>&1; then
+        PG_CONTAINER="$candidate"
+        break
+    fi
+done
+
+if [[ -z "$PG_CONTAINER" ]]; then
+    err "Kein Postgres-Container gefunden (gesucht: logbot-ext-postgres, logbot-postgres)."
+    err "Bitte zuerst 'docker compose up -d postgres' ausfuehren."
     exit 1
 fi
+info "Postgres-Container: ${PG_CONTAINER}"
 
 # Volume des laufenden Containers exakt ermitteln
-PG_VOL="$(docker inspect logbot-postgres \
+PG_VOL="$(docker inspect "$PG_CONTAINER" \
     --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}')"
 if [[ -z "$PG_VOL" ]]; then
     err "Konnte das Postgres-Daten-Volume nicht ermitteln. Abbruch."

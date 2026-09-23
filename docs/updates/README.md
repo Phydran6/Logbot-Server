@@ -532,10 +532,40 @@ neu zu konfigurieren. Der bestehende Token steht in
 `/opt/logbot-agent/config.json`. Windows und alle Optionen:
 [Agents](../../agents/README.md).
 
-**Watchtower** hält nur die Images der Zusatzdienste aktuell und fasst LogBots
-eigene Container bewusst nicht an (`WATCHTOWER_LABEL_ENABLE`) — sonst kämen sich
-zwei Update-Wege in die Quere. Ein zugeschaltetes Watchtower ersetzt also kein
-LogBot-Update.
+### Was diese Seite *nicht* aktualisiert
+
+Nur die Container, die aus diesem Quellcode gebaut werden: `logbot-app-backend`,
+`-frontend` und `-syslog`. Die fremden Images — PostgreSQL, Caddy, n8n,
+Portainer, Open WebUI, Postfix — brauchen ihre eigenen Updates. Die laufen
+unter *System → Container*; dort steht auch, für welches gerade etwas
+bereitliegt.
+
+Das ist bewusst getrennt: Ein Update von LogBot holt neuen Quellcode und baut
+Container neu. Ein Image-Update tauscht ein fertiges Image aus. Zwei
+verschiedene Vorgänge mit zwei verschiedenen Risiken — sie in einen Knopf zu
+legen, würde nur verwischen, was gerade passiert.
+
+---
+
+## Zusehen, was passiert
+
+Während ein Lauf arbeitet, zeigt die Seite nicht nur einen Fortschrittsbalken,
+sondern **die Ausgabe des Wartungsskripts, Zeile für Zeile**, so wie sie auf dem
+Server entsteht.
+
+Der Grund ist einfach: Ein Balken sagt „43 %“. Er sagt nicht, woran es gerade
+hängt, und wenn etwas schiefgeht, sagt er gar nichts. Wer `docker compose build`
+durchlaufen sieht, weiß im Fehlerfall sofort, wo es klemmte, statt hinterher zu
+raten.
+
+Bricht die Verbindung ab, ist das normal — der Container, der die Seite
+ausliefert, wird ja gerade neu gebaut. Der Browser verbindet sich von selbst
+wieder, und die Ausgabe läuft weiter.
+
+Danach steht der ganze Vorgang dauerhaft im
+[Systemtagebuch](../operate/README.md#systemtagebuch): wer das Update
+angestoßen hat, von welcher Version auf welche, ob vorher gesichert wurde und
+wie es ausging.
 
 ---
 

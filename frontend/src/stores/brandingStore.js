@@ -25,8 +25,12 @@ export const useBrandingStore = defineStore('branding', () => {
   
   const config = reactive({
     company_name: 'LogBot',
-    tagline: 'Centralized Log Management',
-    footer_text: '© 2026 LogBot. All rights reserved.',
+    tagline: 'Zentraler Log-Server',
+    // Kein "All rights reserved" mehr: LogBot steht unter der MIT-Lizenz, die
+    // Rechte sind eingeräumt und nicht vorbehalten. Wer es genau wissen will,
+    // findet unter "Über LogBot" Herkunft, Lizenz und die Verweise ins
+    // Repository.
+    footer_text: 'LogBot · Freie Software unter MIT-Lizenz',
     support_email: 'support@example.com',
     logo_path: null,
     favicon_path: null,

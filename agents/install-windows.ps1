@@ -505,11 +505,12 @@ function Install-Agent {
         Write-Host ""
         $AgentToken = $Token
         if ([string]::IsNullOrWhiteSpace($AgentToken)) {
-            $AgentToken = Read-Answer -Prompt "Agent-Token (im Web-UI unter Einstellungen -> Agent-Token)"
+            $AgentToken = Read-Answer -Prompt "Zugangsschluessel (Einladung oder Generalschluessel, im Web-UI unter Zugangsschluessel)"
         }
         if ([string]::IsNullOrWhiteSpace($AgentToken)) {
-            Write-LogError "Ohne Agent-Token geht der HTTPS-Modus nicht."
-            Write-LogInfo  "Der Token steht im Web-UI unter Einstellungen -> Agent-Token."
+            Write-LogError "Ohne Zugangsschluessel geht der HTTPS-Modus nicht."
+            Write-LogInfo  "Den Schluessel erzeugt man im Web-UI unter Verwaltung -> Zugang & Sicherheit -> Zugangsschluessel."
+            Write-LogInfo  "Empfohlen: eine 'Einladung' - die laeuft ab und gilt nur einmal."
             exit 1
         }
         if ($Insecure.IsPresent) { $SkipTlsVerify = $true }
@@ -538,6 +539,55 @@ function Install-Agent {
                     }
                 } else {
                     Write-LogWarn "API-Check fehlgeschlagen: $_"
+                }
+            }
+        }
+
+        # ----------------------------------------------------------------------
+        # Eigenen Geraeteschluessel holen
+        # ----------------------------------------------------------------------
+        # Frueher lag auf jedem Rechner derselbe Schluessel. Wer einen davon
+        # aufmachte, hatte den Schluessel fuer ALLE Geraete - und konnte im Namen
+        # jedes beliebigen Rechners Logzeilen erfinden oder Geraete loeschen.
+        #
+        # Jetzt wird der mitgegebene Schluessel gegen einen eigenen getauscht,
+        # der nur fuer diesen Rechner gilt. Der mitgegebene darf eine
+        # kurzlebige Einladung sein - dann liegt der Generalschluessel nirgends
+        # mehr herum.
+        #
+        # Scheitert das - etwa weil der Server noch eine aeltere Fassung faehrt
+        # und den Endpunkt nicht kennt -, laeuft die Installation mit dem
+        # mitgegebenen Schluessel weiter. Ein Agent, der sich wegen einer
+        # Neuerung gar nicht installieren laesst, waere die schlechtere Loesung.
+        if ($TestUrl) {
+            $EnrollUrl = ($TestUrl -replace '/api$', '/api/agents/enroll')
+            Write-LogInfo "Melde diesen Rechner am Server an (eigener Schluessel)..."
+            try {
+                $EnrollBody = @{
+                    hostname    = $env:COMPUTERNAME
+                    device_type = "windows_agent"
+                } | ConvertTo-Json -Compress
+
+                $EnrollResult = Invoke-RestMethod -Uri $EnrollUrl -Method POST -TimeoutSec 20 `
+                    -Headers @{ "Authorization" = "Bearer $AgentToken"; "Content-Type" = "application/json" } `
+                    -Body $EnrollBody
+
+                if ($EnrollResult.token) {
+                    $AgentToken = $EnrollResult.token
+                    Write-LogSuccess "Eigener Geraeteschluessel erhalten - der mitgegebene wird nicht gespeichert."
+                } else {
+                    Write-LogWarn "Der Server hat geantwortet, aber keinen Schluessel geschickt. Nehme den mitgegebenen."
+                }
+            } catch {
+                $StatusCode = $null
+                if ($_.Exception.Response) { $StatusCode = [int]$_.Exception.Response.StatusCode }
+                if ($StatusCode -eq 401 -or $StatusCode -eq 403) {
+                    Write-LogError "Der Server hat den Schluessel abgelehnt. Stimmt er noch, oder ist die Einladung abgelaufen?"
+                    exit 1
+                } elseif ($StatusCode -eq 404) {
+                    Write-LogWarn "Der Server kennt die Anmeldung noch nicht (aeltere Fassung). Nehme den mitgegebenen Schluessel."
+                } else {
+                    Write-LogWarn "Anmeldung nicht moeglich ($_). Nehme den mitgegebenen Schluessel."
                 }
             }
         }

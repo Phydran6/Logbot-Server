@@ -99,9 +99,10 @@
           </button>
 
           <!-- Passkey: Windows Hello, Face ID, Fingerabdruck, Sicherheitsschlüssel -->
-          <template v-if="passkeySupported">
+          <template v-if="passkeySupported || sso.enabled">
             <div class="divider-text"><span>oder</span></div>
             <button
+              v-if="passkeySupported"
               type="button"
               class="btn btn-secondary w-full"
               :disabled="passkeyBusy"
@@ -109,6 +110,23 @@
             >
               <AppIcon name="lock" :size="16" />
               {{ passkeyBusy ? 'Warte auf Gerät…' : 'Mit Passkey anmelden' }}
+            </button>
+
+            <!-- Firmenkonto (Microsoft 365 / OpenID Connect).
+
+                 Die Anmeldung mit Benutzername und Passwort bleibt bewusst
+                 daneben stehen: wäre sie weg, würde ein Fehler beim
+                 Identitätsanbieter alle aussperren - auch den Administrator,
+                 der ihn wieder geradeziehen müsste. -->
+            <button
+              v-if="sso.enabled"
+              type="button"
+              class="btn btn-secondary w-full"
+              :disabled="ssoBusy"
+              @click="startSso"
+            >
+              <AppIcon name="shield" :size="16" />
+              {{ ssoBusy ? 'Weiterleitung…' : (sso.label || 'Mit Firmenkonto anmelden') }}
             </button>
           </template>
         </form>
@@ -177,6 +195,11 @@ const passkeyBusy = ref(false)
 const mfaToken = ref(null)
 const mfaCode = ref('')
 const mfaSecondsLeft = ref(0)
+
+// Single Sign-on. Der Anmeldeschirm fragt nur, OB es den Knopf gibt - Mandant
+// und Anwendungs-ID gehen niemanden etwas an, der noch nicht angemeldet ist.
+const sso = ref({ enabled: false, label: '' })
+const ssoBusy = ref(false)
 let mfaTimer = null
 
 const companyName = computed(() => brandingStore.config?.company_name || 'LogBot')
@@ -194,7 +217,70 @@ onMounted(() => {
   if (!document.documentElement.getAttribute('data-theme')) {
     themeStore.initTheme('dark')
   }
+  loadSsoStatus()
+  finishSso()
 })
+
+async function loadSsoStatus() {
+  try {
+    const res = await fetch('/api/auth/sso/status')
+    if (res.ok) sso.value = await res.json()
+  } catch {
+    // Ohne Antwort bleibt der Knopf einfach weg - anmelden geht weiterhin.
+  }
+}
+
+function startSso() {
+  ssoBusy.value = true
+  // Vollständiger Seitenwechsel, kein fetch: der Anbieter will den Browser
+  // sehen, nicht eine Hintergrundanfrage.
+  window.location.href = '/api/auth/sso/start'
+}
+
+/**
+ * Rückkehr vom Anbieter.
+ *
+ * Der Rückweg landet auf /login?sso=<Einmal-Schlüssel>. Dieser Schlüssel wird
+ * über denselben erprobten Endpunkt gegen eine Sitzung getauscht, den auch die
+ * App nach dem QR-Code benutzt - ein zweiter, halb paralleler Anmeldeweg wäre
+ * genau eine Stelle zu viel, an der etwas schiefgehen kann.
+ *
+ * Danach verschwindet der Schlüssel sofort aus der Adresszeile: er soll weder
+ * im Verlauf noch in einem Lesezeichen landen.
+ */
+async function finishSso() {
+  const params = new URLSearchParams(window.location.search)
+  const handoff = params.get('sso')
+  const failure = params.get('sso_error')
+
+  if (failure) {
+    error.value = failure
+    window.history.replaceState({}, '', '/login')
+    return
+  }
+  if (!handoff) return
+
+  loading.value = true
+  try {
+    const res = await fetch('/api/auth/app-token/exchange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: handoff }),
+    })
+    if (!res.ok) throw new Error('Die Anmeldung ist abgelaufen. Bitte noch einmal versuchen.')
+    const data = await res.json()
+    auth.token = data.access_token
+    localStorage.setItem('token', data.access_token)
+    await auth.fetchUser()
+    window.history.replaceState({}, '', '/login')
+    router.push(params.get('next') || '/')
+  } catch (e) {
+    error.value = e.message
+    window.history.replaceState({}, '', '/login')
+  } finally {
+    loading.value = false
+  }
+}
 
 onUnmounted(() => {
   if (mfaTimer) clearInterval(mfaTimer)

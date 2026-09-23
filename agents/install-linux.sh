@@ -774,8 +774,12 @@ configure_https() {
     ask PORT "Server Port" "$PORT"
     ask IPFB "Optionale IP als Fallback (leer = keine)" "$IPFB"
 
-    ask TOKEN "Agent-Token (Bearer, im Web-UI erstellt)" "$TOKEN"
-    [[ -z "$TOKEN" ]] && fail "Agent-Token fehlt. Per --token / LOGBOT_TOKEN / Platzhalter setzen."
+    # Der hier eingegebene Schluessel ist nur die Eintrittskarte: er wird gleich
+    # gegen einen eigenen getauscht (siehe enroll_own_token). Am besten eine
+    # Einladung aus dem Web-UI unter "Zugangsschlüssel" - die laeuft ab und
+    # gilt nur einmal.
+    ask TOKEN "Zugangsschlüssel (Einladung oder Generalschlüssel, im Web-UI erstellt)" "$TOKEN"
+    [[ -z "$TOKEN" ]] && fail "Zugangsschlüssel fehlt. Per --token / LOGBOT_TOKEN / Platzhalter setzen."
 
     local ins="$INSECURE"
     ask ins "Selbstsignierte TLS-Zertifikate akzeptieren? (true/false)" "$INSECURE"
@@ -793,10 +797,92 @@ configure_https() {
     check_tcp_reachable "$FQDN" "$PORT" && log_success "HTTPS ${FQDN}:${PORT} erreichbar" \
         || log_warn "HTTPS ${FQDN}:${PORT} derzeit nicht erreichbar - Dienst wird dennoch eingerichtet."
 
+    # Eigenen Schluessel holen, bevor die Konfiguration geschrieben wird.
+    enroll_own_token
+
     write_agent_script
     write_agent_config
     write_systemd_unit
     log_success "HTTPS-Agent eingerichtet: $AGENT_DIR"
+}
+
+# ==============================================================================
+# Eigenen Geraeteschluessel holen
+# ==============================================================================
+# Frueher lag auf jedem Rechner derselbe Schluessel. Wer einen davon aufmachte,
+# hatte den Schluessel fuer alle Geraete - und konnte im Namen jedes beliebigen
+# Rechners Logzeilen erfinden oder Geraete samt Logs loeschen.
+#
+# Jetzt tauscht der Agent den mitgegebenen Schluessel beim Installieren gegen
+# einen EIGENEN, der nur fuer diesen Rechner gilt. Der mitgegebene darf eine
+# kurzlebige Einladung sein (empfohlen) - dann liegt der Generalschluessel
+# nirgends mehr herum.
+#
+# Wichtig: Faellt das Anmelden aus - weil der Server noch eine aeltere Fassung
+# faehrt und den Endpunkt nicht kennt -, laeuft die Installation mit dem
+# mitgegebenen Schluessel weiter. Ein Agent, der sich wegen einer Neuerung
+# gar nicht erst installieren laesst, waere die schlechtere Loesung.
+# Umgesetzt mit python3 statt curl: python3 ist fuer den Agenten ohnehin
+# Voraussetzung (ensure_https_deps stellt es sicher), curl ist auf manchen
+# Minimal-Installationen nicht dabei. Ein Abhaengigkeitsproblem weniger.
+enroll_own_token() {
+    local host; host="$(hostname)"
+    log_info "Melde diesen Rechner am Server an (eigener Schlüssel)..."
+
+    local result
+    result="$("$PYTHON_BIN" - "$FQDN" "$PORT" "$TOKEN" "$host" "$INSECURE" <<'PYENROLL'
+import json
+import ssl
+import sys
+import urllib.error
+import urllib.request
+
+fqdn, port, token, hostname, insecure = sys.argv[1:6]
+
+context = None
+if insecure == "true":
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
+payload = json.dumps({"hostname": hostname, "device_type": "linux_agent"}).encode()
+request = urllib.request.Request(
+    f"https://{fqdn}:{port}/api/agents/enroll",
+    data=payload,
+    method="POST",
+    headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+)
+
+try:
+    with urllib.request.urlopen(request, timeout=20, context=context) as response:
+        data = json.loads(response.read().decode("utf-8", "replace"))
+    own = (data.get("token") or "").strip()
+    print("OK " + own if own else "EMPTY")
+except urllib.error.HTTPError as exc:
+    print(f"HTTP {exc.code}")
+except Exception as exc:                                    # Netz, TLS, DNS
+    print(f"UNREACHABLE {exc}")
+PYENROLL
+)" || result="UNREACHABLE"
+
+    case "$result" in
+        OK\ *)
+            TOKEN="${result#OK }"
+            log_success "Eigener Geräteschlüssel erhalten - der mitgegebene wird nicht gespeichert."
+            ;;
+        "HTTP 404")
+            log_warn "Der Server kennt die Anmeldung noch nicht (ältere Fassung). Nehme den mitgegebenen Schlüssel."
+            ;;
+        "HTTP 401"|"HTTP 403")
+            fail "Der Server hat den Schlüssel abgelehnt. Stimmt er noch, oder ist die Einladung abgelaufen?"
+            ;;
+        UNREACHABLE*)
+            log_warn "Server nicht erreichbar - es wird der mitgegebene Schlüssel eingetragen."
+            ;;
+        *)
+            log_warn "Anmeldung nicht möglich (${result}). Nehme den mitgegebenen Schlüssel."
+            ;;
+    esac
 }
 
 start_https_service() {

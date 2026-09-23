@@ -32,14 +32,25 @@
           >
             <input v-model="config.provider" type="radio" :value="option.id">
             <span>
-              <strong>{{ locale === 'en' ? option.label_en : option.label }}</strong>
+              <strong>
+                {{ locale === 'en' ? option.label_en : option.label }}
+                <!-- Der Unterschied, auf den es bei Logdaten ankommt: bleibt
+                     die Auswertung im Haus oder nicht? -->
+                <span v-if="option.local" class="badge badge-success ml-1">bleibt im Haus</span>
+              </strong>
               <em>{{ option.hint }}</em>
             </span>
           </label>
         </div>
 
-        <p v-if="config.provider !== 'off'" class="alert alert-warning">
+        <p v-if="config.provider !== 'off' && !current?.local" class="alert alert-warning">
           {{ t('ai.dataWarning') }}
+        </p>
+        <p v-else-if="current?.local" class="alert alert-info">
+          Läuft die Gegenstelle auf diesem Server (Open WebUI mit lokalem Modell über
+          Ollama), verlässt keine Logzeile das Haus. Zeigt die Adresse dagegen nach
+          außen, gilt dieselbe Warnung wie bei jedem anderen Anbieter: die ausgewählten
+          Zeilen gehen dorthin.
         </p>
 
         <!-- Nur zeigen, was der gewählte Weg braucht. -->
@@ -54,6 +65,7 @@
           >
           <p class="hint">
             {{ config.api_key_set ? t('ai.apiKeySet') : '' }}
+            {{ current.key_hint || '' }}
             <a v-if="current.key_url" class="link" :href="current.key_url" target="_blank" rel="noopener">
               {{ current.key_url }}
             </a>
@@ -71,7 +83,26 @@
         <div v-if="config.provider !== 'off'" class="grid gap-3 sm:grid-cols-2">
           <div v-if="current?.needs_key">
             <label class="label">{{ t('ai.model') }}</label>
-            <input v-model="config.model" type="text" class="input" :placeholder="current.default_model">
+            <!-- Bei Open WebUI hängt hinter der Adresse das, was der Betreiber
+                 selbst installiert hat - den Namen kann niemand erraten. Also
+                 abfragen statt abtippen lassen. -->
+            <div class="flex gap-2">
+              <input v-model="config.model" type="text" class="input" :placeholder="current.default_model"
+                     list="ai-model-options">
+              <button
+                v-if="config.provider === 'openwebui'"
+                type="button"
+                class="btn btn-secondary btn-sm shrink-0"
+                :disabled="loadingModels"
+                @click="loadModels"
+              >
+                {{ loadingModels ? '…' : 'Modelle holen' }}
+              </button>
+            </div>
+            <datalist id="ai-model-options">
+              <option v-for="entry in models" :key="entry.id" :value="entry.id">{{ entry.label }}</option>
+            </datalist>
+            <p v-if="modelNote" class="hint">{{ modelNote }}</p>
           </div>
           <div>
             <label class="label">{{ t('ai.maxLogs') }}</label>
@@ -185,6 +216,9 @@ const { t, locale } = useI18n()
 
 const config = ref({ provider: 'off', max_logs: 100 })
 const providers = ref([])
+const models = ref([])
+const modelNote = ref('')
+const loadingModels = ref(false)
 const limits = ref({ max_logs: 500 })
 const defaultPrompt = ref('')
 const apiKey = ref('')
@@ -234,6 +268,28 @@ async function save() {
     error.value = err.message
   } finally {
     saving.value = false
+  }
+}
+
+/**
+ * Holt die Modellliste der eingerichteten Gegenstelle (derzeit Open WebUI).
+ *
+ * Warum das nicht automatisch passiert: es braucht Adresse UND Schlüssel, und
+ * beides ist erst nach dem Speichern hinterlegt. Ein Knopf sagt klarer, was
+ * gerade passiert, als eine Abfrage, die im Hintergrund still scheitert.
+ */
+async function loadModels() {
+  loadingModels.value = true
+  modelNote.value = ''
+  try {
+    const data = await auth.api('/api/ai/models')
+    models.value = data.models || []
+    modelNote.value = data.note
+      || (models.value.length ? `${models.value.length} Modell(e) gefunden.` : '')
+  } catch (err) {
+    modelNote.value = err.message
+  } finally {
+    loadingModels.value = false
   }
 }
 
@@ -394,6 +450,13 @@ onMounted(load)
 
 .alert-success {
   background-color: var(--primary-soft);
+  color: var(--color-success);
+}
+
+/* Fuer den umgekehrten Fall: die Daten bleiben hier. Das ist eine gute
+   Nachricht und soll nicht wie eine Warnung aussehen. */
+.alert-info {
+  background-color: var(--success-soft);
   color: var(--color-success);
 }
 

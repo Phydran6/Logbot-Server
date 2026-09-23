@@ -3,6 +3,27 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.23.10.00.00
+
+### Changed
+- **Die Container heißen jetzt so, dass man ihnen ansieht, wem sie gehören.** Vorher hieß alles `logbot-irgendwas` — auch PostgreSQL und Caddy. Das war irreführend: PostgreSQL ist nicht „von LogBot“, es ist PostgreSQL. Und daran hängt eine praktische Frage, nämlich *wie* man ein Ding aktualisiert. Deshalb:
+
+  | Präfix | Was es ist | Wie es aktualisiert wird |
+  |---|---|---|
+  | `logbot-app-*` | aus diesem Quellcode gebaut (backend, frontend, syslog) | System → Updates |
+  | `logbot-ext-*` | fremdes, fertiges Image (postgres, caddy, n8n, …) | System → Container |
+
+  Zusätzlich trägt jeder Dienst Labels (`de.logbot.origin`, `de.logbot.update`, `de.logbot.component`, `de.logbot.role`) — der Name ist für Menschen, die Labels für die Container-Übersicht. Die alten Namen bleiben im Docker-Netz als Alias erreichbar, gespeicherte Adressen wie `http://logbot-n8n:5678` funktionieren also weiter. `db/migrate.sh` akzeptiert beide Namen.
+
+### Removed
+- **Watchtower ist raus.** Es hat Images geholt *und* Container eigenmächtig ausgetauscht — nachts, ohne Ansage, hinterher schwer zuzuordnen. Auf einem Log-Server will das niemand.
+
+### Added
+- **Tugtainer** (`ghcr.io/quenary/tugtainer`, Profil `tugtainer`) nimmt seinen Platz ein und macht standardmäßig nur eines: nachsehen und melden. Der Docker-Socket ist deshalb nur **lesend** eingehängt — damit kann dieser Container gar nichts austauschen, selbst wenn ihn jemand umstellt. Wer es anders will: `TUGTAINER_SOCKET_MODE=rw`. Eingespielt wird in LogBots Oberfläche unter System → Container, in Tugtainers eigener Oberfläche oder auf der Kommandozeile.
+- **Open WebUI** (Profil `openwebui`): KI-Oberfläche, die dieselbe Schnittstelle wie OpenAI spricht, dahinter aber ein lokales Modell haben kann. Mit Ollama verlässt bei der KI-Auswertung keine Logzeile den Server. Ollama selbst ist bewusst *nicht* Teil dieses Stacks — ein Sprachmodell will Arbeitsspeicher und möglichst eine Grafikkarte, das gehört nicht nebenbei auf einen Log-Server; `OLLAMA_BASE_URL` zeigt auf eine vorhandene Installation.
+- Schema: `agent_tokens` bekommt `token_hash`, `prefix`, `kind`, `agent_id`, `max_uses`, `use_count`, `allowed_cidrs`, `expires_at`, `revoked_at`, `last_used_at`, `last_used_ip`, `created_by` und `note`; `token` (Klartext) wird nullable und bleibt nur für Altbestände gefüllt. Neue Tabelle `system_events` für das Systemtagebuch. Beides legt die Startup-Migration auch auf bestehenden Datenbanken an.
+- Portainer und Tugtainer bekommen den Docker-Socket nur lesend. Der Installer würfelt fehlende Pflicht-Geheimnisse (`TUGTAINER_AGENT_SECRET`, `OPENWEBUI_SECRET_KEY`) aus, damit niemand an einer kryptischen Compose-Meldung hängenbleibt.
+
 ## 2026.09.15.20.00.00
 ### Added
 - **Setup-Assistent `setup.sh`** im Wurzelverzeichnis, als Einzeiler startbar

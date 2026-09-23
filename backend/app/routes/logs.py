@@ -37,6 +37,44 @@ LIST_COLUMNS = (
     Log.message,
 )
 
+# Dieselbe Liste, aber mit allem, was der Anzeige-Parser braucht.
+# Bewusst getrennt: `raw_message` ist die mit Abstand groesste Spalte, und wer
+# nur ueberfliegen will, soll sie nicht bei jeder Seite mitschleppen.
+READABLE_COLUMNS = LIST_COLUMNS + (Log.raw_message, Log.facility, Log.extra_data)
+
+# Wie viele Zeilen hoechstens durch den Parser gehen. Das Zerlegen ist reine
+# Textarbeit im Arbeitsspeicher (ein paar Mikrosekunden je Zeile), aber bei
+# 1000 Zeilen pro Seite summiert sich auch das - und niemand liest 1000 Zeilen
+# am Stueck.
+MAX_READABLE_ROWS = 300
+
+
+def _readable_items(rows: list) -> list:
+    """Haengt jeder Zeile ihre lesbare Fassung an.
+
+    Die Rohzeile wandert mit in die Antwort: wenn die Erkennung danebenliegt,
+    muss man sehen koennen, was wirklich ankam. Genau deshalb aendert der
+    Parser auch nie etwas in der Datenbank - er stellt nur anders dar.
+    """
+    items = []
+    for row in rows:
+        item = dict(row)
+        parsed = logparse.parse_log_row(item)
+        item["parsed"] = {
+            "summary": parsed["summary"],
+            "format": parsed["format"],
+            "readable": parsed["readable"],
+            "highlights": parsed["highlights"],
+            "fields": parsed["fields"],
+            "meta": parsed["meta"],
+        }
+        # facility und extra_data haben ihren Dienst getan - sie stecken jetzt
+        # in `parsed` und muessen nicht doppelt ueber die Leitung.
+        item.pop("facility", None)
+        item.pop("extra_data", None)
+        items.append(item)
+    return items
+
 # Kleiner In-Memory-Cache für Dashboard-Stats, um wiederholte Aufrufe zu entlasten
 _stats_cache = None
 _stats_cache_expires = datetime.min
@@ -242,6 +280,7 @@ async def list_logs(
     category: Optional[str] = Query(None, description="Logtyp-Kategorie, siehe /api/logs/filter-options"),
     facility: Optional[int] = Query(None, ge=0, le=23, description="Syslog-Facility (0-23)"),
     device_type: Optional[str] = Query(None, description="Geräteart, z.B. linux_agent, windows_agent, syslog"),
+    readable: bool = Query(False, description="Zeilen zusätzlich lesbar aufbereitet zurückgeben"),
     db: AsyncSession = Depends(get_db),
     _=Depends(get_current_user)
 ):
@@ -257,7 +296,11 @@ async def list_logs(
         min_severity=min_severity, category=category, facility=facility, device_type=device_type,
     )
 
-    query = _apply_filters(select(*LIST_COLUMNS), **filter_args)
+    # Nur wenn wirklich lesbar gewuenscht ist, kommen die dicken Spalten mit.
+    use_readable = readable and page_size <= MAX_READABLE_ROWS
+    columns = READABLE_COLUMNS if use_readable else LIST_COLUMNS
+
+    query = _apply_filters(select(*columns), **filter_args)
     has_filters = any([
         hostname, level, source, search, start_date, end_date,
         min_severity, category, facility is not None, device_type,
@@ -277,7 +320,8 @@ async def list_logs(
     offset = (page - 1) * page_size
     result = await db.execute(query.order_by(desc(Log.timestamp)).offset(offset).limit(page_size))
 
-    items = [dict(row) for row in result.mappings().all()]
+    rows = result.mappings().all()
+    items = _readable_items(rows) if use_readable else [dict(row) for row in rows]
 
     return LogListResponse(items=items, total=total, page=page, page_size=page_size)
 
@@ -315,10 +359,15 @@ async def get_filter_options(db: AsyncSession = Depends(get_db), _=Depends(get_c
 
 
 @router.get("/recent", response_model=List[LogResponse])
-async def get_recent_logs(limit: int = Query(10, ge=1, le=100), db: AsyncSession = Depends(get_db), _=Depends(get_current_user), response: Response = None):
-    query = select(*LIST_COLUMNS).order_by(desc(Log.timestamp)).limit(limit)
+async def get_recent_logs(limit: int = Query(10, ge=1, le=100),
+                          readable: bool = Query(False, description="Lesbar aufbereitet"),
+                          db: AsyncSession = Depends(get_db),
+                          _=Depends(get_current_user), response: Response = None):
+    columns = READABLE_COLUMNS if readable else LIST_COLUMNS
+    query = select(*columns).order_by(desc(Log.timestamp)).limit(limit)
     result = await db.execute(query)
-    items = [dict(row) for row in result.mappings().all()]
+    rows = result.mappings().all()
+    items = _readable_items(rows) if readable else [dict(row) for row in rows]
     if response is not None:
         response.headers["Cache-Control"] = "public, max-age=15"
     return items

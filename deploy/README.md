@@ -9,7 +9,7 @@ Hier liegen die Varianten, die man dazuschaltet.
 |-------|-------|
 | [`external-db.yml`](external-db.yml) | Daten auf einem eigenen Datenbankserver, LogBot läuft nur als Anwendung |
 | [`hardened.yml`](hardened.yml) | Ohne erweiterte Container-Rechte |
-| [`optional.yml`](optional.yml) | Portainer, Watchtower, n8n, Postfix — je hinter einem Profil |
+| [`optional.yml`](optional.yml) | Portainer, Tugtainer, n8n, Open WebUI, Postfix — je hinter einem Profil |
 
 ## Verwendung
 
@@ -35,7 +35,7 @@ Dauerhaft, ohne jedes Mal beide Dateien zu nennen — in die `.env`:
 
 ```
 COMPOSE_FILE=docker-compose.yml:deploy/optional.yml
-COMPOSE_PROFILES=portainer,watchtower
+COMPOSE_PROFILES=portainer,tugtainer
 ```
 
 Genau das schreibt der Installer, wenn man dort Zusatzdienste auswählt, und die

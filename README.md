@@ -43,19 +43,38 @@ Filter nach Host, Zeit, Schweregrad, Kategorie, Facility und Geräteart. Filter
 stehen in der Adresse, gelten auch für den Export (CSV/JSON) und lassen sich als
 Lesezeichen ablegen.
 
+**Logs lesen, nicht entziffern**
+Eine Firewall schickt dreißig `key=value`-Paare, ein Switch eine Zahlenwurst,
+ein Container eine JSON-Zeile. LogBot macht daraus einen Satz und hebt Quell-IP,
+Ziel, Benutzer und Ergebnis als Abzeichen hervor. Die Rohzeile bleibt daneben
+stehen — liegt die Erkennung daneben, sieht man es sofort.
+
 **Auswerten lassen**
-Optional an eine KI geben: direkt an Claude oder ChatGPT, oder über n8n —
-extern oder als Container daneben. Nichts davon ist voreingestellt.
+Optional an eine KI geben: direkt an Claude oder ChatGPT, über n8n, oder an
+**Open WebUI** mit einem lokalen Modell dahinter — dann verlässt keine Logzeile
+den Server. Nichts davon ist voreingestellt.
 
 **Sich selbst verwalten**
 Systemcheck auf Knopfdruck. Patchmanagement, das sich meldet, sobald etwas
-Neues da ist. Sicherungen als ZIP, granular und optional verschlüsselt.
-Reverse Proxy, TLS, DNS, Archivierung, LDAP, MFA und Passkeys — alles im
-Browser, ohne eine einzige Konfigurationsdatei anzufassen.
+Neues da ist, und dessen Ausgabe live mitläuft. Eine Konsole im Browser wie in
+Proxmox VE. Sicherungen als ZIP, granular und optional verschlüsselt.
+Reverse Proxy, TLS, DNS, Archivierung, LDAP, MFA, Passkeys und Anmeldung über
+Microsoft 365 — alles im Browser, ohne eine einzige Konfigurationsdatei
+anzufassen.
+
+**Nachvollziehbar bleiben**
+Jeder Eingriff steht im Systemtagebuch: wer, wann, woran, mit welchem Ausgang.
+Ein „ich weiß nicht, warum das passiert ist“ soll es auf diesem Server nicht
+geben.
+
+**Nicht volllaufen**
+Der Plattenwächter räumt auf, *bevor* es eng wird — ab 80 %, in Häppchen, und
+die letzten 24 Stunden bleiben immer stehen. Ein automatisches „alles weg“ gibt
+es nicht.
 
 **Erweitert werden**
-Portainer, Watchtower, n8n und Postfix stehen bereit — jeder einzeln zuschaltbar,
-keiner läuft ungefragt.
+Portainer, Tugtainer, n8n, Open WebUI und Postfix stehen bereit — jeder einzeln
+zuschaltbar, keiner läuft ungefragt.
 
 ---
 
@@ -94,7 +113,7 @@ Nach der Server-Installation:
   *(bitte sofort ändern; HTTPS danach unter Einstellungen → Netzwerk einschalten)*
 - **API-Doku:** `http://SERVER-IP/api/docs`
 - **Syslog:** Port 514 (UDP/TCP)
-- **Agent-Token** für die Agents: Einstellungen → Agent-Token
+- **Zugangsschlüssel** für die Agents: Verwaltung → Zugang & Sicherheit → Zugangsschlüssel
 
 ### Wenn du schon weißt, was drauf soll
 
@@ -110,11 +129,11 @@ Nur LogBot, Standardwerte:
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh | sudo bash -s -- --yes
 ```
 
-Mit Zusatzdiensten (portainer, watchtower, n8n, postfix):
+Mit Zusatzdiensten (portainer, tugtainer, n8n, openwebui, postfix):
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/install.sh \
-  | sudo bash -s -- --with portainer,watchtower --yes
+  | sudo bash -s -- --with portainer,tugtainer --yes
 ```
 
 Bestimmtes Release in eigenes Verzeichnis:
@@ -316,10 +335,10 @@ Fehlersuche: **[Updates](docs/updates/README.md)**
 | | |
 |---|---|
 | **[Installation](docs/install/README.md)** | Voraussetzungen, Systemprüfung, Zusatzdienste, Hardware-Bedarf |
-| **[Betrieb](docs/operate/README.md)** | Tägliche Handgriffe, Menüführung, Sprache, Systemcheck, Terminal |
+| **[Betrieb](docs/operate/README.md)** | Tägliche Handgriffe, Menüführung, Container, Systemtagebuch, Speicherplatz, Konsole |
 | **[Updates](docs/updates/README.md)** | Patchmanagement, Release-Auswahl, Sofortmeldung bei neuem Stand |
 | **[Sicherung](docs/backup/README.md)** | Sichern, Zurückspielen, Verschlüsselung, Versionsprüfung |
-| **[Integrationen](docs/integrations/README.md)** | Webhooks, n8n, KI, Mail, Portainer, Watchtower |
+| **[Integrationen](docs/integrations/README.md)** | Webhooks, n8n, KI, Open WebUI, Mail, Portainer, Tugtainer |
 | **[API](docs/api/README.md)** | REST-API, Agent-Ingest, App-Schnittstelle |
 | **[Agents](agents/README.md)** | Linux- und Windows-Agent, Einzeiler, Deinstallation |
 | **[Changelog](CHANGELOG/README.md)** | Was sich wann geändert hat |
@@ -346,6 +365,30 @@ Logbot-Server/
 ```
 
 Jedes Verzeichnis hat seine eigene README mit den Einzelheiten.
+
+### Welcher Container gehört wem?
+
+An dieser Frage hängt eine praktische: *wie* aktualisiert man das Ding? Die
+Namen sagen es.
+
+| Container | Was es ist | Wie es aktualisiert wird |
+|---|---|---|
+| `logbot-app-backend` | aus diesem Quellcode gebaut | **System → Updates** |
+| `logbot-app-frontend` | aus diesem Quellcode gebaut | **System → Updates** |
+| `logbot-app-syslog` | aus diesem Quellcode gebaut | **System → Updates** |
+| `logbot-ext-postgres` | PostgreSQL — fremdes Image | **System → Container** |
+| `logbot-ext-caddy` | Caddy — fremdes Image | **System → Container** |
+| `logbot-ext-*` (optional) | n8n, Portainer, Open WebUI, Postfix, Tugtainer | **System → Container** |
+
+Für `logbot-app-*` gibt es nirgends ein fertiges Image — sie werden hier
+gebaut. Ein Image-Update kann es dafür also gar nicht geben. Die `logbot-ext-*`
+dagegen sind ganz normale Images und brauchen ihre eigenen, regelmäßigen
+Updates; LogBots Patchmanagement fasst sie bewusst nicht an.
+
+> Vorher hieß alles `logbot-…`, auch PostgreSQL. Das war irreführend und hat
+> dazu geführt, dass die fremden Images nie aktualisiert wurden. Die alten
+> Namen bleiben im Docker-Netz als Alias erreichbar — gespeicherte Adressen wie
+> `http://logbot-n8n:5678` funktionieren weiter.
 
 ---
 

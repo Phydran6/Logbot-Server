@@ -129,22 +129,64 @@ auch ein neues Passwort setzen.
 
 ---
 
-## Watchtower
+## Tugtainer (löst Watchtower ab)
 
-Holt neue Images und startet die Container damit neu.
+Sieht nach, ob für die **fremden** Images Updates bereitliegen — und meldet sie.
+Mehr nicht.
 
-**Wichtig zum Zusammenspiel mit dem Patchmanagement:** LogBots eigene Container
-werden aus dem Quellcode gebaut, nicht aus einer Registry gezogen. Watchtower
-fasst sie deshalb **nicht** an (`WATCHTOWER_LABEL_ENABLE`) — sonst kämen sich
-zwei Update-Wege in die Quere. Zuständig ist es für die fertigen Images:
-PostgreSQL, Caddy, n8n, Portainer, Postfix.
+**Warum Watchtower raus ist:** Es hat Images geholt *und* Container
+eigenmächtig ausgetauscht. Nachts, ohne Ansage, und hinterher war schwer
+zuzuordnen, warum ein Dienst plötzlich anders lief. Auf einem Log-Server, der
+Nachvollziehbarkeit verspricht, ist das der falsche Mechanismus.
 
-In die `.env` eintragen. `86400` Sekunden heißt einmal täglich; `WATCHTOWER_MONITOR_ONLY=true` würde nur melden statt tauschen:
+Tugtainer bekommt den Docker-Socket deshalb nur **lesend**: es *kann* gar
+nichts austauschen, selbst wenn jemand die Automatik einschaltet. Eingespielt
+wird bewusst — in LogBots Oberfläche unter *System → Container*, in Tugtainers
+eigener Oberfläche oder auf der Kommandozeile.
+
+**Zum Zusammenspiel mit dem Patchmanagement:** LogBots eigene Container
+(`logbot-app-*`) werden aus dem Quellcode gebaut, es gibt für sie gar kein
+Image in einer Registry. Tugtainer kann dort also nichts finden; zuständig ist
+*System → Updates*. Tugtainer kümmert sich um die fertigen Images:
+PostgreSQL, Caddy, n8n, Portainer, Open WebUI, Postfix.
+
+Oberfläche unter `127.0.0.1:9412`. In die `.env`, falls man den Socket doch
+schreibbar machen will:
 
 ```
-WATCHTOWER_INTERVAL=86400
-WATCHTOWER_MONITOR_ONLY=false
+TUGTAINER_SOCKET_MODE=rw
 ```
+
+> LogBot prüft Image-Updates auch **ohne** Tugtainer: *System → Container →
+> Auf Updates prüfen* fragt die Registry direkt nach dem Abdruck des benutzten
+> Tags. Tugtainer bringt Zeitplan, eigene Oberfläche und mehrere Hosts dazu.
+
+---
+
+## Open WebUI
+
+KI-Oberfläche, die dieselbe Schnittstelle spricht wie OpenAI — dahinter aber
+das Modell hat, das man selbst wählt.
+
+**Warum das interessant ist:** Mit einem lokalen Modell über Ollama verlässt
+bei der KI-Auswertung **keine einzige Logzeile den Server**. Für Logdaten, in
+denen Benutzernamen, interne Adressen und Fehlermeldungen stehen, ist das oft
+der Unterschied zwischen „geht“ und „geht nicht“.
+
+Ollama selbst ist bewusst **nicht** Teil dieses Stacks: Ein Sprachmodell will
+mehrere Gigabyte Arbeitsspeicher und möglichst eine Grafikkarte, und das gehört
+nicht nebenbei auf einen Log-Server. In die `.env` kommt die Adresse einer
+vorhandenen Installation:
+
+```
+OLLAMA_BASE_URL=http://192.168.1.50:11434
+```
+
+Einzurichten unter *Auswertung → KI-Auswertung*, Anbieter **Open WebUI**. Es
+braucht die Adresse (intern: `http://logbot-openwebui:8080`) und einen
+API-Schlüssel aus Open WebUI (dort unter *Profil → Einstellungen → Konto*).
+Der Knopf „Modelle holen“ liest die verfügbaren Modelle aus, damit der Name
+nicht geraten werden muss.
 
 ---
 

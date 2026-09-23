@@ -354,6 +354,102 @@ async def read_run_log(lines: int = 200) -> list:
     return hostexec.split_lines(raw, limit=lines)
 
 
+async def log_size() -> int:
+    """Wie gross ist das Wartungsprotokoll gerade? (Bytes, 0 wenn es fehlt.)"""
+    paths = hostexec.host_paths()
+    result = await hostexec.run_host(
+        ["sh", "-c", f'wc -c < "{paths["log_file"]}" 2>/dev/null || echo 0'], timeout=10.0)
+    try:
+        return int((result.stdout or "0").strip() or 0)
+    except ValueError:
+        return 0
+
+
+async def read_log_from(offset: int, limit_bytes: int = 65536) -> tuple:
+    """Alles, was seit `offset` dazugekommen ist. Gibt (Text, neuer Offset).
+
+    Damit laesst sich das Protokoll wie ein `tail -f` mitlesen, ohne die ganze
+    Datei bei jedem Takt erneut durch den Host zu schleusen - waehrend eines
+    Updates schreibt das Skript zuegig, und die Datei wird schnell gross.
+
+    Wird die Datei kleiner als der Offset (ein neuer Lauf faengt von vorne an),
+    beginnt das Mitlesen wieder bei Null - sonst bliebe die Ausgabe stumm.
+    """
+    paths = hostexec.host_paths()
+    size = await log_size()
+    if size < offset:
+        offset = 0                    # neuer Lauf, Datei wurde ueberschrieben
+    if size <= offset:
+        return "", offset
+
+    result = await hostexec.run_host(
+        ["sh", "-c",
+         f'tail -c +{offset + 1} "{paths["log_file"]}" 2>/dev/null | head -c {int(limit_bytes)}'],
+        timeout=15.0)
+    if not result.ok:
+        return "", offset
+
+    chunk = result.stdout or ""
+    return chunk, offset + len(chunk.encode("utf-8", "replace"))
+
+
+async def stream_run_log(poll_seconds: float = 1.0, idle_stop_seconds: float = 900.0):
+    """Server-Sent Events mit der laufenden Ausgabe des Wartungslaufs.
+
+    Wozu: Ein Fortschrittsbalken sagt "43 %". Er sagt nicht, *woran* es gerade
+    haengt - und wenn etwas schiefgeht, sagt er gar nichts. Wer zusehen kann,
+    wie `docker compose build` durchlaeuft, weiss im Fehlerfall sofort, wo es
+    klemmte, statt hinterher zu raten.
+
+    Der Strom endet von selbst, wenn der Lauf fertig ist und danach eine Weile
+    nichts mehr kommt - ein offener Kanal, an dem niemand mehr haengt, soll
+    nicht ewig weiterlaufen.
+    """
+    import json as _json
+
+    offset = 0
+    quiet_for = 0.0
+    finished_at: Optional[float] = None
+
+    # Erst den bisherigen Stand nachreichen, damit wer spaeter dazukommt den
+    # Anfang nicht verpasst.
+    history = await read_run_log(lines=400)
+    if history:
+        payload = _json.dumps({"lines": history, "initial": True}, ensure_ascii=False)
+        yield f"event: update.output\ndata: {payload}\n\n"
+        offset = await log_size()
+
+    while True:
+        chunk, offset = await read_log_from(offset)
+        if chunk:
+            quiet_for = 0.0
+            lines = [line.rstrip() for line in chunk.splitlines() if line.strip()]
+            if lines:
+                payload = _json.dumps({"lines": lines, "initial": False}, ensure_ascii=False)
+                yield f"event: update.output\ndata: {payload}\n\n"
+        else:
+            quiet_for += poll_seconds
+            if quiet_for >= 15.0:
+                quiet_for = 0.0
+                yield ": heartbeat\n\n"
+
+        state = await read_run_state()
+        payload = _json.dumps(state, ensure_ascii=False, default=str)
+        yield f"event: update.state\ndata: {payload}\n\n"
+
+        if state.get("status") not in ("running", "unknown"):
+            # Fertig - aber noch kurz dranbleiben, damit die letzten Zeilen
+            # sicher ankommen.
+            finished_at = finished_at or time.time()
+            if time.time() - finished_at > 10:
+                yield "event: update.done\ndata: {}\n\n"
+                return
+        else:
+            finished_at = None
+
+        await asyncio.sleep(poll_seconds)
+
+
 async def list_backups() -> list:
     """Vorhandene Sicherungen (fuer den Rueckfall).
 

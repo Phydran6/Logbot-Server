@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..models import Webhook, User
 from ..schemas import WebhookCreate, WebhookUpdate, WebhookResponse
-from ..auth import get_current_user
+from ..auth import get_current_user, get_current_admin
 
 router = APIRouter(prefix="/api/webhooks", tags=["Webhooks"])
 
@@ -30,8 +30,20 @@ async def get_webhook(webhook_id: int, db: AsyncSession = Depends(get_db), _=Dep
         raise HTTPException(status_code=404, detail="Webhook nicht gefunden")
     return webhook
 
+# ==============================================================================
+# Anlegen und aendern: nur Administratoren
+# ==============================================================================
+# Warum das enger ist als frueher: Ein Webhook ist ein Endpunkt, der OHNE
+# Anmeldung Logdaten herausgibt - der Token steht in der Adresse, mehr braucht
+# es nicht. Wer einen anlegen darf, kann sich also einen dauerhaften, offenen
+# Abgriff auf den Logbestand bauen und ihn weitergeben.
+#
+# Vorher genuegte dafuer ein beliebiges angemeldetes Konto. Ein Benutzer mit
+# reinen Leserechten konnte sich damit einen Zugang schaffen, der auch nach dem
+# Sperren seines Kontos weiterlief. Lesen darf die Liste weiterhin jeder
+# Angemeldete; anlegen, aendern, neu wuerfeln und loeschen nur Administratoren.
 @router.post("", response_model=WebhookResponse, status_code=201)
-async def create_webhook(data: WebhookCreate, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+async def create_webhook(data: WebhookCreate, db: AsyncSession = Depends(get_db), _=Depends(get_current_admin)):
     webhook = Webhook(
         name=data.name, description=data.description, token=secrets.token_hex(32),
         filters=data.filters.model_dump() if data.filters else {},
@@ -43,7 +55,7 @@ async def create_webhook(data: WebhookCreate, db: AsyncSession = Depends(get_db)
     return webhook
 
 @router.put("/{webhook_id}", response_model=WebhookResponse)
-async def update_webhook(webhook_id: int, data: WebhookUpdate, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+async def update_webhook(webhook_id: int, data: WebhookUpdate, db: AsyncSession = Depends(get_db), _=Depends(get_current_admin)):
     result = await db.execute(select(Webhook).where(Webhook.id == webhook_id))
     webhook = result.scalar_one_or_none()
     if not webhook:
@@ -59,7 +71,7 @@ async def update_webhook(webhook_id: int, data: WebhookUpdate, db: AsyncSession 
     return webhook
 
 @router.post("/{webhook_id}/regenerate-token", response_model=WebhookResponse)
-async def regenerate_token(webhook_id: int, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+async def regenerate_token(webhook_id: int, db: AsyncSession = Depends(get_db), _=Depends(get_current_admin)):
     result = await db.execute(select(Webhook).where(Webhook.id == webhook_id))
     webhook = result.scalar_one_or_none()
     if not webhook:
@@ -70,7 +82,7 @@ async def regenerate_token(webhook_id: int, db: AsyncSession = Depends(get_db), 
     return webhook
 
 @router.delete("/{webhook_id}", status_code=204)
-async def delete_webhook(webhook_id: int, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+async def delete_webhook(webhook_id: int, db: AsyncSession = Depends(get_db), _=Depends(get_current_admin)):
     result = await db.execute(select(Webhook).where(Webhook.id == webhook_id))
     webhook = result.scalar_one_or_none()
     if not webhook:

@@ -2,6 +2,20 @@
 
 Installer & Log-Forwarder für Linux/Windows (`agents/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.23.10.00.00
+
+### Security
+- **Jeder Agent holt sich beim Installieren einen eigenen Schlüssel.** Bisher lag auf jedem Rechner derselbe: Wer einen davon aufmachte, hatte den Schlüssel für alle Geräte — und konnte im Namen jedes beliebigen Rechners Logzeilen erfinden oder Geräte samt Logs löschen. Beide Installer (Linux und Windows) tauschen den mitgegebenen Schlüssel jetzt über `POST /api/agents/enroll` gegen einen eigenen, der nur für diesen Rechner gilt. Gespeichert wird nur noch dieser.
+- Der mitgegebene Schlüssel darf eine **Einladung** sein (im Web-UI unter Zugangsschlüssel): kurzlebig, zählbar, darf ausschließlich einen Geräteschlüssel anfordern. Damit muss der Generalschlüssel nicht mehr auf jeden Rechner kopiert werden.
+- Beim Deinstallieren wird der Schlüssel des Geräts auf dem Server entwertet. Ein deinstallierter Agent lässt keinen gültigen Schlüssel zurück.
+
+### Changed
+- Die Abfrage heißt nicht mehr „Agent-Token“, sondern „Zugangsschlüssel“ — und der Text sagt, dass eine Einladung der bessere Weg ist.
+- Die Anmeldung im Linux-Installer läuft über `python3` statt `curl`: python3 ist für den Agenten ohnehin Voraussetzung, curl ist auf Minimal-Installationen nicht immer dabei. Eine Abhängigkeit weniger.
+
+### Fixed
+- **Die Installation scheitert nicht, wenn der Server die Anmeldung noch nicht kennt.** Antwortet er mit 404 (ältere Fassung) oder ist er gerade nicht erreichbar, wird der mitgegebene Schlüssel eingetragen und die Installation läuft durch. Nur ein ausdrücklich abgelehnter Schlüssel (401/403) bricht ab — dann stimmt er wirklich nicht.
+
 ## 2026.09.15.20.00.00
 ### Added
 - **`--proto udp|tcp`** (auch `LOGBOT_PROTO`) für den Syslog-Modus des Linux-Agents. Das

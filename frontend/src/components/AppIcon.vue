@@ -236,6 +236,34 @@ const ICONS = {
     { d: 'M12 3v9' },
     { d: 'M18.4 6.6a9 9 0 1 1-12.8 0' },
   ],
+
+  // Mit der neuen Menuestruktur dazugekommen
+  shield: [
+    { d: 'M12 22s8-3.5 8-10V5.5L12 2 4 5.5V12c0 6.5 8 10 8 10z' },
+    { d: 'M9 12l2 2 4-4' },
+  ],
+  help: [
+    { circle: [12, 12, 9] },
+    { d: 'M9.2 9.2a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4' },
+    { line: [12, 17.5, 12.01, 17.5] },
+  ],
+  mobile: [
+    { rect: [6, 2, 12, 20, 2] },
+    { line: [10.5, 18.5, 13.5, 18.5] },
+  ],
+  container: [
+    { rect: [3, 7, 18, 12, 1.5] },
+    { line: [8, 7, 8, 19] },
+    { line: [12, 7, 12, 19] },
+    { line: [16, 7, 16, 19] },
+  ],
+  // Alias: 'palette' liest sich an manchen Stellen natuerlicher als 'branding'.
+  palette: [
+    { d: 'M12 3a9 9 0 0 0 0 18c1.1 0 2-.9 2-2 0-.53-.21-1-.55-1.36-.33-.35-.53-.82-.53-1.34 0-1.1.9-2 2-2H17a4 4 0 0 0 4-4c0-4.42-4.03-7.3-9-7.3z' },
+    { circle: [7.5, 11, 1.1] },
+    { circle: [11, 7.5, 1.1] },
+    { circle: [15.5, 9.5, 1.1] },
+  ],
 }
 
 const shapes = computed(() => ICONS[props.name] || [])

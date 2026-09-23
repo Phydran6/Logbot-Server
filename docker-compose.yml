@@ -1,11 +1,40 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.31.20.06.53
+# Changelog:   CHANGELOG/database.md
 # Beschreibung: LogBot - Docker Compose Konfiguration
+# ==============================================================================
+#
+# NAMEN: WAS IST HIER EIGENTLICH WESSEN?
+#
+#   Frueher hiess jeder Container in diesem Stack `logbot-irgendwas` - auch
+#   PostgreSQL und Caddy. Das war irrefuehrend: PostgreSQL ist nicht "von
+#   LogBot", es ist PostgreSQL. Und daran haengt eine praktische Frage, naemlich
+#   *wie* man ein Ding aktualisiert. Deshalb sagen die Namen es jetzt:
+#
+#     logbot-app-*   Aus DIESEM Quellcode gebaut (backend, frontend, syslog).
+#                    Aktualisiert werden sie ueber System -> Updates: neuer
+#                    Stand von GitHub, Container neu bauen. Ein Image-Update
+#                    gibt es fuer sie nicht - es gibt kein fertiges Image.
+#
+#     logbot-ext-*   Fremde, fertige Images (postgres, caddy, ...). Die werden
+#                    aktualisiert, indem man ein neueres Image holt - genau wie
+#                    ueberall sonst auch. Zustaendig dafuer: System -> Container.
+#                    LogBots Patchmanagement fasst sie NICHT an.
+#
+#   Zusaetzlich traegt jeder Dienst Labels (de.logbot.*). Danach richten sich
+#   die Container-Uebersicht in der Oberflaeche und der Update-Pruefer
+#   (Tugtainer) - der Name allein ist fuer Menschen, die Labels fuer Maschinen.
+#
+#   Alte Namen bleiben im Docker-Netz als Alias erreichbar. Eine gespeicherte
+#   Adresse wie `http://logbot-n8n:5678` funktioniert also weiter.
 # ==============================================================================
 
 services:
+
+  # ============================================================================
+  # FREMD: PostgreSQL. Nicht von LogBot - ganz normales PostgreSQL.
+  # ============================================================================
   postgres:
     # PostgreSQL-Major-Version ueber POSTGRES_VERSION in .env steuerbar.
     # Standard: 17 (neu + stabil). Neuinstallationen bekommen direkt 17-alpine.
@@ -13,8 +42,16 @@ services:
     # dann laeuft alles sofort weiter. Datenerhaltendes Upgrade: db/migrate.sh.
     # Details: README -> "Update / PostgreSQL-Major-Upgrade".
     image: postgres:${POSTGRES_VERSION:-17}-alpine
-    container_name: logbot-postgres
+    container_name: logbot-ext-postgres
+    hostname: postgres
     restart: unless-stopped
+    labels:
+      de.logbot.stack: "core"
+      de.logbot.origin: "upstream"          # fremdes Image
+      de.logbot.update: "image"             # Update = neueres Image holen
+      de.logbot.component: "postgres"
+      de.logbot.role: "Datenbank — hier liegen alle Logs"
+      de.logbot.critical: "true"
     environment:
       POSTGRES_USER: ${DB_USER:-logbot}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD muss gesetzt sein}
@@ -34,15 +71,30 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - logbot
+      logbot:
+        aliases:
+          - postgres
+          - logbot-postgres                 # alter Name, damit nichts bricht
 
+  # ============================================================================
+  # EIGEN: Syslog-Empfaenger. Aus ./syslog gebaut.
+  # ============================================================================
   syslog:
     build: ./syslog
-    container_name: logbot-syslog
+    image: logbot/syslog:local
+    container_name: logbot-app-syslog
+    hostname: syslog
     restart: unless-stopped
+    labels:
+      de.logbot.stack: "core"
+      de.logbot.origin: "logbot"            # aus diesem Quellcode gebaut
+      de.logbot.update: "source"            # Update = System -> Updates
+      de.logbot.component: "syslog"
+      de.logbot.role: "Nimmt Syslog auf Port 514 entgegen (UDP und TCP)"
+      de.logbot.critical: "true"
     environment:
       # Bei externer Datenbank DB_HOST in der .env auf den externen Server setzen
-      # (oder DATABASE_URL nutzen) - siehe docker-compose.external-db.yml.
+      # (oder DATABASE_URL nutzen) - siehe deploy/external-db.yml.
       DB_HOST: ${DB_HOST:-postgres}
       DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${DB_USER:-logbot}
@@ -57,18 +109,33 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - logbot
+      logbot:
+        aliases:
+          - syslog
+          - logbot-syslog
 
+  # ============================================================================
+  # EIGEN: Backend (FastAPI). Aus ./backend gebaut.
+  # ============================================================================
   backend:
     build: ./backend
-    container_name: logbot-backend
+    image: logbot/backend:local
+    container_name: logbot-app-backend
+    hostname: backend
     restart: unless-stopped
+    labels:
+      de.logbot.stack: "core"
+      de.logbot.origin: "logbot"
+      de.logbot.update: "source"
+      de.logbot.component: "backend"
+      de.logbot.role: "API, Oberflaechen-Logik, Patchmanagement, Terminal"
+      de.logbot.critical: "true"
     # ACHTUNG, bewusst weitreichende Rechte: privileged + pid:host + SYS_BOOT
-    # existieren nur fuer den Neustart-Knopf unter "Einstellungen" (der Container
-    # startet damit den *Host* neu) und fuer das Lesen der Host-DNS-Konfiguration.
+    # existieren fuer den Neustart-Knopf, das Terminal, das Patchmanagement und
+    # die Container-Verwaltung (der Container steuert damit den *Host*).
     # Preis: wer im Backend Code ausfuehren kann, uebernimmt den ganzen Server.
-    # Wer den Neustart-Knopf nicht braucht, faehrt die Rechte herunter mit:
-    #   docker compose -f docker-compose.yml -f docker-compose.hardened.yml up -d
+    # Wer das nicht braucht, faehrt die Rechte herunter mit:
+    #   docker compose -f docker-compose.yml -f deploy/hardened.yml up -d
     privileged: true
     pid: "host"
     security_opt:
@@ -112,11 +179,23 @@ services:
       # viele aufgehoben werden.
       LOGBOT_BACKUP_DIR: /backups
       LOGBOT_KEEP_BACKUPS: ${LOGBOT_KEEP_BACKUPS:-10}
-      # Terminal im Browser (System -> Terminal). Bewusst standardmaessig AUS:
-      # es oeffnet eine Root-Shell auf dem HOST. Siehe app/shell.py.
-      LOGBOT_WEBSHELL: ${LOGBOT_WEBSHELL:-false}
+      # Terminal im Browser (System -> Konsole). Es oeffnet eine Root-Shell auf
+      # dem HOST - wie die Konsole in Proxmox VE. Nur Administratoren, jede
+      # Sitzung wird protokolliert. Abschalten: LOGBOT_WEBSHELL=false.
+      LOGBOT_WEBSHELL: ${LOGBOT_WEBSHELL:-true}
       LOGBOT_WEBSHELL_MAX_SESSIONS: ${LOGBOT_WEBSHELL_MAX_SESSIONS:-3}
       LOGBOT_WEBSHELL_IDLE_TIMEOUT: ${LOGBOT_WEBSHELL_IDLE_TIMEOUT:-900}
+      # Plattenwaechter: raeumt auf, BEVOR es eng wird. Siehe app/diskguard.py.
+      DISK_MONITOR_INTERVAL: ${DISK_MONITOR_INTERVAL:-60}
+      DISK_USAGE_WARN: ${DISK_USAGE_WARN:-80}
+      DISK_USAGE_HIGH: ${DISK_USAGE_HIGH:-88}
+      DISK_USAGE_THRESHOLD: ${DISK_USAGE_THRESHOLD:-93}
+      DISK_USAGE_TARGET: ${DISK_USAGE_TARGET:-75}
+      DISK_MIN_KEEP_HOURS: ${DISK_MIN_KEEP_HOURS:-24}
+      DISK_ALLOW_TRUNCATE: ${DISK_ALLOW_TRUNCATE:-false}
+      # Anmeldung ueber Microsoft 365 / Entra ID (OpenID Connect).
+      # Eingerichtet wird das in der Oberflaeche unter Sicherheit -> Single Sign-on.
+      OIDC_ENABLED: ${OIDC_ENABLED:-}
       # Sprache der Oberflaeche, wenn ein Browser nichts anderes verlangt.
       LOGBOT_DEFAULT_LANGUAGE: ${LOGBOT_DEFAULT_LANGUAGE:-de}
     expose:
@@ -132,23 +211,52 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - logbot
+      logbot:
+        aliases:
+          - backend
+          - logbot-backend
 
+  # ============================================================================
+  # EIGEN: Frontend (Vue, ausgeliefert von nginx). Aus ./frontend gebaut.
+  # ============================================================================
   frontend:
     build: ./frontend
-    container_name: logbot-frontend
+    image: logbot/frontend:local
+    container_name: logbot-app-frontend
+    hostname: frontend
     restart: unless-stopped
+    labels:
+      de.logbot.stack: "core"
+      de.logbot.origin: "logbot"
+      de.logbot.update: "source"
+      de.logbot.component: "frontend"
+      de.logbot.role: "Die Weboberflaeche"
+      de.logbot.critical: "true"
     expose:
       - "80"
     depends_on:
       - backend
     networks:
-      - logbot
+      logbot:
+        aliases:
+          - frontend
+          - logbot-frontend
 
+  # ============================================================================
+  # FREMD: Caddy. Reverse Proxy und TLS - nicht von LogBot.
+  # ============================================================================
   caddy:
-    image: caddy:2-alpine
-    container_name: logbot-caddy
+    image: caddy:${CADDY_VERSION:-2}-alpine
+    container_name: logbot-ext-caddy
+    hostname: caddy
     restart: unless-stopped
+    labels:
+      de.logbot.stack: "core"
+      de.logbot.origin: "upstream"
+      de.logbot.update: "image"
+      de.logbot.component: "caddy"
+      de.logbot.role: "Reverse Proxy und TLS-Zertifikate"
+      de.logbot.critical: "true"
     ports:
       - "80:80"
       - "443:443"
@@ -161,17 +269,22 @@ services:
       - frontend
       - backend
     networks:
-      - logbot
+      logbot:
+        aliases:
+          - caddy
+          - logbot-caddy
 
-# HINWEIS zu Zusatzdiensten: In DIESEM Stack laeuft bewusst nichts Fremdes.
-# Portainer, Watchtower, n8n und Postfix liegen in deploy/optional.yml und
-# haengen dort je an einem eigenen Profil - eingeschaltet wird bewusst, in der
-# Oberflaeche unter System -> Zusatzdienste oder beim Installieren.
+# HINWEIS zu Zusatzdiensten: In DIESEM Stack laeuft bewusst nichts Fremdes,
+# ausser dem, was LogBot zum Laufen braucht (PostgreSQL und Caddy).
+# Portainer, Tugtainer, n8n, Open WebUI und Postfix liegen in
+# deploy/optional.yml und haengen dort je an einem eigenen Profil -
+# eingeschaltet wird bewusst, in der Oberflaeche unter System -> Zusatzdienste
+# oder beim Installieren.
 #
-# Der Grund fuer die Trennung: Portainer und Watchtower brauchen den
+# Der Grund fuer die Trennung: Portainer und Tugtainer brauchen den
 # Docker-Socket, und wer darauf schreiben kann, ist faktisch root auf diesem
 # Server. Genau deshalb wurde der frueher hier enthaltene portainer-agent
-# entfernt. Wer die Dienste will, bekommt sie - aber nicht nebenbei.
+# entfernt, und deshalb bekommt Tugtainer den Socket nur lesend.
 #
 #   docker compose -f docker-compose.yml -f deploy/optional.yml \
 #     --profile portainer up -d

@@ -224,16 +224,41 @@
           <template v-if="loading">Lade…</template>
           <template v-else>{{ total.toLocaleString('de-DE') }} Einträge</template>
         </span>
-        <div class="flex items-center gap-2">
-          <label class="text-xs" :style="{ color: 'var(--color-text-muted)' }">Zeilen:</label>
-          <select v-model.number="pageSize" class="rounded px-2 py-1 text-sm" :style="inputStyle" @change="page = 1; loadLogs()">
-            <option :value="50">50</option>
-            <option :value="100">100</option>
-            <option :value="250">250</option>
-            <option :value="500">500</option>
-          </select>
+        <div class="flex items-center gap-4">
+          <!-- Lesbar oder roh.
+
+               Die Rohzeile ist das, was das Gerät geschickt hat - bei einer
+               Firewall dreißig key=value-Paare, bei einem Switch eine
+               Zahlenwurst. Für die Beweisführung unverzichtbar, zum
+               Überfliegen unbrauchbar. Deshalb der Schalter: „Lesbar" zeigt
+               den Satz, den der Parser daraus macht, und die wichtigsten
+               Angaben als Abzeichen. Die Rohzeile bleibt eine Zeile
+               darunter - wenn die Erkennung danebenliegt, sieht man es
+               sofort. -->
+          <label
+            class="flex items-center gap-2 text-xs cursor-pointer select-none"
+            :style="{ color: 'var(--color-text-secondary)' }"
+            :title="readableHint"
+          >
+            <input type="checkbox" v-model="readable" :disabled="pageSize > 300">
+            Lesbar
+          </label>
+
+          <div class="flex items-center gap-2">
+            <label class="text-xs" :style="{ color: 'var(--color-text-muted)' }">Zeilen:</label>
+            <select v-model.number="pageSize" class="rounded px-2 py-1 text-sm" :style="inputStyle" @change="page = 1; loadLogs()">
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+              <option :value="250">250</option>
+              <option :value="500">500</option>
+            </select>
+          </div>
         </div>
       </div>
+      <p v-if="readable && pageSize > 300" class="px-4 pb-2 text-xs" :style="{ color: 'var(--color-text-muted)' }">
+        Die lesbare Darstellung gibt es bis 300 Zeilen pro Seite — darüber kostet das
+        Zerlegen mehr, als es beim Überfliegen bringt.
+      </p>
 
       <div class="overflow-x-auto">
         <table class="w-full">
@@ -275,7 +300,32 @@
                 {{ log.source || '–' }}
               </td>
               <td class="px-4 py-2.5 text-sm" :style="{ color: 'var(--color-text-secondary)', maxWidth: '40vw' }">
-                <span class="block truncate">{{ log.message }}</span>
+                <template v-if="readable && log.parsed">
+                  <span class="block truncate" :style="{ color: 'var(--color-text-primary)' }">
+                    {{ log.parsed.summary || log.message }}
+                  </span>
+                  <!-- Die paar Angaben, die fast immer interessieren: Quelle,
+                       Ziel, Benutzer, Ergebnis. Als Abzeichen, damit man sie
+                       nicht aus dem Satz herauslesen muss. -->
+                  <span v-if="log.parsed.highlights?.length" class="flex flex-wrap gap-1 mt-1">
+                    <span
+                      v-for="badge in log.parsed.highlights"
+                      :key="badge.key + badge.value"
+                      class="chip"
+                      :style="chipStyleFor(badge.kind)"
+                    >
+                      <span class="opacity-70">{{ badge.label }}</span>
+                      <span class="font-medium">{{ badge.value }}</span>
+                    </span>
+                  </span>
+                  <!-- Die Rohzeile bleibt sichtbar - gekuerzt, aber da. -->
+                  <span
+                    v-if="differsFromRaw(log)"
+                    class="block truncate text-xs mt-0.5 font-mono"
+                    :style="{ color: 'var(--color-text-muted)' }"
+                  >{{ log.raw_message }}</span>
+                </template>
+                <span v-else class="block truncate">{{ log.message }}</span>
               </td>
             </tr>
 
@@ -347,6 +397,42 @@
             </div>
           </div>
 
+          <!-- Lesbare Fassung: Zusammenfassung, Abzeichen, erkannte Felder.
+
+               Erst das, was ein Mensch braucht. Die Rohzeile steht darunter,
+               unveraendert - der Parser aendert nie Daten, er stellt nur
+               anders dar. -->
+          <div v-if="parsed?.readable">
+            <p class="text-xs mb-1" :style="{ color: 'var(--color-text-muted)' }">
+              Lesbar ({{ parsed.format }})
+            </p>
+            <p class="text-sm mb-2" :style="{ color: 'var(--color-text-primary)' }">{{ parsed.summary }}</p>
+
+            <div v-if="parsed.highlights?.length" class="flex flex-wrap gap-1 mb-2">
+              <span
+                v-for="badge in parsed.highlights"
+                :key="badge.key + badge.value"
+                class="chip"
+                :style="chipStyleFor(badge.kind)"
+              >
+                <span class="opacity-70">{{ badge.label }}</span>
+                <span class="font-medium">{{ badge.value }}</span>
+              </span>
+            </div>
+
+            <div v-if="Object.keys(parsed.fields || {}).length" class="rounded overflow-hidden" :style="codeBlockStyle">
+              <div
+                v-for="(value, key) in parsed.fields"
+                :key="key"
+                class="flex gap-3 px-3 py-1.5 text-xs border-b last:border-b-0"
+                :style="{ borderColor: 'var(--color-border)' }"
+              >
+                <span class="w-40 shrink-0" :style="{ color: 'var(--color-text-muted)' }">{{ key }}</span>
+                <span class="min-w-0 break-all font-mono" :style="{ color: 'var(--color-text-primary)' }">{{ value }}</span>
+              </div>
+            </div>
+          </div>
+
           <!-- Nachricht -->
           <div>
             <p class="text-xs mb-1" :style="{ color: 'var(--color-text-muted)' }">Nachricht</p>
@@ -415,8 +501,30 @@ const pageSize = ref(100)
 const loading = ref(false)
 const exporting = ref(false)
 const selectedLog = ref(null)
+const parsed = ref(null)
 const error = ref('')
 const filterOpen = ref(true)
+
+// Lesbare Darstellung. Die Wahl bleibt gemerkt - wer einmal entschieden hat,
+// wie er Logs liest, will das nicht bei jedem Seitenaufruf neu einstellen.
+const READABLE_KEY = 'logbot.logs.readable'
+
+function readStoredReadable() {
+  try {
+    // Vorgabe: an. Die Rohzeile ist weiter da, nur eine Zeile tiefer.
+    return localStorage.getItem(READABLE_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+const readable = ref(readStoredReadable())
+
+const readableHint = computed(() => (
+  readable.value
+    ? 'Zeigt den Satz, den LogBot aus der Rohzeile macht — die Rohzeile bleibt darunter stehen.'
+    : 'Zeigt die Meldung so, wie sie in der Datenbank steht.'
+))
 
 const EMPTY_FILTERS = {
   hostname: '',
@@ -616,6 +724,9 @@ async function loadLogs() {
     const p = buildFilterParams()
     p.append('page', page.value)
     p.append('page_size', pageSize.value)
+    // Nur anfordern, wenn es auch etwas bringt: ueber 300 Zeilen liefert der
+    // Server die lesbare Fassung ohnehin nicht mehr mit.
+    if (readable.value && pageSize.value <= 300) p.append('readable', 'true')
 
     const data = await authStore.api(`/api/logs?${p}`)
     logs.value  = data.items
@@ -627,10 +738,55 @@ async function loadLogs() {
   }
 }
 
-async function showDetail(log) {
+// Umschalten wirkt sofort und bleibt gemerkt.
+watch(readable, (value) => {
   try {
-    selectedLog.value = await authStore.api(`/api/logs/${log.id}`)
-  } catch {}
+    localStorage.setItem(READABLE_KEY, value ? '1' : '0')
+  } catch {
+    // Privater Modus: die Wahl gilt dann nur fuer diese Sitzung.
+  }
+  loadLogs()
+})
+
+/** Lohnt es sich, die Rohzeile zusaetzlich zu zeigen? */
+function differsFromRaw(log) {
+  if (!log.raw_message) return false
+  const summary = (log.parsed?.summary || '').trim()
+  const raw = log.raw_message.trim()
+  return raw.length > 0 && raw !== summary && raw !== (log.message || '').trim()
+}
+
+/** Faerbt ein Abzeichen nach Art des Wertes - IP anders als Aktion. */
+function chipStyleFor(kind) {
+  const map = {
+    ip: 'var(--color-primary)',
+    mac: 'var(--color-secondary)',
+    state: 'var(--color-accent)',
+    number: 'var(--color-text-secondary)',
+    url: 'var(--color-primary)',
+  }
+  const color = map[kind] || 'var(--color-text-secondary)'
+  return {
+    color,
+    borderColor: color,
+    backgroundColor: 'var(--color-surface-elevated)',
+  }
+}
+
+async function showDetail(log) {
+  parsed.value = null
+  try {
+    // Die zerlegte Fassung bringt die Rohzeile unveraendert mit - ein Aufruf
+    // statt zwei.
+    const data = await authStore.api(`/api/logs/${log.id}/parsed`)
+    selectedLog.value = data
+    parsed.value = data.parsed
+  } catch {
+    // Faellt der Parser aus, bleibt die Zeile trotzdem ansehbar.
+    try {
+      selectedLog.value = await authStore.api(`/api/logs/${log.id}`)
+    } catch {}
+  }
 }
 
 function filterByHost(hostname) {
@@ -770,5 +926,20 @@ function levelBadge(level) {
 <style scoped>
 .hover-row:hover {
   background-color: var(--color-surface-elevated);
+}
+
+/* Abzeichen fuer die wichtigsten erkannten Angaben (Quell-IP, Aktion, …).
+   Bewusst klein und randbetont statt flaechig: in einer Liste mit hundert
+   Zeilen soll das Auge die Meldung lesen und die Abzeichen nur streifen. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 0.65rem;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 </style>

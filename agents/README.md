@@ -13,7 +13,7 @@ Für **Linux** und **Windows**, jeweils als Einzeiler installierbar.
 |---------------------|---------------------------------------------|-----------------------------------|
 | Transport           | HTTPS an `/api/agents/ingest`               | Port 514                          |
 | Verschlüsselt       | ja                                           | nein                              |
-| Anmeldung           | Agent-Token (Bearer)                         | keine                             |
+| Anmeldung           | Zugangsschlüssel, je Gerät ein eigener       | keine                             |
 | Über das Internet   | **ja** — dafür ist er gedacht                | nein, nur im eigenen Netz         |
 | Adressierung        | FQDN (DNS), IP als Rückfallebene             | FQDN oder IP                      |
 | Braucht auf Linux   | python3 + systemd + journald                 | rsyslog                           |
@@ -121,11 +121,42 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Cr
 
 ---
 
-## Agent-Token
+## Zugangsschlüssel
 
-Im Web-UI unter **Einstellungen → Agent-Token**. Ein Token gilt für beliebig
-viele Rechner; wer sie trennen will, legt mehrere an. Ein zurückgezogener Token
-sperrt sofort alle Agents, die ihn benutzen.
+Im Web-UI unter **Verwaltung → Zugang & Sicherheit → Zugangsschlüssel** (nur
+für Administratoren).
+
+**Jeder Rechner bekommt seinen eigenen Schlüssel.** Der Agent holt ihn sich beim
+Installieren selbst: Er legt den mitgegebenen Schlüssel einmal vor, bekommt
+dafür einen eigenen und speichert nur diesen. Was man beim Installieren angibt,
+ist also nur die Eintrittskarte.
+
+Drei Arten stehen zur Wahl:
+
+| Art | Darf | Gedacht für |
+|---|---|---|
+| **Einladung** | nur einen Geräteschlüssel anfordern | der übliche Weg — kurzlebig und zählbar |
+| **Gerät** | nur für sein Gerät liefern, nur sich selbst abmelden | wird beim Anmelden automatisch erzeugt |
+| **Generalschlüssel** | alles | Sammler wie n8n, die für fremde Geräte einliefern |
+
+**Nimm eine Einladung.** Sie läuft ab (Standard 24 Stunden) und gilt nur einmal.
+Damit liegt der Generalschlüssel nirgends mehr auf einem Endgerät herum — und
+genau das war vorher das Problem: Auf jedem Rechner lag derselbe Schlüssel. Wer
+einen davon aufmachte, hatte den Schlüssel für alle und konnte im Namen jedes
+beliebigen Geräts Logzeilen erfinden oder Geräte samt Logs löschen.
+
+Ein Geräteschlüssel darf **nur für sein eigenes Gerät** liefern und **nur sich
+selbst** abmelden. Geht ein Rechner verloren, entwertet man diesen einen — die
+anderen laufen weiter. Beim Deinstallieren wird er automatisch zurückgezogen.
+
+**Ein Schlüssel wird genau einmal angezeigt**, direkt nach dem Erzeugen. Danach
+steht in der Datenbank nur noch seine Prüfsumme. Wer ihn verlegt, würfelt ihn
+neu — das ist eine Sache von zwei Klicks und besser als ein Schlüsselbund, den
+jeder Datenbankabzug mitnimmt.
+
+> **Ältere Server:** Kennt der Server die Anmeldung noch nicht (HTTP 404),
+> trägt der Installer den mitgegebenen Schlüssel ein und läuft durch. Die
+> Installation scheitert also nicht an einer neueren Agent-Fassung.
 
 ---
 

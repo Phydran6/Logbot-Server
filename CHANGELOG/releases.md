@@ -11,6 +11,95 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.09.23.10.00.00 (2026-09-23)
+
+Ein großes Release. Der rote Faden: **es soll auf diesem Server nichts mehr
+passieren, das hinterher niemand nachvollziehen kann** — und nichts mehr
+stillschweigend schiefgehen.
+
+### Sicherheit
+
+- **Agent-Schlüssel waren für jedes angemeldete Konto im Klartext lesbar.** Das
+  war eine echte Lücke: ein Konto mit reinen Leserechten auf die Logs kam an den
+  Generalschlüssel. Die Schlüsselverwaltung ist jetzt Administratoren
+  vorbehalten.
+- **Jedes Gerät bekommt einen eigenen Schlüssel.** Bisher lag auf jedem Rechner
+  derselbe. Wer einen aufmachte, hatte den Schlüssel für alle — und konnte im
+  Namen jedes beliebigen Geräts Logzeilen erfinden oder Geräte samt Logs
+  löschen. Die Agent-Installer holen sich beim Einrichten ihren eigenen.
+- **Kein Schlüssel liegt mehr im Klartext in der Datenbank.** Nur noch ein
+  SHA-256-Abdruck; angezeigt wird der Schlüssel genau einmal nach dem Erzeugen.
+  Bestehende Schlüssel funktionieren unverändert weiter und lassen sich mit
+  einem Klick überführen.
+- **Der Generalschlüssel bleibt** — für Sammler wie n8n und für den Notfall —,
+  ist aber eingrenzbar auf Absenderbereiche, mit Ablaufdatum versehbar, und
+  jede Benutzung wie jeder Fehlversuch steht im Systemtagebuch.
+- **Anmeldung über Microsoft 365** (OpenID Connect). Ohne Zusatzkosten: SAML für
+  eine eigene Anwendung verlangt bei Microsoft einen kostenpflichtigen
+  Entra-Plan, eine OIDC-App-Registrierung ist in jedem Tarif enthalten. Andere
+  Anbieter (Keycloak, Authentik, Google Workspace, Okta) gehen genauso.
+
+### Behoben
+
+- **Die Aufräum-Automatik versagte genau ab 95 % — also dann, wenn man sie
+  braucht.** Ursache: Sie rief bei 90 % `VACUUM FULL`. Das schreibt die Tabelle
+  komplett neu und braucht dafür noch einmal so viel freien Platz, wie sie groß
+  ist. Bei 90 % Belegung ist der nicht da; der Lauf brach ab oder trieb die
+  Belegung über 95 %, und ab dort half nur noch „alle Logs weg“. Dazu kam der
+  erste Blick auf die Platte erst fünf Minuten nach dem Start.
+
+  Der Plattenwächter ist neu geschrieben: sieht im Minutentakt nach und sofort
+  nach dem Start, rechnet wie `df` statt zu optimistisch, fängt ab 80 % an,
+  löscht in Häppchen statt in einer Riesentransaktion, und `VACUUM FULL` läuft
+  nur noch, wenn der Platz dafür wirklich reicht. **Ein automatisches „alles
+  weg“ gibt es nicht mehr:** die letzten 24 Stunden bleiben immer stehen.
+
+### Neu
+
+- **Systemtagebuch.** Jeder Eingriff steht dort: Update, Sicherung,
+  Aufräumlauf, Container-Aktion, Terminal-Sitzung, Anmeldung und abgewiesene
+  Anmeldung, geänderte Einstellung, erzeugter Schlüssel. Eigene Tabelle, damit
+  ein Aufräumlauf die eigene Spur nicht mitnimmt. Läuft live mit.
+- **Live-Ausgabe beim Update.** Ein Fortschrittsbalken sagt „43 %“ — er sagt
+  nicht, woran es hängt. Jetzt läuft mit, was das Wartungsskript auf dem Server
+  tatsächlich ausgibt.
+- **Container-Übersicht.** Für jeden Container steht da, *wie* er aktualisiert
+  wird: LogBot-eigen (aus dem Quellcode) oder fremdes Image. Die Prüfung fragt
+  die Registry direkt, ohne Zusatzdienst; eingespielt wird auf Klick.
+- **Konsole im Browser**, wie in Proxmox VE — eine echte Shell auf dem Server,
+  ab Werk verfügbar und lückenlos protokolliert.
+- **Lesbare Logs.** Der Anzeige-Parser wirkt jetzt auch in der Liste: statt der
+  Rohzeile ein Satz plus die wichtigsten Angaben als Abzeichen. Die Rohzeile
+  bleibt darunter stehen.
+- **Open WebUI als KI-Anbieter.** Mit einem lokalen Modell (Ollama) dahinter
+  verlässt bei der Auswertung keine Logzeile den Server.
+- **Speicherplatz-Seite** mit Belegung, Schwellen und einem Bericht darüber, was
+  beim Aufräumen getan wurde — und was bewusst nicht.
+- **Über LogBot & FAQ**: Herkunft, Lizenz, Verweise ins Repository, und wie man
+  prüft, dass hier wirklich das läuft, was auf GitHub steht.
+
+### Geändert
+
+- **Die Container heißen jetzt so, dass man ihnen ansieht, wem sie gehören.**
+  `logbot-app-*` wird aus diesem Quellcode gebaut (Update über System →
+  Updates), `logbot-ext-*` sind fremde Images wie PostgreSQL und Caddy (Update
+  über System → Container). Vorher hieß alles `logbot-…`, und damit sah es so
+  aus, als gehörte PostgreSQL zu LogBot. Alte Namen bleiben im Docker-Netz als
+  Alias erreichbar.
+- **Menüstruktur nach Fragen statt nach Technik** — fünf Bereiche, sauber
+  verschachtelt, jeder mit einer klaren Zuständigkeit.
+- Die Fußzeile sagt nicht mehr „All rights reserved“. Bei einer MIT-Lizenz sind
+  die Rechte eingeräumt, nicht vorbehalten.
+
+### Entfernt
+
+- **Watchtower.** Es hat Container eigenmächtig ausgetauscht — nachts, ohne
+  Ansage, hinterher schwer zuzuordnen. **Tugtainer** nimmt seinen Platz ein und
+  macht nur eines: nachsehen und melden. Der Docker-Socket ist dort nur lesend
+  eingehängt, es *kann* also gar nichts austauschen.
+
+---
+
 ## v2026.09.15.20.30.00 (2026-09-15)
 
 Erstes Release seit `v2026.09.10.20.00.00`. Es enthält auch die Stände

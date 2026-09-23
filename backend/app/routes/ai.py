@@ -134,6 +134,34 @@ async def test(db: AsyncSession = Depends(get_db), _=Depends(get_current_admin))
     return await ai.test_connection(await ai.load_config(db))
 
 
+@router.get("/models")
+async def models(db: AsyncSession = Depends(get_db), _=Depends(get_current_admin)):
+    """Welche Modelle bietet die eingerichtete Gegenstelle an?
+
+    Bislang nur für Open WebUI: dort hängt hinter der Adresse das, was der
+    Betreiber selbst installiert hat — den Namen kann niemand erraten. Bei
+    Anthropic und OpenAI steht der Modellname in deren Dokumentation und
+    ändert sich selten; da hilft eine Abfrage wenig.
+
+    Antwortet mit einer leeren Liste, wenn die Gegenstelle nicht erreichbar ist
+    oder keine Auskunft gibt. Das ist kein Fehler — es heißt nur, dass der
+    Modellname von Hand einzutragen ist.
+    """
+    config = await ai.load_config(db)
+    if config.get("provider") != "openwebui":
+        return {"models": [], "provider": config.get("provider"),
+                "note": "Eine Modellliste gibt es nur für Open WebUI."}
+    found = await ai.list_openwebui_models(config)
+    return {
+        "models": found,
+        "provider": "openwebui",
+        "note": ("" if found else
+                 "Open WebUI hat keine Modelle gemeldet. Stimmen Adresse und "
+                 "API-Schlüssel? Der Schlüssel steht dort unter Profil → "
+                 "Einstellungen → Konto."),
+    }
+
+
 # =============================================================================
 # Auswerten
 # =============================================================================

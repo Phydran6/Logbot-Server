@@ -2,11 +2,15 @@
 # Name:        Phydran6
 # Kontakt:     Phydran6
 # Changelog:   ../../CHANGELOG/backend.md
-# Beschreibung: LogBot - Zusatzdienste verwalten (Portainer, Watchtower, n8n, Postfix)
+# Beschreibung: LogBot - Zusatzdienste verwalten (fremde Container, eigene Profile)
 # ==============================================================================
 """
-Die vier Zusatzdienste aus `deploy/optional.yml` ein- und ausschalten und ihre
+Die fuenf Zusatzdienste aus `deploy/optional.yml` ein- und ausschalten und ihre
 Zugangsdaten anzeigen.
+
+Alle fuenf sind **fremde** Images und heissen deshalb `logbot-ext-*`. Ihre
+Updates laufen nicht ueber LogBots Patchmanagement, sondern unter
+*System -> Container*.
 
 Wie das laeuft: In der `.env` auf dem Host steht `COMPOSE_PROFILES`. Wird dort
 ein Profil ergaenzt oder gestrichen und danach `docker compose up -d` gestartet,
@@ -42,7 +46,8 @@ STACKS: Dict[str, dict] = {
     "portainer": {
         "label": "Portainer",
         "hint": "Container-Oberfläche im Browser: Zustände, Protokolle, Konsole.",
-        "container": "logbot-portainer",
+        "container": "logbot-ext-portainer",
+        "legacy_container": "logbot-portainer",
         "default_port": 9000,
         "url_template": "http://{host}:{port}",
         "credentials": {
@@ -53,21 +58,31 @@ STACKS: Dict[str, dict] = {
         "warning": ("Portainer bekommt den Docker-Socket lesend. Wer die Oberfläche "
                     "erreicht, sieht damit alle Container dieses Servers."),
     },
-    "watchtower": {
-        "label": "Watchtower",
-        "hint": "Holt neue Images der Zusatzdienste und startet sie damit neu.",
-        "container": "logbot-watchtower",
-        "default_port": None,
+    "tugtainer": {
+        "label": "Tugtainer (Image-Update-Prüfer)",
+        "hint": ("Sieht nach, ob für die fremden Images Updates bereitliegen, und "
+                 "meldet sie. Eingespielt wird auf Ansage — hier oder unter "
+                 "System → Container."),
+        "container": "logbot-ext-tugtainer",
+        "default_port": 9412,
+        "url_template": "http://{host}:{port}",
         "credentials": None,
-        "requirements": {"ram_mb": 128, "disk_mb": 150},
-        "warning": ("Watchtower braucht Schreibzugriff auf den Docker-Socket — das ist "
-                    "faktisch Root auf diesem Server. LogBots eigene Container fasst es "
-                    "nicht an, dafür ist das Patchmanagement zuständig."),
+        # Ohne gesetzten Wert startet der Container nicht. Wird beim Einschalten
+        # ausgewuerfelt, damit niemand an einer kryptischen Compose-Meldung
+        # haengenbleibt.
+        "required_env": ["TUGTAINER_AGENT_SECRET"],
+        "requirements": {"ram_mb": 256, "disk_mb": 300},
+        "warning": ("Tugtainer bekommt den Docker-Socket nur lesend: er kann prüfen, "
+                    "aber nichts austauschen. Wer auch das will, setzt "
+                    "TUGTAINER_SOCKET_MODE=rw in der .env — und weiß, worauf er sich "
+                    "einlässt."),
+        "replaces": "watchtower",
     },
     "n8n": {
         "label": "n8n",
         "hint": "Automatisierung: Workflows, Benachrichtigungen, KI-Auswertung.",
-        "container": "logbot-n8n",
+        "container": "logbot-ext-n8n",
+        "legacy_container": "logbot-n8n",
         "default_port": 5678,
         "url_template": "http://{host}:{port}",
         "credentials": {
@@ -78,14 +93,46 @@ STACKS: Dict[str, dict] = {
         "requirements": {"ram_mb": 768, "disk_mb": 1200},
         "warning": "",
     },
+    "openwebui": {
+        "label": "Open WebUI (KI-Oberfläche)",
+        "hint": ("Spricht dieselbe Sprache wie OpenAI, hat dahinter aber das Modell, "
+                 "das man selbst wählt — auch ein lokales über Ollama. Als Anbieter "
+                 "unter System → KI-Auswertung auswählbar."),
+        "container": "logbot-ext-openwebui",
+        "default_port": 3000,
+        "url_template": "http://{host}:{port}",
+        "credentials": None,
+        "required_env": ["OPENWEBUI_SECRET_KEY"],
+        "requirements": {"ram_mb": 1024, "disk_mb": 2500},
+        "warning": ("Open WebUI selbst ist genügsam. Das Sprachmodell dahinter ist es "
+                    "nicht: Ollama auf demselben Server will mehrere Gigabyte "
+                    "Arbeitsspeicher. Deshalb ist Ollama bewusst NICHT Teil dieses "
+                    "Stacks — OLLAMA_BASE_URL zeigt auf eine vorhandene Installation."),
+    },
     "postfix": {
         "label": "Postfix (Mailversand)",
         "hint": "Damit der Server Mails verschicken kann. Eingestellt unter System → Mail.",
-        "container": "logbot-postfix",
+        "container": "logbot-ext-postfix",
+        "legacy_container": "logbot-postfix",
         "default_port": 1587,
         "credentials": None,
         "requirements": {"ram_mb": 128, "disk_mb": 200},
         "warning": "",
+    },
+}
+
+# Watchtower ist raus (siehe deploy/optional.yml). Wer es noch laufen hat, soll
+# das erfahren statt es stillschweigend weiterlaufen zu lassen: es tauscht
+# Container eigenmaechtig aus, und genau das will man auf einem Log-Server
+# nicht.
+RETIRED = {
+    "watchtower": {
+        "label": "Watchtower",
+        "container": "logbot-watchtower",
+        "successor": "tugtainer",
+        "reason": ("Watchtower hat Container von selbst ausgetauscht — nachts, ohne "
+                   "Ansage und hinterher schwer zuzuordnen. Tugtainer nimmt seinen "
+                   "Platz ein und macht nur eines: nachsehen und melden."),
     },
 }
 
@@ -176,6 +223,12 @@ async def _running_containers() -> Dict[str, str]:
 
     states: Dict[str, str] = {}
     wanted = {spec["container"] for spec in STACKS.values()}
+    # Container aus einer aelteren Installation heissen noch anders - sie sollen
+    # trotzdem als "laeuft" erkannt werden, sonst meldet die Uebersicht nach dem
+    # Update faelschlich "nicht vorhanden".
+    wanted |= {spec["legacy_container"] for spec in STACKS.values()
+               if spec.get("legacy_container")}
+    wanted |= {spec["container"] for spec in RETIRED.values()}
     for line in (result.stdout or "").splitlines():
         parts = line.split("\t")
         if len(parts) >= 2 and parts[0].strip() in wanted:
@@ -207,6 +260,8 @@ async def overview(host_hint: str = "") -> dict:
     items = []
     for key, spec in STACKS.items():
         state = running.get(spec["container"], "")
+        if not state and spec.get("legacy_container"):
+            state = running.get(spec["legacy_container"], "")
         port = spec.get("default_port")
         if port and (custom := env.get(f"{key.upper()}_PORT")):
             try:
@@ -229,9 +284,22 @@ async def overview(host_hint: str = "") -> dict:
             "requirements": spec["requirements"],
         })
 
+    # Laeuft noch etwas, das es nicht mehr geben sollte?
+    retired = []
+    for key, spec in RETIRED.items():
+        state = running.get(spec["container"], "")
+        if state or key in enabled:
+            retired.append({
+                "id": key, "label": spec["label"], "container": spec["container"],
+                "state": state or "im Profil eingetragen",
+                "running": state.lower() == "running",
+                "successor": spec["successor"], "reason": spec["reason"],
+            })
+
     return {
         "available": True,
         "stacks": items,
+        "retired": retired,
         "compose_files": await compose_files(env),
         "profiles": enabled,
         "optional_file": "deploy/optional.yml",
@@ -323,6 +391,12 @@ async def _ensure_optional_file_listed(env: Dict[str, str]) -> None:
 
 async def toggle(stack: str, enable: bool) -> dict:
     """Schaltet einen Zusatzdienst ein oder aus und wendet es sofort an."""
+    if stack in RETIRED and enable:
+        spec = RETIRED[stack]
+        raise ValueError(f"{spec['label']} gibt es hier nicht mehr. {spec['reason']} "
+                         f"Nachfolger: {spec['successor']}.")
+    if stack in RETIRED and not enable:
+        return await _remove_retired(stack)
     if stack not in STACKS:
         raise ValueError(f"Unbekannter Zusatzdienst '{stack}'.")
     if not _PROFILE_PATTERN.match(stack):
@@ -342,6 +416,18 @@ async def toggle(stack: str, enable: bool) -> dict:
         config = spec.get("credentials")
         if config and not env.get(config["password_env"]):
             await set_password(stack)
+
+        # Dienste ohne eigenes Passwort, die trotzdem ein Geheimnis brauchen
+        # (Open WebUI, Tugtainer): fehlt es, startet der Container gar nicht
+        # erst - mit einer Meldung, die niemandem weiterhilft. Also hier
+        # auswuerfeln.
+        missing = {name: secrets.token_urlsafe(32)
+                   for name in spec.get("required_env", []) if not env.get(name)}
+        if missing:
+            if not await write_env_values(missing):
+                raise RuntimeError("Die .env auf dem Host konnte nicht geschrieben werden.")
+            logger.warning("Geheimnis für '%s' erzeugt: %s", stack, ", ".join(missing))
+
         await _ensure_optional_file_listed(await read_env())
         if stack not in profiles:
             profiles.append(stack)
@@ -367,6 +453,27 @@ async def toggle(stack: str, enable: bool) -> dict:
 
     logger.warning("Zusatzdienst '%s' %s", stack, action)
     return {"stack": stack, "enabled": enable, "action": action, "output": output}
+
+
+async def _remove_retired(stack: str) -> dict:
+    """Raeumt einen abgeloesten Dienst weg (derzeit: Watchtower).
+
+    Compose kennt den Dienst nach dem Update gar nicht mehr, ein
+    `compose rm` liefe also ins Leere. Deshalb direkt ueber Docker - und das
+    Profil aus der .env streichen, damit er nicht beim naechsten `up` wieder
+    auftaucht.
+    """
+    spec = RETIRED[stack]
+    env = await read_env()
+    profiles = [p for p in await active_profiles(env) if p != stack]
+    await write_env_values({"COMPOSE_PROFILES": ",".join(profiles)})
+
+    result = await hostexec.run_host(
+        ["sh", "-c", f"docker rm -f '{spec['container']}' 2>&1 || true"], timeout=120.0)
+    logger.warning("Abgeloester Dienst '%s' entfernt", stack)
+    return {"stack": stack, "enabled": False, "action": "entfernt",
+            "output": (result.stdout or result.stderr or "").strip()[-2000:],
+            "message": f"{spec['label']} wurde entfernt. Nachfolger: {spec['successor']}."}
 
 
 async def restart(stack: str) -> dict:

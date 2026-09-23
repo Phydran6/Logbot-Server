@@ -50,6 +50,27 @@
             Bitte das Fenster offen lassen. Die Oberfläche ist gleich kurz nicht erreichbar.
           </template>
         </p>
+
+        <!-- Die Ausgabe des Wartungsskripts, live.
+
+             Ein Fortschrittsbalken sagt „43 %". Er sagt nicht, woran es gerade
+             hängt, und wenn etwas schiefgeht, sagt er gar nichts. Hier läuft
+             stattdessen mit, was auf dem Server tatsächlich passiert — so, wie
+             in einer Shell danebenzustehen. -->
+        <div class="mt-4">
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <span class="text-xs font-medium" style="color: var(--color-text-secondary)">
+              Ausgabe vom Server
+              <span v-if="liveConnected" class="badge badge-success ml-1">live</span>
+              <span v-else class="badge badge-neutral ml-1">Verbindung unterbrochen</span>
+            </span>
+            <label class="flex items-center gap-1.5 text-xs cursor-pointer" style="color: var(--color-text-muted)">
+              <input type="checkbox" v-model="followOutput">
+              mitscrollen
+            </label>
+          </div>
+          <pre ref="liveBox" class="log-box log-box--live">{{ liveLines.join('\n') || 'Warte auf die erste Ausgabe…' }}</pre>
+        </div>
       </div>
     </div>
 
@@ -386,7 +407,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import AppIcon from '../components/AppIcon.vue'
 import BackupPrompt from '../components/BackupPrompt.vue'
@@ -414,6 +435,19 @@ const databaseBackup = ref(true)
 const showLog = ref(false)
 const logText = ref('')
 const copied = ref(false)
+
+// Mitlaufende Ausgabe des Wartungslaufs (Server-Sent Events).
+const liveLines = ref([])
+const liveConnected = ref(false)
+const followOutput = ref(true)
+const liveBox = ref(null)
+let outputStream = null
+
+// Wie viele Zeilen im Fenster stehen bleiben. Ein Neubau erzeugt schnell
+// einige tausend - alle zu behalten macht den Browser langsam, ohne dass es
+// jemandem hilft. Das vollstaendige Protokoll steht weiterhin unter
+// „Protokoll anzeigen".
+const MAX_LIVE_LINES = 2000
 
 let pollTimer = null
 let pendingSince = 0
@@ -480,14 +514,26 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopPolling()
+  stopOutputStream()
 })
+
+// Sobald ein Lauf beginnt, haengt sich die Seite an die Ausgabe - und loest
+// sich wieder, wenn er durch ist. Ohne das liefe ein offener Kanal weiter,
+// an dem niemand mehr haengt.
+watch(isRunning, (running) => {
+  if (running) startOutputStream()
+  else stopOutputStream()
+}, { immediate: true })
 
 async function load(force = false) {
   try {
     status.value = await auth.api(`/api/updates/status${force ? '?force=true' : ''}`)
     offline.value = false
     error.value = ''
-    if (isRunning.value) startPolling()
+    if (isRunning.value) {
+      startPolling()
+      startOutputStream()
+    }
   } catch (e) {
     error.value = e.message || 'Der Update-Stand konnte nicht geladen werden.'
   }
@@ -663,6 +709,64 @@ async function loadBackupScopes() {
   } catch {
     backupScopes.value = []
   }
+}
+
+/**
+ * Haengt sich an die laufende Ausgabe.
+ *
+ * Bewusst ein eigener Strom statt des allgemeinen Ereigniskanals: hier kommen
+ * je nach Lauf hunderte Zeilen pro Sekunde, und die haben in dem Kanal, ueber
+ * den sonst nur Hinweise laufen, nichts verloren.
+ */
+function startOutputStream() {
+  if (outputStream || typeof EventSource === 'undefined') return
+  outputStream = new EventSource(
+    `/api/updates/log/stream?token=${encodeURIComponent(auth.token)}`)
+
+  outputStream.addEventListener('update.output', (event) => {
+    liveConnected.value = true
+    try {
+      const data = JSON.parse(event.data)
+      if (data.initial) liveLines.value = []
+      liveLines.value = [...liveLines.value, ...(data.lines || [])].slice(-MAX_LIVE_LINES)
+      scrollToEnd()
+    } catch {
+      // Eine unlesbare Zeile ist kein Grund, den Strom aufzugeben.
+    }
+  })
+
+  outputStream.addEventListener('update.state', (event) => {
+    try {
+      const state = JSON.parse(event.data)
+      if (status.value) status.value.run = state
+    } catch {
+      // Zustand kommt beim naechsten Takt ohnehin wieder.
+    }
+  })
+
+  outputStream.addEventListener('update.done', () => {
+    liveConnected.value = false
+    stopOutputStream()
+    load()
+  })
+
+  outputStream.onopen = () => { liveConnected.value = true }
+  // Bricht die Verbindung ab (der Container wird gerade neu gebaut - genau
+  // das ist ja der Vorgang), versucht der Browser es von selbst erneut.
+  outputStream.onerror = () => { liveConnected.value = false }
+}
+
+function stopOutputStream() {
+  outputStream?.close()
+  outputStream = null
+}
+
+function scrollToEnd() {
+  if (!followOutput.value) return
+  nextTick(() => {
+    const box = liveBox.value
+    if (box) box.scrollTop = box.scrollHeight
+  })
 }
 
 async function loadLog() {
@@ -875,6 +979,18 @@ function formatTime(value) {
   color: var(--color-text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Die mitlaufende Ausgabe darf hoeher sein und sieht aus wie eine Konsole -
+   sie ist ja eine. Dunkler Hintergrund auch im hellen Design: eine
+   Terminalausgabe liest sich so besser, und man verwechselt sie nicht mit dem
+   Rest der Seite. */
+.log-box--live {
+  max-height: 26rem;
+  margin-top: 0;
+  background-color: #0b1220;
+  border-color: #1e293b;
+  color: #cbd5e1;
 }
 
 .modal-actions {

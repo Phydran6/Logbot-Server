@@ -37,7 +37,7 @@ curl -sSL … /install.sh | sudo bash -s -- --yes
 Mit Zusatzdiensten, unbeaufsichtigt:
 
 ```bash
-curl -sSL … /install.sh | sudo bash -s -- --with portainer,watchtower --yes
+curl -sSL … /install.sh | sudo bash -s -- --with portainer,tugtainer --yes
 ```
 
 Aus einem geklonten Repository:
@@ -103,8 +103,9 @@ ARM, fehlendes Compose-Plugin, zu wenig Speicher für PostgreSQL.
 |----------|----:|-------:|
 | **LogBot** (Postgres, Backend, Frontend, Caddy, Syslog) | 1024 MB | 4096 MB |
 | Portainer | 256 MB | 400 MB |
-| Watchtower | 128 MB | 150 MB |
+| Tugtainer | 256 MB | 300 MB |
 | n8n | 768 MB | 1200 MB |
+| Open WebUI *(ohne Modell)* | 1024 MB | 2500 MB |
 | Postfix | 128 MB | 200 MB |
 
 Untergrenze: 768 MB RAM und 2 GB Platte — darunter startet PostgreSQL nicht
@@ -118,19 +119,26 @@ Belegung selbst auf (siehe [Betrieb](../operate/README.md#platte-läuft-voll)).
 
 ## Zusatzdienste
 
-Vier Dienste stehen bereit. Keiner läuft, bevor er ausgewählt wird.
+Fünf Dienste stehen bereit. Keiner läuft, bevor er ausgewählt wird. Alle fünf
+sind fremde Images und laufen als `logbot-ext-*`.
 
 | Dienst | Wofür | Achtung |
 |--------|-------|---------|
-| **Portainer** | Container im Browser ansehen und verwalten | braucht den Docker-Socket (lesend) |
-| **Watchtower** | hält die Images der Zusatzdienste aktuell | braucht den Docker-Socket (schreibend) |
+| **Portainer** | Container im Browser ansehen | braucht den Docker-Socket (nur lesend) |
+| **Tugtainer** | prüft, ob für die fremden Images Updates bereitliegen | Docker-Socket nur lesend — es meldet, es tauscht nicht |
 | **n8n** | Automatisierung, u. a. für die KI-Auswertung | eigene Oberfläche, eigene Anmeldung |
+| **Open WebUI** | KI-Oberfläche, auch für lokale Modelle | das Modell (Ollama) läuft **nicht** hier — `OLLAMA_BASE_URL` zeigt darauf |
 | **Postfix** | Mailversand vom Server | konfiguriert wird er später im Web-UI |
+
+> **Watchtower ist raus.** Es hat Images geholt *und* Container eigenmächtig
+> ausgetauscht — nachts, ohne Ansage, hinterher schwer zuzuordnen. Tugtainer
+> nimmt seinen Platz ein und macht nur eines: nachsehen und melden. Eingespielt
+> wird bewusst, unter *System → Container*.
 
 Bei der Installation mit Zusatzdiensten:
 
 ```bash
-sudo bash install.sh --with portainer,watchtower
+sudo bash install.sh --with portainer,tugtainer
 ```
 
 Ausdrücklich ohne:
@@ -205,13 +213,14 @@ Damit man das nicht jedes Mal tippt, in die `.env`:
 
 ```
 COMPOSE_FILE=docker-compose.yml:deploy/optional.yml
-COMPOSE_PROFILES=portainer,watchtower
+COMPOSE_PROFILES=portainer,tugtainer
 ```
 
 > **Zur gehärteten Variante:** Sie nimmt dem Backend `privileged`, `pid: host`
 > und `SYS_BOOT`. LogBot läuft normal weiter — es entfallen aber der
-> Neustart-Knopf, das Update über die Oberfläche, das Terminal und die
-> Zusatzdienst-Schalter. Der Systemcheck sagt das ausdrücklich an.
+> Neustart-Knopf, das Update über die Oberfläche, die Konsole, die
+> Container-Verwaltung und die Zusatzdienst-Schalter. Der Systemcheck sagt das
+> ausdrücklich an.
 
 ---
 
@@ -221,7 +230,7 @@ COMPOSE_PROFILES=portainer,watchtower
 2. **HTTPS einschalten** — Einstellungen → Netzwerk → Reverse Proxy.
    Let's Encrypt, eigenes Zertifikat oder selbstsigniert.
 3. **Systemcheck laufen lassen** — System → Systemzustand.
-4. **Agent-Token holen** — Einstellungen → Agent-Token, dann
+4. **Zugangsschlüssel holen** — Verwaltung → Zugang & Sicherheit → Zugangsschlüssel (am besten eine „Einladung“), dann
    [Rechner anbinden](../../agents/README.md).
 5. **Sicherung einrichten** — [System → Sicherung](../backup/README.md).
 

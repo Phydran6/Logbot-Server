@@ -8,21 +8,39 @@ Der Alltag mit einem laufenden LogBot.
 
 ## Die Oberfläche
 
-Alles hängt am **linken Menü**, in drei Ebenen:
+Alles hängt am **linken Menü**, in drei Ebenen. Die fünf Bereiche sind nach
+Fragen geschnitten, nicht nach Technik — jeder beantwortet genau eine:
 
 ```
-Überwachung
-  Dashboard · Logs · Geräte
-Verwaltung
-  Webhooks · Benutzer
-System
-  Einstellungen
-      Allgemein · Aufbewahrung · Agent-Token · Archivierung
-      Netzwerk · Datenbank · Passwort · Anmeldesicherheit
-      Verzeichnis (LDAP) · Erscheinungsbild · Neustart
-  Systemzustand · Updates · Sicherung
-  KI-Auswertung · Zusatzdienste · Mail · Terminal
+Überwachung        Was ist im Netz passiert?
+  Dashboard · Logs · Geräte · Systemzustand
+
+Auswertung         Was mache ich damit?
+  KI-Auswertung · Webhooks · App verbinden
+
+Verwaltung         Wer darf was, und wie lange bleiben Daten liegen?
+  Benutzer
+  Zugang & Sicherheit
+      Passwort · Anmeldesicherheit · Single Sign-on (M365)
+      Verzeichnis (LDAP) · Zugangsschlüssel
+  Daten & Aufbewahrung
+      Aufbewahrung · Speicherplatz · Archivierung · Datenbank
+
+System             Womit läuft das hier, und was tut es gerade?
+  Container
+      Übersicht & Image-Updates · Zusatzdienste
+  Updates (LogBot) · Systemtagebuch · Sicherung · Konsole
+  Netzwerk & Mail · Erscheinungsbild · Allgemein · Neustart
+
+Hilfe              Was ist das eigentlich, und wo kommt es her?
+  Über LogBot & FAQ
 ```
+
+Die Trennlinie zwischen *Verwaltung* und *System* ist bewusst diese:
+**Verwaltung handelt von Menschen und Daten, System von der Maschine.** Vorher
+lagen Passwort, LDAP, Datenbank, Netzwerk und Erscheinungsbild alle im selben
+Reiterstapel unter „Einstellungen“ — richtig zu raten, wo etwas steckt, war
+Glückssache.
 
 Die Einstellungen haben ihre Unterpunkte links im Baum — nicht mehr als
 Reiterleiste rechts im Inhalt. Wer die alten Adressen gespeichert hat:
@@ -59,7 +77,8 @@ Die Filter stehen in der Adresse. Damit ist jede Ansicht verlinkbar, als
 Lesezeichen ablegbar — und der Export (CSV/JSON) liefert genau das, was auf dem
 Bildschirm steht.
 
-**Rohdaten lesbar:** Jede Zeile läuft durch den Anzeige-Parser. Aus
+**Rohdaten lesbar:** Über der Tabelle steht ein Schalter **„Lesbar“** — ab Werk
+an. Jede Zeile läuft dann durch den Anzeige-Parser. Aus
 
 ```
 <134>Sep  9 12:00:01 fw01 kernel: [12345.6] IN=eth0 OUT= MAC=aa:bb:… SRC=192.168.1.10 DST=8.8.8.8 PROTO=TCP SPT=44321 DPT=443
@@ -77,6 +96,11 @@ stellt nur anders dar.
 Erkannt werden RFC 5424 und 3164, UniFi Netconsole und MAC/Modell, Cisco IOS,
 `key=value` (Fortinet, Netfilter), JSON und journald.
 
+Das gilt in der **Liste** wie in der **Detailansicht**; dort stehen zusätzlich
+alle erkannten Felder als Tabelle. Bei mehr als 300 Zeilen pro Seite schaltet
+sich die lesbare Darstellung ab — darüber kostet das Zerlegen mehr, als es beim
+Überfliegen bringt.
+
 ---
 
 ## Systemcheck
@@ -90,26 +114,34 @@ Auffälligkeiten.
 
 ---
 
-## Terminal im Browser
+## Konsole im Browser
 
-*System → Terminal* — nur für Administratoren.
+*System → Konsole* — nur für Administratoren.
 
-Eine echte Shell auf dem Server, **als root**. Wer sie erreicht, hat den Server.
-Deshalb ist sie standardmäßig **aus**:
+Eine echte Shell auf dem Server, **als root**, direkt im Browser — das Vorbild
+ist die Konsole in Proxmox VE. Befehle laufen auf dem Host, nicht im Container.
 
-In die `.env` eintragen:
+Sie ist **ab Werk an**. Das klingt gewagt, ist aber die ehrlichere Einstellung:
+Wer diese Oberfläche als Administrator erreicht, kann ohnehin Updates
+einspielen, Container neu bauen und den Host neu starten — also in jedem Fall
+Code auf diesem Server ausführen. Ein Schalter davor hat keinen Angreifer
+aufgehalten, nur den Betreiber.
+
+Wer sie trotzdem nicht will, trägt in die `.env` ein:
 
 ```
-LOGBOT_WEBSHELL=true
+LOGBOT_WEBSHELL=false
 ```
 
-Danach `docker compose up -d backend`.
+Danach `docker compose up -d backend`. Dann antwortet der Endpunkt mit 403 und
+es wird gar nichts gestartet.
 
-Zusätzliche Sicherungen:
+Abgesichert ist sie so:
 
 - nur Administratoren, Token wird bei jedem Verbindungsaufbau geprüft
 - nur mit Host-Zugriff (bei der gehärteten Variante gibt es sie schlicht nicht)
-- jede Sitzung wird protokolliert: wer, wann, wie lange
+- jede Sitzung steht mit Benutzer, IP, Uhrzeit und Dauer im
+  [Systemtagebuch](#systemtagebuch)
 - höchstens 3 Sitzungen gleichzeitig (`LOGBOT_WEBSHELL_MAX_SESSIONS`)
 - nach 15 Minuten ohne Eingabe endet die Sitzung (`LOGBOT_WEBSHELL_IDLE_TIMEOUT`)
 
@@ -180,17 +212,94 @@ Verbindungstest und Verlauf.
 
 ### Platte läuft voll
 
-LogBot greift von selbst ein, in drei Stufen:
+*Verwaltung → Daten & Aufbewahrung → Speicherplatz* zeigt die Belegung, die
+Schwellen, die Größe von Logtabelle und Datenbank — und erlaubt, den
+Aufräumlauf sofort anzustoßen.
+
+Der **Plattenwächter** sieht jede Minute nach und arbeitet sich vom
+Unwichtigsten nach oben:
 
 | Belegung | Was passiert |
 |---------:|--------------|
-| ab 80 % | abgelaufene Anmelde-Token weg, `VACUUM` |
-| ab 90 % | Logs älter als die eingestellte Aufbewahrung weg, `VACUUM FULL` |
-| ab 95 % | **alle** Logs per `TRUNCATE` weg |
+| ab 80 % | abgelaufene Anmelde-Token und altes Systemtagebuch weg; dann Logzeilen jenseits der eingestellten Aufbewahrung, in Häppchen von 50.000, danach je ein `VACUUM` |
+| ab 88 % | die Aufbewahrung wird schrittweise halbiert, bis wieder Luft ist; `VACUUM FULL` nur, wenn der Platz dafür reicht |
+| ab 93 % | dasselbe mit Nachdruck — **aber die letzten 24 Stunden bleiben stehen** |
 
-Stufe 3 ist die Notbremse: ein voller Datenträger legt auch die Datenbank still.
-Wer die Logs braucht, sorgt vorher für Platz — oder für
-[Archivierung](#aufbewahrung-und-archivierung).
+Zwei Dinge tut er ausdrücklich **nicht**:
+
+- **Er löscht nie von selbst alles.** Ein Log-Server ohne die letzten Stunden
+  ist bei einem Zwischenfall wertlos. Wer den Rundumschlag trotzdem automatisch
+  will, setzt `DISK_ALLOW_TRUNCATE=true` — bewusst und nachlesbar.
+- **Er startet kein `VACUUM FULL`, wenn der Platz dafür fehlt.** Das schreibt
+  die Tabelle komplett neu und braucht noch einmal so viel freien Platz, wie sie
+  groß ist. Genau daran ist die frühere Automatik gescheitert: Sie versuchte es
+  bei 90 % Belegung, scheiterte, und ab 95 % blieb nur noch „alles weg“.
+
+Jeder Aufräumlauf steht mit Uhrzeit, Anlass und Zeilenzahl im
+[Systemtagebuch](#systemtagebuch). Wer mehr Luft will: kürzere Aufbewahrung,
+[Archivierung](#aufbewahrung-und-archivierung) oder eine größere Platte.
+
+Feineinstellung über die `.env` (`DISK_USAGE_WARN`, `DISK_USAGE_TARGET`,
+`DISK_MIN_KEEP_HOURS`, …) — siehe `.env.example`.
+
+---
+
+## Systemtagebuch
+
+*System → Systemtagebuch* — nur für Administratoren.
+
+Der Anspruch dahinter ist hart formuliert und genau so gemeint: **es darf auf
+diesem Server nichts passieren, das hinterher niemand mehr nachvollziehen
+kann.** Ein „ich weiß nicht, warum das passiert ist“ soll es nicht geben.
+
+Festgehalten wird jeder Eingriff — Update und Rückfall, Sicherung, Aufräumlauf,
+Container-Aktion, geöffnete und geschlossene Konsolen-Sitzung, Anmeldung und
+abgewiesene Anmeldung, geänderte Einstellung, erzeugter und zurückgezogener
+Schlüssel. Jede Zeile nennt Zeit, Bereich, Vorgang, Verursacher, Absender-IP,
+Ziel, Ausgang und Dauer.
+
+Filtern lässt sich nach Bereich, Schweregrad, Zeitraum, Verursacher und
+Freitext; „nur Fehlschläge“ gibt es als eigenen Schalter. Neue Einträge laufen
+**live** mit — während ein Update läuft oder der Wächter aufräumt, kann man
+zusehen statt hinterher nachzulesen.
+
+Das Tagebuch liegt in einer **eigenen Tabelle** (`system_events`). Das ist
+Absicht: ein Aufräumlauf, der die Logs kürzt, darf ausgerechnet den Eintrag
+„Aufräumlauf hat 4,2 Millionen Zeilen gelöscht“ nicht mitnehmen. Aufgehoben
+wird ein Jahr; Fehler und Kritisches bleiben darüber hinaus stehen.
+
+---
+
+## Container und ihre Updates
+
+*System → Container → Übersicht & Image-Updates* — nur für Administratoren.
+
+Die Seite beantwortet für jeden Container die einzige Frage, die zählt: **wie
+aktualisiere ich das Ding?**
+
+| Gruppe | Was es ist | Weg |
+|---|---|---|
+| **LogBot selbst** (`logbot-app-*`) | aus dem Quellcode dieses Projekts gebaut | System → Updates |
+| **Fremde Dienste** (`logbot-ext-*`) | ganz normale Images: PostgreSQL, Caddy, n8n … | hier, auf Knopfdruck |
+| **Andere Container** | laufen daneben, gehören nicht dazu | nur zur Information |
+
+„Auf Updates prüfen“ fragt die Registry direkt nach dem Abdruck des benutzten
+Tags und vergleicht ihn mit dem lokal vorhandenen Image. Es wird **nichts
+heruntergeladen und nichts ausgetauscht** — nur nachgesehen. Dafür braucht es
+keinen Zusatzdienst.
+
+Eingespielt wird auf Klick: Bestätigung mit dem Containernamen, Sicherungsfrage
+davor, Eintrag im Systemtagebuch danach. Ein Schalter „automatisch
+aktualisieren“ fehlt bewusst — auf einem Log-Server will niemand, dass sich
+nachts die Datenbank austauscht und am Morgen keiner weiß, warum.
+
+Wer die Prüfung nach Zeitplan und über mehrere Hosts hinweg will, schaltet
+**Tugtainer** dazu (*System → Container → Zusatzdienste*). Es hat den
+Docker-Socket nur lesend und kann deshalb ebenfalls nur melden, nicht tauschen.
+
+> Der Vorgänger **Watchtower ist raus**: Er hat Container eigenmächtig
+> ausgetauscht — nachts, ohne Ansage und hinterher schwer zuzuordnen. Läuft er
+> noch, weist die Zusatzdienste-Seite darauf hin und bietet das Entfernen an.
 
 ---
 
@@ -203,6 +312,63 @@ Wer die Logs braucht, sorgt vorher für Platz — oder für
   Braucht HTTPS mit gültigem Zertifikat.
 - **LDAP / Active Directory:** optional. Schlägt die lokale Anmeldung fehl, wird
   zusätzlich das Verzeichnis gefragt. Gruppen lassen sich auf Rollen abbilden.
+- **Single Sign-on mit Microsoft 365:** siehe unten.
+
+### Single Sign-on (Microsoft 365 und andere)
+
+*Verwaltung → Zugang & Sicherheit → Single Sign-on.*
+
+**Warum OpenID Connect und nicht SAML.** Beides erledigt dieselbe Aufgabe. Der
+Unterschied liegt in der Rechnung: SAML-Anmeldung für eine eigene, nicht im
+Katalog gelistete Anwendung verlangt bei Microsoft einen kostenpflichtigen
+Entra-ID-Plan. Eine App-Registrierung mit OpenID Connect — also OAuth 2.0 mit
+Identitätsschicht — ist in **jedem** Microsoft-365-Tarif enthalten, auch im
+kostenlosen. Sicherheitstechnisch gelten beide als gleichwertig, und OIDC ist
+der Weg, den Microsoft selbst empfiehlt.
+
+Einzurichten ist es in fünf Minuten; die Seite zeigt die Rückadresse zum
+Kopieren und führt Schritt für Schritt durchs Entra-Portal. Gebraucht werden
+Verzeichnis-ID (Mandant), Anwendungs-ID und ein Client-Geheimnis.
+
+Wer Administrator wird, entscheidet nicht der Zufall: entweder über die
+Objekt-ID einer Entra-Gruppe oder über eine App-Rolle (`LogBot.Admin`). Steht
+beides leer, bekommt jeder die Standardrolle — ab Werk **Benutzer**. Zusätzlich
+lassen sich zugelassene Domänen eintragen.
+
+Die Anmeldung mit Benutzername und Passwort bleibt bewusst daneben bestehen:
+Wäre sie weg, würde ein Fehler beim Identitätsanbieter alle aussperren — auch
+den Administrator, der ihn wieder geradeziehen müsste.
+
+Andere Anbieter (Keycloak, Authentik, Google Workspace, Okta) gehen über
+dieselbe Einstellung; statt der Verzeichnis-ID trägt man dort die Adresse des
+Discovery-Dokuments ein.
+
+### Zugangsschlüssel für Agents
+
+*Verwaltung → Zugang & Sicherheit → Zugangsschlüssel* — nur für Administratoren.
+
+Drei Arten, und die Art entscheidet, was der Schlüssel darf:
+
+| Art | Darf | Gedacht für |
+|---|---|---|
+| **Einladung** | nur einen Geräteschlüssel anfordern | das Anschließen eines Rechners — der übliche Fall |
+| **Gerät** | nur für sein Gerät liefern, nur sich selbst abmelden | wird beim Anmelden automatisch erzeugt |
+| **Generalschlüssel** | alles: anmelden, für jedes Gerät liefern, jedes abmelden | Sammler wie n8n, die für fremde Geräte einliefern |
+
+Beim Installieren tauscht der Agent den mitgegebenen Schlüssel selbst gegen
+einen **eigenen**, der nur für diesen Rechner gilt. Geht ein Gerät verloren,
+entwertet man genau diesen einen — die anderen laufen weiter. Beim
+Deinstallieren wird er auf dem Server zurückgezogen.
+
+**Ein Schlüssel wird genau einmal angezeigt**, direkt nach dem Erzeugen.
+Danach steht in der Datenbank nur noch seine Prüfsumme; auslesen kann ihn
+niemand mehr — auch kein Administrator, auch nicht über einen Datenbankabzug.
+Wer ihn verlegt, würfelt ihn neu.
+
+Schlüssel aus früheren Fassungen liegen noch im Klartext und sind als solche
+markiert. Der Knopf „In den geschützten Speicher überführen“ trägt die
+Prüfsumme nach und löscht den Klartext; **die Schlüssel bleiben dabei gültig**,
+auf den Geräten ändert sich nichts.
 
 ---
 

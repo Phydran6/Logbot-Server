@@ -58,22 +58,40 @@ export default {
   },
 
   nav: {
+    // Bereich 1: Was ist im Netz passiert?
     monitoring: 'Überwachung',
     dashboard: 'Dashboard',
     logs: 'Logs',
     devices: 'Geräte',
-    management: 'Verwaltung',
-    webhooks: 'Webhooks',
-    users: 'Benutzer',
-    system: 'System',
-    settings: 'Einstellungen',
     health: 'Systemzustand',
-    updates: 'Updates',
-    backup: 'Sicherung',
+    // Bereich 2: Was mache ich damit?
+    analysis: 'Auswertung',
     ai: 'KI-Auswertung',
+    webhooks: 'Webhooks',
+    app: 'App verbinden',
+    // Bereich 3: Wer darf was, und wie lange bleiben Daten liegen?
+    management: 'Verwaltung',
+    users: 'Benutzer',
+    access: 'Zugang & Sicherheit',
+    sso: 'Single Sign-on (M365)',
+    data: 'Daten & Aufbewahrung',
+    storage: 'Speicherplatz',
+    // Bereich 4: Womit läuft das hier?
+    system: 'System',
+    containers: 'Container',
+    containerOverview: 'Übersicht & Image-Updates',
     stacks: 'Zusatzdienste',
+    updates: 'Updates (LogBot)',
+    journal: 'Systemtagebuch',
+    backup: 'Sicherung',
+    console: 'Konsole',
+    connectivity: 'Netzwerk & Mail',
     mail: 'Mail',
-    terminal: 'Terminal',
+    // Bereich 5: Was ist das eigentlich?
+    help: 'Hilfe',
+    about: 'Über LogBot & FAQ',
+    settings: 'Einstellungen',
+    terminal: 'Konsole',
     // Unterpunkte der Einstellungen - im linken Menü aufgeklappt
     general: 'Allgemein',
     retention: 'Aufbewahrung',
@@ -220,9 +238,11 @@ export default {
   },
 
   terminal: {
-    title: 'Terminal',
-    intro: 'Eine Shell auf dem Server, direkt im Browser.',
-    warning: 'Dieses Terminal läuft als root auf dem Server. Jede Sitzung wird protokolliert.',
+    title: 'Konsole',
+    intro: 'Eine echte Shell auf dem Server, direkt im Browser — wie die Konsole in '
+         + 'Proxmox VE. Befehle laufen auf dem Host, nicht im Container.',
+    warning: 'Diese Konsole läuft als root auf dem Server. Jede Sitzung steht mit '
+           + 'Benutzer, Uhrzeit und Dauer im Systemtagebuch.',
     connect: 'Verbinden',
     disconnect: 'Trennen',
     connected: 'Verbunden',

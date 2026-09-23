@@ -47,7 +47,9 @@ BRANCH="${LOGBOT_BRANCH:-main}"
 SERVER_DIR_DEFAULT="/opt/logbot"
 AGENT_DIR="/opt/logbot-agent"
 AGENT_SYSLOG_CONF="/etc/rsyslog.d/99-logbot.conf"
-ALL_ADDONS="portainer watchtower n8n postfix"
+# Watchtower ist raus - es hat Container eigenmaechtig ausgetauscht.
+# Tugtainer prueft und meldet, eingespielt wird auf Ansage.
+ALL_ADDONS="portainer tugtainer n8n openwebui postfix"
 
 TMP_DIR=""
 
@@ -227,16 +229,18 @@ ask_addons() {
     echo ""
     echo "  Zusatzdienste (keiner läuft, ohne ausgewählt zu sein):"
     echo "    1) Portainer    Container-Oberfläche im Browser"
-    echo "    2) Watchtower   hält die Images der Zusatzdienste aktuell"
+    echo "    2) Tugtainer    prüft, ob für die fremden Images Updates bereitliegen"
     echo "    3) n8n          Automatisierung, u.a. für die KI-Auswertung"
-    echo "    4) Postfix      Mailversand (Einstellungen später im Web-UI)"
+    echo "    4) Open WebUI   KI-Oberfläche, auch für lokale Modelle (Ollama)"
+    echo "    5) Postfix      Mailversand (Einstellungen später im Web-UI)"
     echo "  Mehrere gehen: z.B. '1 3'. Leer = keine."
     local answer="" picked=()
     ask answer "Auswahl" ""
     [[ "$answer" == *1* ]] && picked+=("portainer")
-    [[ "$answer" == *2* ]] && picked+=("watchtower")
+    [[ "$answer" == *2* ]] && picked+=("tugtainer")
     [[ "$answer" == *3* ]] && picked+=("n8n")
-    [[ "$answer" == *4* ]] && picked+=("postfix")
+    [[ "$answer" == *4* ]] && picked+=("openwebui")
+    [[ "$answer" == *5* ]] && picked+=("postfix")
     ADDON_LIST="$(IFS=,; echo "${picked[*]}")"
 }
 
@@ -381,7 +385,7 @@ agent_install() {
         fqdn="$(clean_host "$fqdn")"
         if [[ "$fqdn" == *:* ]]; then port="${fqdn##*:}"; fqdn="${fqdn%%:*}"; fi
         ask port "Port" "${port:-443}"
-        ask_secret token "Agent-Token (Web-UI: Einstellungen -> Agent-Token)"
+        ask_secret token "Zugangsschluessel (Web-UI: Zugang & Sicherheit -> Zugangsschluessel)"
         local ip=""
         ask ip "IP des Servers als Rückfallebene, falls DNS ausfällt (leer = keine)" ""
         echo ""
@@ -461,7 +465,7 @@ agent_purge() {
         fqdn="$(clean_host "$fqdn")"
         if [[ "$fqdn" == *:* ]]; then port="${fqdn##*:}"; fqdn="${fqdn%%:*}"; fi
         ask port "HTTPS-Port des Servers" "${port:-443}"
-        ask_secret token "Agent-Token"
+        ask_secret token "Zugangsschluessel"
         export LOGBOT_TOKEN="$token"
         args=(uninstall-purge --fqdn "$fqdn" --port "$port" --yes)
         shown=(uninstall-purge --fqdn "$fqdn" --port "$port" --token DEIN-AGENT-TOKEN --yes)

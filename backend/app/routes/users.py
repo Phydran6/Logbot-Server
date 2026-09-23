@@ -6,13 +6,16 @@
 # ==============================================================================
 
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..models import User, MFABackupCode
 from ..schemas import UserCreate, UserUpdate, UserResponse
-from ..auth import get_current_user, get_current_admin, get_password_hash
+from ..auth import (get_current_user, get_current_admin, get_password_hash,
+                    verify_password)
+from ..limiter import client_ip as real_client_ip
+from .. import journal
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
@@ -41,21 +44,82 @@ async def create_user(data: UserCreate, db: AsyncSession = Depends(get_db), _=De
     return user
 
 @router.put("/{user_id}", response_model=UserResponse)
-async def update_user(user_id: int, data: UserUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def update_user(user_id: int, data: UserUpdate, request: Request,
+                      db: AsyncSession = Depends(get_db),
+                      current_user: User = Depends(get_current_user)):
+    """Konto ändern.
+
+    Wer darf was:
+
+    * **Administratoren** dürfen jedes Konto ändern, samt Rolle und Zustand.
+    * **Alle anderen** dürfen nur ihr eigenes Konto anfassen, und davon nur
+      E-Mail-Adresse und Passwort. Rolle und Aktiv-Schalter sind tabu - auch
+      der eigene: ein Konto, das sich selbst deaktiviert, ist ein Supportfall
+      ohne Gewinn für irgendwen.
+
+    Neu: **Wer sein eigenes Passwort ändert, muss das alte nennen.** Vorher
+    genügte eine gültige Sitzung. Wer sich einen Token beschafft hatte - über
+    einen unbeaufsichtigten Rechner oder eine gestohlene Sitzung -, konnte
+    damit das Passwort setzen und den rechtmäßigen Besitzer aussperren.
+    Administratoren, die ein fremdes Passwort zurücksetzen, brauchen es
+    weiterhin nicht: sie kennen es ja nicht.
+    """
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User nicht gefunden")
-    if current_user.id != user_id and current_user.role != "admin":
+
+    is_admin = current_user.role == "admin"
+    is_self = current_user.id == user_id
+
+    if not is_self and not is_admin:
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
-    if data.role and current_user.role != "admin":
+    if data.role is not None and not is_admin:
         raise HTTPException(status_code=403, detail="Rollenänderung nur durch Admin")
-    if data.email is not None: user.email = data.email
-    if data.role is not None: user.role = data.role
-    if data.is_active is not None: user.is_active = data.is_active
-    if data.password: user.password_hash = get_password_hash(data.password)
+    if data.is_active is not None and not is_admin:
+        raise HTTPException(status_code=403,
+                            detail="Den Aktiv-Zustand setzt nur ein Administrator.")
+
+    if data.password and is_self:
+        if (user.auth_source or "local") != "local":
+            raise HTTPException(
+                status_code=400,
+                detail=("Dieses Konto kommt aus dem Verzeichnis bzw. von einem "
+                        "Anmeldedienst - ein Passwort gibt es hier nicht zu ändern."))
+        if not data.current_password:
+            raise HTTPException(
+                status_code=400,
+                detail="Zum Ändern des eigenen Passworts das aktuelle mit angeben.")
+        if not verify_password(data.current_password, user.password_hash):
+            await journal.record(
+                db, category="auth", event="password.change.failed", level="warning",
+                message=f"Passwortänderung für '{user.username}' abgelehnt: altes Passwort falsch.",
+                actor=current_user.username, source_ip=real_client_ip(request), ok=False)
+            raise HTTPException(status_code=403, detail="Das aktuelle Passwort stimmt nicht.")
+
+    changed = []
+    if data.email is not None:
+        user.email = data.email
+        changed.append("E-Mail")
+    if data.role is not None:
+        user.role = data.role
+        changed.append(f"Rolle → {data.role}")
+    if data.is_active is not None:
+        user.is_active = data.is_active
+        changed.append("aktiv" if data.is_active else "deaktiviert")
+    if data.password:
+        user.password_hash = get_password_hash(data.password)
+        changed.append("Passwort")
+
     await db.commit()
     await db.refresh(user)
+
+    if changed:
+        await journal.record(
+            db, category="auth", event="user.updated", level="warning",
+            message=f"Konto '{user.username}' geändert: {', '.join(changed)}.",
+            actor=current_user.username, source_ip=real_client_ip(request),
+            target=user.username, detail={"changed": changed, "self": is_self})
     return user
 
 @router.delete("/{user_id}", status_code=204)

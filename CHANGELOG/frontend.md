@@ -2,6 +2,32 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.09.23.10.00.00
+
+### Changed
+- **Menüstruktur nach Fragen statt nach Technik.** Fünf Bereiche, jeder beantwortet einen: *Überwachung* (was ist im Netz passiert?), *Auswertung* (was mache ich damit?), *Verwaltung* (wer darf was, und wie lange bleiben Daten liegen?), *System* (womit läuft das hier?) und *Hilfe*. Die Trennlinie zwischen Verwaltung und System ist bewusst diese: Verwaltung handelt von Menschen und Daten, System von der Maschine. Vorher lagen Passwort, LDAP, Datenbank, Netzwerk und Erscheinungsbild alle im selben Reiterstapel unter „Einstellungen“ — richtig zu raten, wo etwas steckt, war Glückssache. Die Reiter der Einstellungsseite tragen jetzt dieselben Gruppenüberschriften wie das Menü, damit man nicht zweimal sucht.
+- **Die Logliste ist lesbar.** Ein Schalter über der Tabelle zeigt statt der Rohzeile den Satz, den der Parser daraus macht, dazu die wichtigsten Angaben (Quell-IP, Ziel, Benutzer, Ergebnis) als Abzeichen. Die Rohzeile bleibt eine Zeile darunter stehen — liegt die Erkennung daneben, sieht man es sofort. Die Wahl bleibt gemerkt. Die Detailansicht zeigt zusätzlich alle erkannten Felder.
+- **„Terminal“ heißt jetzt „Konsole“** — das Vorbild ist die Konsole in Proxmox VE, und genau danach sucht man.
+- Die Fußzeile verweist auf „Über LogBot“ statt einen Rechtevorbehalt zu behaupten, den es bei einer MIT-Lizenz nicht gibt.
+- Die App-Seite (QR-Code) hatte bisher gar keinen Menüpunkt und war nur über die Adresse erreichbar.
+
+### Added
+- **Container** (`/containers`): zeigt für jeden Container, *wie* er aktualisiert wird — LogBot-eigen (aus dem Quellcode, über System → Updates) oder fremdes Image (hier, auf Knopfdruck). Update-Prüfung gegen die Registry, Einspielen mit Sicherungsfrage, Protokollansicht, Aufräumen ungenutzter Images.
+- **Systemtagebuch** (`/journal`): jeder Eingriff mit Zeit, Verursacher, Ziel und Ausgang. Filter nach Bereich, Stufe, Zeitraum und Freitext; neue Einträge laufen live mit.
+- **Speicherplatz** (`/storage`): Belegung mit den Schwellen als Marken auf dem Balken, Größe von Logtabelle und Datenbank, eine Erklärung, wie aufgeräumt wird — und ein Knopf, um es sofort zu tun. Der Bericht danach sagt, was getan wurde und was bewusst nicht.
+- **Single Sign-on** (`/sso`): Einrichtung für Microsoft 365 mit Rückadresse zum Kopieren und Schritt-für-Schritt-Anleitung fürs Entra-Portal. Auf dem Anmeldeschirm erscheint ein zusätzlicher Knopf; Benutzername und Passwort bleiben daneben bestehen, sonst würde ein Fehler beim Anbieter alle aussperren.
+- **Über LogBot & FAQ** (`/about`): Herkunft, Lizenz, Verweise ins Repository und die Fragen, die immer wieder kommen — darunter, wie man prüft, dass hier wirklich das läuft, was auf GitHub steht.
+- **Live-Konsole beim Update:** die Ausgabe des Wartungsskripts läuft im Fenster mit, statt dass nur ein Balken wandert.
+- Neue Symbole: `shield`, `help`, `mobile`, `container`, `palette`.
+
+### Security
+- **Die Schlüsselverwaltung zeigte alle Agent-Schlüssel im Klartext, und zwar jedem angemeldeten Benutzer.** Neu geschrieben: nur für Administratoren, der Schlüssel wird genau einmal nach dem Erzeugen angezeigt, danach steht in der Liste nur noch die Kennung. Schlüssel aus früheren Fassungen sind als „liegt noch im Klartext“ markiert, mit einem Knopf zum Überführen.
+- Das Passwortformular verlangt jetzt das **aktuelle** Passwort. Eine offene Sitzung allein reicht nicht mehr, um das Passwort zu setzen.
+- Anlegen, Ändern und Löschen von Webhooks sind nur noch für Administratoren sichtbar — ein Webhook gibt Logdaten ohne Anmeldung heraus.
+
+### Fixed
+- Der Ersatzweg zur API im Frontend-Container (nginx) reichte weder das WebSocket-Upgrade noch ungepufferte Ereignisströme durch. Über Caddy fiel das nicht auf, beim direkten Zugriff auf den Container hätten Konsole und Live-Ausgabe aber nicht funktioniert.
+
 ## 2026.09.09.22.00.00
 ### Added
 - **Sprachen** (`src/i18n/`): Deutsch und English, umschaltbar unten im Seitenmenü. Bewusst

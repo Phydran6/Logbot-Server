@@ -89,6 +89,12 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    # Pflicht, wenn jemand SEIN EIGENES Passwort aendert. Ohne das genuegte eine
+    # gueltige Sitzung, um das Passwort zu setzen - wer sich einen Token
+    # beschafft hatte, konnte damit den rechtmaessigen Besitzer aussperren.
+    # Ein Administrator, der ein FREMDES Passwort zuruecksetzt, braucht es nicht:
+    # er kennt es ja nicht.
+    current_password: Optional[str] = Field(default=None, max_length=128)
 
     @field_validator("password")
     @classmethod
@@ -135,6 +141,22 @@ class AgentListResponse(BaseModel):
     page: int
     page_size: int
 
+class LogParsed(BaseModel):
+    """Die lesbare Fassung einer Logzeile (siehe app/logparse.py).
+
+    Warum das mit in die Liste gehoert und nicht nur in die Einzelansicht: eine
+    Logzeile, die man erst aufklappen muss, um sie zu verstehen, hilft beim
+    Ueberfliegen von zweihundert Zeilen gar nichts. Die Rohzeile bleibt
+    daneben - wenn die Erkennung danebenliegt, muss man nachsehen koennen.
+    """
+    summary: str = ""
+    format: str = "plain"
+    readable: bool = False
+    highlights: List[Dict[str, Any]] = []
+    fields: Dict[str, Any] = {}
+    meta: Dict[str, Any] = {}
+
+
 class LogResponse(BaseModel):
     id: int
     hostname: Optional[str]
@@ -143,6 +165,9 @@ class LogResponse(BaseModel):
     level: Optional[str]
     source: Optional[str]
     message: Optional[str]
+    # Nur gefuellt, wenn die Liste mit readable=true abgefragt wurde.
+    parsed: Optional[LogParsed] = None
+    raw_message: Optional[str] = None
     class Config:
         from_attributes = True
 

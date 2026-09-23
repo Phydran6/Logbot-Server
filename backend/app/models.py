@@ -114,14 +114,80 @@ class Webhook(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class AgentToken(Base):
+    """Ein Zugangsschluessel fuer die Maschinen-Schnittstelle.
+
+    Drei Arten, und die Art entscheidet, was der Schluessel darf (siehe
+    app/tokens.py):
+
+    * ``global``  - der Generalschluessel des Administrators. Darf alles:
+                    anmelden, liefern, abmelden. Genau einer davon, und er
+                    liegt nur als Pruefsumme in der Datenbank.
+    * ``agent``   - gehoert genau einem Geraet. Darf nur fuer dieses Geraet
+                    liefern und sich selbst abmelden. Wird beim Anmelden
+                    erzeugt und beim Deinstallieren wieder entwertet.
+    * ``enroll``  - eine Einladung: kurzlebig, zaehlbar, darf ausschliesslich
+                    einen Geraete-Schluessel anfordern. Damit muss der
+                    Generalschluessel nicht mehr auf jeden Rechner kopiert
+                    werden.
+
+    ``token`` (Klartext) gibt es nur noch fuer Schluessel aus der Zeit vor
+    dieser Fassung. Neue Schluessel werden *nie* im Klartext gespeichert -
+    sie werden einmal angezeigt und danach nur noch als ``token_hash``
+    (SHA-256) wiedererkannt.
+    """
     __tablename__ = "agent_tokens"
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
-    token = Column(String(64), unique=True, nullable=False)
+    # Altbestand: Klartext. Neue Schluessel lassen die Spalte leer.
+    token = Column(String(64), unique=True, nullable=True)
+    token_hash = Column(String(64), unique=True, nullable=True)
+    # Die ersten Zeichen, damit man einen Schluessel in der Liste wiedererkennt.
+    prefix = Column(String(24))
+    kind = Column(String(20), default="agent", nullable=False)
     device_type = Column(String(50))
+    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True)
+    # Nur fuer 'enroll': wie oft die Einladung noch gilt.
+    max_uses = Column(Integer, nullable=True)
+    use_count = Column(Integer, default=0, nullable=False)
+    # Absenderbeschraenkung, z.B. "10.0.0.0/8,192.168.1.5/32". Leer = ueberall.
+    allowed_cidrs = Column(Text, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    last_used_ip = Column(String(45), nullable=True)
+    created_by = Column(String(50), nullable=True)
+    note = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SystemEvent(Base):
+    """Was LogBot selbst getan hat - das Systemtagebuch.
+
+    Der Grundsatz dahinter: es darf auf diesem Server nichts passieren, das
+    hinterher niemand mehr nachvollziehen kann. Jeder Eingriff (Update,
+    Sicherung, Aufraeumen, Terminal, Anmeldung, Container) schreibt hier eine
+    Zeile - getrennt von den Logs der ueberwachten Geraete, damit ein
+    Aufraeumlauf die eigene Spur nicht mitloescht.
+    """
+    __tablename__ = "system_events"
+    id = Column(Integer, primary_key=True)
+    at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # 'update', 'backup', 'retention', 'auth', 'shell', 'container', 'settings' ...
+    category = Column(String(40), nullable=False)
+    # 'debug' | 'info' | 'notice' | 'warning' | 'error' | 'critical'
+    level = Column(String(20), default="info", nullable=False)
+    # Kurzer Maschinenname des Vorgangs, z.B. 'update.apply.started'
+    event = Column(String(80), nullable=False)
+    # Ein Satz in Klartext - das, was in der Oberflaeche steht.
+    message = Column(Text, nullable=False)
+    actor = Column(String(100))              # wer: Benutzername, 'system', Token-Name
+    source_ip = Column(String(45))
+    target = Column(String(200))             # worauf: Container, Sicherung, Geraet ...
+    ok = Column(Boolean, default=True, nullable=False)
+    duration_ms = Column(Integer, nullable=True)
+    detail = Column(JSON, default=dict)      # alles Weitere, maschinenlesbar
 
 class Setting(Base):
     __tablename__ = "settings"

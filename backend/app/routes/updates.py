@@ -29,12 +29,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import updater
+from .. import journal, updater
 from ..auth import admin_from_token, get_current_admin
 from ..database import get_db
 from ..events import bus
 from ..guard import BackupDecision, ensure_backup_decision
-from ..limiter import limiter
+from ..limiter import limiter, client_ip as real_client_ip
 
 logger = logging.getLogger("logbot.updates")
 
@@ -95,6 +95,33 @@ async def check_now(_=Depends(get_current_admin)):
 async def get_log(lines: int = Query(200, ge=10, le=2000), _=Depends(get_current_admin)):
     """Die letzten Zeilen des Wartungsprotokolls vom Host."""
     return {"lines": await updater.read_run_log(lines=lines)}
+
+
+@router.get("/log/stream")
+async def stream_log(token: str = Query(..., description="Access-Token eines Admins")):
+    """Die Ausgabe des laufenden Updates — live, Zeile für Zeile.
+
+    Ein Fortschrittsbalken sagt „43 %". Er sagt nicht, woran es gerade hängt,
+    und wenn etwas schiefgeht, sagt er gar nichts. Hier läuft stattdessen mit,
+    was das Wartungsskript auf dem Server tatsächlich ausgibt — so wie in einer
+    Shell danebenzustehen.
+
+    Der Token kommt als Abfrageparameter, weil `EventSource` im Browser keine
+    eigenen Kopfzeilen mitschicken kann. Geprüft wird er genauso streng.
+    """
+    if not await admin_from_token(token):
+        raise HTTPException(status_code=401,
+                            detail="Nicht angemeldet oder keine Administratorrechte.")
+
+    return StreamingResponse(
+        updater.stream_run_log(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # =============================================================================
@@ -179,7 +206,8 @@ async def github_webhook(request: Request):
 # Update und Rueckfall
 # =============================================================================
 @router.post("/apply")
-async def apply_update(data: UpdateRequest, db: AsyncSession = Depends(get_db),
+async def apply_update(data: UpdateRequest, request: Request,
+                       db: AsyncSession = Depends(get_db),
                        admin=Depends(get_current_admin)):
     """Spielt den gewählten Stand ein.
 
@@ -221,13 +249,24 @@ async def apply_update(data: UpdateRequest, db: AsyncSession = Depends(get_db),
 
     logger.warning("Update gestartet von %s (Ziel: %s, Datenbank-Abzug: %s, Sicherung: %s)",
                    admin.username, target or "Zweig", data.database_backup, pre.get("created"))
+    await journal.record(
+        db, category="update", event="update.started", level="warning",
+        message=(f"Update gestartet (Ziel: {target or updater.REPO_BRANCH}). "
+                 f"Sicherung vorher: {'ja' if pre.get('created') else 'nein'}."),
+        actor=admin.username, source_ip=real_client_ip(request),
+        target=target or updater.REPO_BRANCH,
+        detail={"ref": target, "database_backup": data.database_backup,
+                "from_version": (status.get("local") or {}).get("version"),
+                "to_version": (status.get("remote") or {}).get("version"),
+                "unit": result.get("unit")})
     result["pre_backup"] = pre
     result["ref"] = target
     return result
 
 
 @router.post("/rollback")
-async def rollback(data: RollbackRequest, db: AsyncSession = Depends(get_db),
+async def rollback(data: RollbackRequest, request: Request,
+                   db: AsyncSession = Depends(get_db),
                    admin=Depends(get_current_admin)):
     """Fährt auf eine vorherige Sicherung des Wartungsskripts zurück."""
     if data.confirm != "ROLLBACK":
@@ -249,5 +288,12 @@ async def rollback(data: RollbackRequest, db: AsyncSession = Depends(get_db),
 
     logger.warning("Rückfall gestartet von %s (Sicherung: %s)",
                    admin.username, data.backup_name or "neueste")
+    await journal.record(
+        db, category="update", event="rollback.started", level="critical",
+        message=(f"Rückfall gestartet auf Sicherung "
+                 f"'{data.backup_name or 'neueste'}'."),
+        actor=admin.username, source_ip=real_client_ip(request),
+        target=data.backup_name or "neueste",
+        detail={"unit": result.get("unit")})
     result["pre_backup"] = pre
     return result
