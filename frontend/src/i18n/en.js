@@ -62,6 +62,7 @@ export default {
     dashboard: 'Dashboard',
     logs: 'Logs',
     devices: 'Devices',
+    discovery: 'Network systems',
     management: 'Management',
     webhooks: 'Webhooks',
     users: 'Users',

@@ -30,6 +30,7 @@ from .journal import router as journal_router
 from .containers import router as containers_router
 from .sso import router as sso_router
 from .about import router as about_router
+from .discovery import router as discovery_router
 from . import caddy
 from . import network
 
@@ -39,4 +40,4 @@ __all__ = ["auth_router", "mfa_router", "health_router", "users_router", "agents
            "diagnostics_router", "updates_router", "backup_router", "mobile_router",
            "ai_router", "stacks_router", "mail_router", "shell_router",
            "journal_router", "containers_router", "sso_router", "about_router",
-           "caddy", "network"]
+           "discovery_router", "caddy", "network"]

@@ -63,6 +63,7 @@ export default {
     dashboard: 'Dashboard',
     logs: 'Logs',
     devices: 'Geräte',
+    discovery: 'Systeme im Netz',
     health: 'Systemzustand',
     // Bereich 2: Was mache ich damit?
     analysis: 'Auswertung',

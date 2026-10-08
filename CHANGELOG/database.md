@@ -3,6 +3,11 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.08.22.00.00
+
+### Added
+- Neue Tabelle `discovered_devices` für die Netzwerksuche — bewusst getrennt von `agents`: dort steht, wer Logs *liefert*, hier, wer im Netz *gefunden* wurde. Bestandsinstallationen bekommen sie beim Start des Backends (`ensure_discovery_table`), Neuinstallationen über `db/init.sql`.
+
 ## 2026.09.23.10.00.00
 
 ### Changed

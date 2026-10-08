@@ -193,6 +193,29 @@ CREATE TABLE IF NOT EXISTS app_login_tokens (
 CREATE INDEX IF NOT EXISTS idx_app_login_tokens_token ON app_login_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_app_login_tokens_user_id ON app_login_tokens(user_id);
 
+-- Netzwerksuche: was im Netz haengt (backend/app/discovery.py).
+--
+-- Getrennt von `agents`: dort steht, wer Logs *liefert*; hier, wer im Netz
+-- *gefunden* wurde. Der Abgleich passiert beim Lesen, weil sich "liefert"
+-- mit jeder Logzeile aendert und nicht mit jedem Suchlauf.
+CREATE TABLE IF NOT EXISTS discovered_devices (
+    id SERIAL PRIMARY KEY,
+    ip_address VARCHAR(45) NOT NULL UNIQUE,
+    mac_address VARCHAR(17),
+    hostname VARCHAR(255),
+    kind VARCHAR(30) NOT NULL DEFAULT 'unknown',
+    os_guess VARCHAR(120),
+    open_ports JSONB DEFAULT '[]',
+    network VARCHAR(100),
+    same_subnet BOOLEAN,
+    ignored BOOLEAN NOT NULL DEFAULT FALSE,
+    note TEXT,
+    details JSONB DEFAULT '{}',
+    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_discovered_devices_mac ON discovered_devices(mac_address);
+
 -- Standard-Einstellungen
 INSERT INTO settings (key, value, description) VALUES
     ('log_retention_days', '90', 'Logs älter als X Tage löschen'),

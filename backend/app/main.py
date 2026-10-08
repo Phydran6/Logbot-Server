@@ -24,6 +24,7 @@ from sqlalchemy import select, desc, delete, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from . import archiving
+from . import discovery
 from . import diskguard
 from . import fritzbox
 from . import journal
@@ -42,6 +43,7 @@ from .routes import (auth_router, mfa_router, health_router, users_router, agent
                      diagnostics_router, updates_router, backup_router, mobile_router,
                      ai_router, stacks_router, mail_router, shell_router,
                      journal_router, containers_router, sso_router, about_router,
+                     discovery_router,
                      caddy as caddy_router, network as network_router)
 from .branding import branding_router
 
@@ -134,6 +136,7 @@ app.include_router(journal_router)
 app.include_router(containers_router)
 app.include_router(sso_router)
 app.include_router(about_router)
+app.include_router(discovery_router)
 app.include_router(caddy_router.router)
 app.include_router(network_router.router)
 
@@ -431,6 +434,38 @@ async def ensure_log_dedup_key():
 
 
 @app.on_event("startup")
+async def ensure_discovery_table():
+    """Tabelle fuer die Netzwerksuche (app/discovery.py) - Migration fuer Bestands-DBs."""
+    logger = logging.getLogger("logbot.startup")
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS discovered_devices (
+                    id SERIAL PRIMARY KEY,
+                    ip_address VARCHAR(45) NOT NULL UNIQUE,
+                    mac_address VARCHAR(17),
+                    hostname VARCHAR(255),
+                    kind VARCHAR(30) NOT NULL DEFAULT 'unknown',
+                    os_guess VARCHAR(120),
+                    open_ports JSONB DEFAULT '[]',
+                    network VARCHAR(100),
+                    same_subnet BOOLEAN,
+                    ignored BOOLEAN NOT NULL DEFAULT FALSE,
+                    note TEXT,
+                    details JSONB DEFAULT '{}',
+                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_discovered_devices_mac ON discovered_devices(mac_address)")
+        logger.info("discovered_devices ready")
+    except Exception as exc:
+        logger.warning("discovered_devices migration skipped: %s", exc)
+
+
+@app.on_event("startup")
 async def apply_saved_caddy_config():
     """Laedt eine gespeicherte Caddyfile (falls vorhanden) nach dem Start."""
     try:
@@ -496,6 +531,28 @@ async def call_webhook(
                 raw_message=l.raw_message, extra_data=l.extra_data or {}) for l in logs]
     return [LogResponse(id=l.id, hostname=l.hostname, ip_address=l.ip_address, timestamp=l.timestamp,
             level=l.level, source=l.source, message=l.message) for l in logs]
+
+
+# =============================================================================
+# Installer vom Server ausliefern
+# =============================================================================
+@app.get("/api/agents/installer/linux", tags=["Agent Ingest"])
+@limiter.limit("30/minute")
+async def serve_linux_installer(request: Request):
+    """Liefert agents/install-linux.sh aus - fuer Systeme, die GitHub nicht erreichen.
+
+    So funktioniert der Einzeiler auch ohne Internet: erst GitHub probieren, sonst
+    diesen Server. Gelesen wird die Datei vom Host (der Backend-Container hat die
+    agents/ nicht im Image). Oeffentlich wie das Rohskript auf GitHub - sie
+    enthaelt keine Geheimnisse, der Schluessel kommt erst beim Aufruf dazu.
+    """
+    from . import hostexec
+
+    paths = hostexec.host_paths()
+    content = await hostexec.read_host_file(f"{paths['install_dir']}/agents/install-linux.sh")
+    if not content or "LogBot Linux Agent" not in content:
+        raise HTTPException(status_code=404, detail="Installer auf diesem Server nicht verfügbar.")
+    return Response(content=content, media_type="text/x-shellscript")
 
 
 # =============================================================================
@@ -852,6 +909,9 @@ async def start_background_tasks():
     # Haelt Ausschau nach einem neuen Stand auf GitHub und meldet ihn sofort an
     # alle offenen Oberflaechen (siehe app/updater.py -> watch_task).
     _spawn(updater.watch_task())
+    # Sucht das Netz nach Systemen ab: kurz nach dem ersten Start, danach im
+    # eingestellten Takt (app/discovery.py, abschaltbar in der Oberflaeche).
+    _spawn(discovery.watch_task())
 
     await journal.write(
         category="system", event="server.started",

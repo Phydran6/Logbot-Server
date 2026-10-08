@@ -10,7 +10,7 @@
  * ======================================================
  * Fünf Bereiche, und jeder beantwortet eine andere Frage:
  *
- *   Überwachung   Was ist im Netz passiert?        Dashboard, Logs, Geräte, Zustand
+ *   Überwachung   Was ist im Netz passiert?        Dashboard, Logs, Geräte, Systeme, Zustand
  *   Auswertung    Was mache ich damit?             KI, Webhooks, App
  *   Verwaltung    Wer darf was, und wie lange?     Benutzer, Zugang, Daten
  *   System        Womit läuft das hier?            Container, Updates, Konsole, …
@@ -75,6 +75,14 @@ const routes = [
         path: 'devices/:hostname',
         name: 'DeviceLogs',
         component: () => import('../views/DeviceLogs.vue')
+      },
+      // Was im Netz haengt und ob es schon liefert. Nur fuer Administratoren:
+      // die Liste ist eine Landkarte des Netzes.
+      {
+        path: 'discovery',
+        name: 'Discovery',
+        component: () => import('../views/Discovery.vue'),
+        meta: { admin: true }
       },
 
       // --- Auswertung --------------------------------------------------------

@@ -33,6 +33,12 @@ Syslog auf UDP/TCP 514. Agents für Linux und Windows, die über HTTPS mit Token
 senden — auch aus fremden Netzen übers Internet. Sammler wie n8n dürfen im
 Namen anderer Geräte liefern (z. B. für die FRITZ!Box).
 
+**Das Netz absuchen**
+LogBot findet selbst, was im Netz hängt — eigene Subnetze, eingetragene
+Bereiche und über Router hinweg (SNMP) — und sagt für jedes Gerät, ob es schon
+liefert und wie man es einbindet. Linux bindet es auf Wunsch selbst per SSH
+ein, ohne dort von Hand etwas zu tun.
+
 **Logs lesbar machen**
 Ein Parser zerlegt die Rohzeilen: RFC 5424 und 3164, UniFi, Cisco IOS,
 Fortinet-`key=value`, JSON, Netfilter. Aus dreißig Feldern wird eine Zeile, die

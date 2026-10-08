@@ -208,3 +208,27 @@ class AppLoginToken(Base):
     used_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     user = relationship("User", back_populates="app_login_tokens")
+
+
+class DiscoveredDevice(Base):
+    """Ein System, das die Netzwerksuche gefunden hat (app/discovery.py).
+
+    Bewusst getrennt von `Agent`: ein Agent *liefert* Logs, ein gefundenes
+    System *existiert* nur. Ob beides dasselbe Geraet ist, wird beim Lesen
+    ueber MAC, IP und Hostname entschieden.
+    """
+    __tablename__ = "discovered_devices"
+    id = Column(Integer, primary_key=True)
+    ip_address = Column(String(45), unique=True, nullable=False)
+    mac_address = Column(String(17))
+    hostname = Column(String(255))
+    kind = Column(String(30), default="unknown", nullable=False)   # linux, windows, network, ...
+    os_guess = Column(String(120))
+    open_ports = Column(JSON, default=list)
+    network = Column(String(100))           # in welchem Bereich gefunden
+    same_subnet = Column(Boolean)           # im selben Subnetz wie der Server
+    ignored = Column(Boolean, default=False, nullable=False)
+    note = Column(Text)
+    details = Column(JSON, default=dict)    # SSH-Kennung, SNMP, wie gefunden
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow)

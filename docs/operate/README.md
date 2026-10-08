@@ -244,6 +244,73 @@ Feineinstellung über die `.env` (`DISK_USAGE_WARN`, `DISK_USAGE_TARGET`,
 
 ---
 
+## Systeme im Netz
+
+*Überwachung → Systeme im Netz* — nur für Administratoren.
+
+Beantwortet die Frage: **Was hängt in meinem Netz, und liefert es schon Logs?**
+LogBot sucht das Netz selbst ab, gleicht jedes gefundene System mit den Geräten
+ab, die schon liefern, und sagt für den Rest, wie man es einbindet.
+
+**Woher die Systeme kommen**
+
+- **Eigene Subnetze** des Servers — gelesen vom Host, nicht vom Container.
+  Ein sehr großes Netz (größer als /22) wird nur rund um den Server abgesucht.
+- **Router per SNMP.** LogBot ist kein Gateway, aber der Router weiß, was hinter
+  ihm hängt: seine ARP-Tabelle nennt IP und MAC, seine Adress- und
+  Routingtabelle die Subnetze. Das Standard-Gateway wird von selbst gefragt
+  (Community `public`), weitere Router trägt man ein. So wird
+  **subnetzübergreifend** gesucht.
+- **Eingetragene Bereiche** — `10.20.0.0/24`, `10.20.0.5` oder
+  `10.20.0.10-10.20.0.80`, etwa für Netze hinter einem VPN.
+
+**Wie gesucht wird:** Ping und ein paar Verbindungsversuche auf typische Ports
+(SSH, SMB, RDP, HTTP, Druckerports …), danach die ARP-Tabelle des Hosts — dort
+erscheinen auch Geräte, die jede Anfrage verwerfen. Für jedes gefundene System
+kommen Rückwärts-DNS, SSH-Kennung und SNMP-Beschreibung dazu. Daraus wird die
+Art geraten: Linux, Windows, Netzwerkgerät, Drucker, NAS, IoT, Smartphone.
+
+**Was empfohlen wird**
+
+| Art | Weg |
+|---|---|
+| Linux, Windows | HTTPS-Agent — verschlüsselt, mit eigenem Schlüssel |
+| Switch, Firewall, Drucker, NAS, Appliance | Syslog — dort läuft kein Agent |
+| FRITZ!Box | n8n-Sammler (`n8n/logbot.json`) — sie spricht kein Syslog |
+| Smartphone, Tablet | nicht einbindbar |
+
+Die Regel dahinter: **HTTPS-Agent überall dort, wo einer läuft; Syslog nur, wo
+nichts anderes geht.**
+
+**Linux automatisch einbinden.** Bei einem Linux-System genügt in der
+Detailansicht *Automatisch einbinden (SSH)*. LogBot zeigt zuerst den
+SSH-Hostschlüssel des Zielsystems — stimmt er, bestätigt man und gibt einen
+Benutzer mit `sudo` (nicht root) samt Passwort ein. Der Server verbindet sich,
+prüft das System, überträgt den Installer über dieselbe SSH-Verbindung (das Ziel
+braucht dafür kein Internet) und richtet den HTTPS-Agent ein. Fertig ist es
+erst, wenn wirklich Logs ankommen.
+
+Die Zugangsdaten werden **nur für diesen einen Vorgang** verwendet: nie
+gespeichert, nie ins Tagebuch geschrieben, danach verworfen — auch im
+Fehlerfall. Im Tagebuch steht nur, wer wann welches System eingebunden hat und
+ob es geklappt hat.
+
+Windows aus der Ferne einzubinden ist bewusst nicht dabei: die Fernverwaltung
+ist auf Windows-Clients ab Werk aus und die Wege dahin sind heikel. Für Windows
+bleibt der Einzeiler zum Kopieren.
+
+**Automatisch:** Ab Werk sucht LogBot einmal kurz nach dem ersten Start und
+danach alle 24 Stunden. Die Suche baut nur Verbindungen auf — eine Firewall mit
+Angriffserkennung kann trotzdem anschlagen. Abschalten oder den Takt ändern
+unter *Einstellungen* auf der Seite. Jeder Lauf steht im Systemtagebuch
+(Bereich „Netzwerksuche“).
+
+Im gehärteten Betrieb (`deploy/hardened.yml`) sieht das Backend das Netz des
+Hosts nicht: dann werden nur eingetragene Bereiche und Router abgesucht, und
+MAC-Adressen fehlen.
+
+---
+
 ## Systemtagebuch
 
 *System → Systemtagebuch* — nur für Administratoren.

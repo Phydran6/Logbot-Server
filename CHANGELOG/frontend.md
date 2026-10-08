@@ -2,6 +2,12 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.08.22.00.00
+
+### Added
+- **Linux automatisch einbinden** direkt aus der Detailansicht: Knopf „Automatisch einbinden (SSH)“, Bestätigung des Hostschlüssels, Eingabe von Benutzer und Passwort (sudo-Passwort optional), danach ein mitlaufender Fortschritt Schritt für Schritt. Die Passwörter werden nach dem Absenden sofort aus der Seite entfernt. Alternativ weiterhin der Einzeiler zum Kopieren — jetzt mit Rückfall auf den LogBot-Server, falls GitHub nicht erreichbar ist.
+- **Systeme im Netz** (*Überwachung → Systeme im Netz*, nur Administratoren). Liste aller gefundenen Systeme mit Status (*liefert Logs*, *liefert nicht mehr*, *nicht eingebunden*, *nicht einbindbar*), Art, Subnetz und offenen Diensten. Ein Klick zeigt Details und die passende Anleitung: HTTPS-Agent für Linux und Windows (Einzeiler mit der Adresse dieses Servers), Syslog-Ziel samt Fundort der Einstellung für Netzwerkgeräte, Drucker und NAS, n8n-Sammler für die FRITZ!Box. Systeme lassen sich ausblenden und mit einer Notiz versehen. Die Suche läuft mit Fortschrittsanzeige; Bereiche, Router und Zeitplan stellt man auf derselben Seite ein.
+
 ## 2026.09.23.10.00.00
 
 ### Changed

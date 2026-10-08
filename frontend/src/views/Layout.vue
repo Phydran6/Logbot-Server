@@ -414,6 +414,7 @@ const navGroups = computed(() => {
         { key: 'dashboard', to: '/', name: 'Dashboard', icon: 'dashboard', label: t('nav.dashboard') },
         { key: 'logs', to: '/logs', name: 'Logs', icon: 'logs', label: t('nav.logs') },
         { key: 'agents', to: '/agents', name: 'Agents', icon: 'agents', label: t('nav.devices'), match: ['DeviceLogs'] },
+        ...(admin ? [{ key: 'discovery', to: '/discovery', name: 'Discovery', icon: 'network', label: t('nav.discovery') }] : []),
         { key: 'health', to: '/health', name: 'Health', icon: 'health', label: t('nav.health') },
       ],
     },

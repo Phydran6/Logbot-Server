@@ -11,6 +11,33 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.08.22.00.00 (2026-10-08)
+
+**Was im Netz hängt, findet und bindet sich selbst ein.**
+
+- **Systeme im Netz** (*Überwachung → Systeme im Netz*). LogBot sucht das Netz
+  ab — eigene Subnetze, eingetragene Bereiche und **subnetzübergreifend über
+  Router** (SNMP: ARP-, Adress- und Routingtabelle). Jedes gefundene System
+  wird mit den Geräten abgeglichen, die schon liefern, und für den Rest sagt
+  LogBot, wie man es einbindet: HTTPS-Agent für Linux und Windows, Syslog für
+  Netzwerkgeräte, Drucker und NAS, der n8n-Sammler für die FRITZ!Box.
+  Smartphones werden als „nicht einbindbar“ erkannt. Gesucht wird automatisch
+  (einmal nach dem Start, danach täglich) oder auf Knopfdruck.
+- **Linux per SSH selbst einbinden.** Fingerabdruck bestätigen, Benutzer und
+  Passwort eingeben — den Rest macht der Server: verbinden (normaler Benutzer
+  mit sudo, nicht root), prüfen, Installer über dieselbe SSH-Verbindung
+  übertragen und ausführen, warten bis Logs kommen. Die Zugangsdaten gelten nur
+  für den einen Vorgang und werden danach verworfen; nichts davon landet in der
+  Datenbank oder im Tagebuch.
+- **Installer vom Server.** Der Einzeiler funktioniert auch ohne GitHub-Zugang:
+  erst GitHub, sonst dieser LogBot-Server.
+
+Nur Administratoren. Jeder Suchlauf und jedes Einbinden steht im Systemtagebuch
+(neuer Bereich „Netzwerksuche“). Im gehärteten Betrieb bleibt die Suche auf
+eingetragene Bereiche und Router beschränkt.
+
+---
+
 ## v2026.09.23.10.00.00 (2026-09-23)
 
 Ein großes Release. Der rote Faden: **es soll auf diesem Server nichts mehr

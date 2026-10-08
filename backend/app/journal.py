@@ -60,6 +60,7 @@ CATEGORIES: Dict[str, str] = {
     "shell": "Terminal",
     "settings": "Einstellungen",
     "agent": "Geräte",
+    "discovery": "Netzwerksuche",
     "archiving": "Archivierung",
     "mail": "Mail",
     "ai": "KI-Auswertung",

@@ -2,6 +2,16 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.08.22.00.00
+
+### Added
+- **Linux-Systeme per SSH selbst einbinden** (`app/onboard.py`, `/api/discovery/devices/{id}/onboard`). Der Server verbindet sich mit einem *normalen* Benutzer (sudo, nicht root), prüft System und Rechte, überträgt den Installer direkt über die SSH-Verbindung (das Ziel braucht dafür weder Internet noch Zugriff auf den Server), führt ihn mit einer frisch erzeugten Einladung aus und meldet „eingebunden“, sobald die erste Logzeile ankommt. Der SSH-Hostschlüssel wird vorab zur Bestätigung angezeigt (`GET …/fingerprint`) und beim Verbinden gegengeprüft — gegen einen Mittelsmann. **Zugangsdaten leben nur für den einen Vorgang:** nie in der Datenbank, nie im Tagebuch, am Ende überschrieben.
+- **Installer vom Server** (`GET /api/agents/installer/linux`). Liefert `agents/install-linux.sh` aus, damit der Einzeiler auch ohne GitHub-Zugang funktioniert: erst GitHub, sonst dieser Server.
+- **Netzwerksuche** (`app/discovery.py`, `/api/discovery/*`). Findet die Systeme im Netz und beantwortet für jedes: liefert es schon Logs, und wenn nicht, wie bindet man es ein? Gesucht wird in den eigenen Subnetzen des Hosts (gelesen per `hostexec`, weil der Container nur sein Docker-Netz sieht), in eingetragenen Bereichen und **subnetzübergreifend über Router**: das Standard-Gateway und eingetragene Router werden per SNMP nach ARP-, Adress- und Routingtabelle gefragt. Abgetastet wird mit Ping (eigener ICMP-Socket, ohne externes Programm) und TCP-Verbindungsversuchen auf typische Ports; danach liefert die ARP-Tabelle des Hosts auch Geräte, die jede Anfrage verwerfen. Rückwärts-DNS, SSH-Kennung und SNMP-`sysDescr` ergänzen die Erkennung. Der Abgleich mit `agents` (MAC → IP → Hostname) passiert beim Lesen, nicht beim Suchen — ob ein Gerät liefert, ändert sich mit jeder Logzeile.
+- **Kleiner SNMPv2c-Client** (`app/snmp.py`), nur GET und GETBULK, ohne neue Abhängigkeit. pysnmp wäre ein großer Brocken mit wechselnder API, nur um drei Tabellen zu lesen.
+- **Automatische Suche**: einmal kurz nach dem ersten Start, danach alle 24 Stunden (abschaltbar). Jeder Lauf steht im Systemtagebuch, neue Kategorie `discovery`.
+- Die Parallelität der Suche richtet sich nach dem Dateilimit des Prozesses: das weiche Limit wird angehoben, reicht es trotzdem nicht, wird langsamer gesucht statt mit „Too many open files“ abzubrechen.
+
 ## 2026.09.23.10.00.00
 
 ### Security
