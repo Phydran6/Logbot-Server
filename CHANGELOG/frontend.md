@@ -2,6 +2,11 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.11.00.15.00
+
+### Fixed
+- Konsole: Rechtsklick bot kein „Einfügen“. Das Eingabefeld wird beim Rechtsklick jetzt synchron per `element.style` unter den Zeiger gelegt (vorher reaktiv über Vue — zu spät für das Kontextmenü). Direktes Einfügen nur, wenn die Clipboard-Freigabe nicht verweigert ist (`permissions.query`); nach einer Ablehnung kommt das Browsermenü.
+
 ## 2026.10.10.23.45.00
 
 ### Fixed

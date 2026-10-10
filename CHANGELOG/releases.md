@@ -11,6 +11,15 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.11.00.15.00 (2026-10-11)
+
+- **Konsole: Rechtsklick bot nur „Kopieren“.** Das unsichtbare Eingabefeld wurde über
+  Vue unter den Mauszeiger geschoben — das kam erst nach dem Rechtsklick-Menü an,
+  der Browser sah nur Text. Jetzt wird es sofort direkt am Element verschoben (wie
+  xterm.js): über HTTP zeigt das Browsermenü „Einfügen“, über HTTPS fügt der
+  Rechtsklick direkt ein. Lehnt man die Zwischenablage-Freigabe ab, kommt danach das
+  Browsermenü statt nichts.
+
 ## v2026.10.10.23.45.00 (2026-10-10)
 
 - **Konsole: Einfügen mit Strg+V und Rechtsklick.** Der Bildschirm war ein `div` —

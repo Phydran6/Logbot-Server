@@ -75,7 +75,6 @@
             <textarea
               ref="inputEl"
               class="screen-input"
-              :style="inputPosition"
               aria-label="Terminal-Eingabe"
               autocapitalize="off"
               autocomplete="off"
@@ -298,28 +297,44 @@ function focusScreen() {
 // =============================================================================
 const inputEl = ref(null)
 const inputFocused = ref(false)
-const inputPosition = ref({})
+
+// Darf die Seite die Zwischenablage selbst lesen? Nur ueber HTTPS/localhost,
+// und nur wenn der Nutzer es nicht abgelehnt hat. Sonst bleibt das Menue des
+// Browsers - mit "Einfuegen", weil es auf dem Eingabefeld aufgeht.
+let clipboardUsable = window.isSecureContext && !!navigator.clipboard?.readText
+
+onMounted(async () => {
+  if (!clipboardUsable || !navigator.permissions?.query) return
+  try {
+    const state = await navigator.permissions.query({ name: 'clipboard-read' })
+    clipboardUsable = state.state !== 'denied'
+    state.onchange = () => { clipboardUsable = state.state !== 'denied' }
+  } catch {
+    // Firefox kennt 'clipboard-read' nicht - dann einfach versuchen.
+  }
+})
 
 function onMouseDown(event) {
   if (event.button !== 2) return
-  // Rechtsklick: das Eingabefeld unter den Mauszeiger schieben. Kann der
-  // Browser die Zwischenablage nicht direkt lesen (HTTP statt HTTPS), oeffnet
-  // er sein eigenes Menue dann auf dem Eingabefeld - mit "Einfuegen".
-  const box = screenEl.value?.getBoundingClientRect()
-  if (box) {
-    inputPosition.value = {
-      left: `${event.clientX - box.left + screenEl.value.scrollLeft - 10}px`,
-      top: `${event.clientY - box.top + screenEl.value.scrollTop - 10}px`,
-      width: '20px',
-      height: '20px',
-      zIndex: 5,
-    }
-  }
+  // Rechtsklick: das Eingabefeld SOFORT unter den Mauszeiger schieben - direkt
+  // am Element, nicht ueber Vue. Ueber Vue kam die neue Position erst nach dem
+  // Rechtsklick-Menue an: der Browser sah dann nur Text und bot "Kopieren" an,
+  // aber kein "Einfuegen". Genau so macht es auch xterm.js.
+  const input = inputEl.value
+  const screen = screenEl.value
+  if (!input || !screen) return
+  const box = screen.getBoundingClientRect()
+  input.style.left = `${event.clientX - box.left + screen.scrollLeft - 20}px`
+  input.style.top = `${event.clientY - box.top + screen.scrollTop - 20}px`
+  input.style.width = '40px'
+  input.style.height = '40px'
+  input.style.zIndex = '1000'
   focusScreen()
 }
 
 function onMouseUp(event) {
   if (event.button !== 0) return
+  resetInputPosition()
   // Wer gerade Text markiert hat, will kopieren - Fokus erst danach holen,
   // sonst geht die Markierung verloren.
   if (window.getSelection()?.toString()) return
@@ -328,25 +343,30 @@ function onMouseUp(event) {
 
 async function onContextMenu(event) {
   if (!connected.value) return
-  // Direkt einfuegen, wenn der Browser es erlaubt (HTTPS oder localhost).
-  if (window.isSecureContext && navigator.clipboard?.readText) {
+  // Rechtsklick = Einfuegen, wie in PuTTY und vielen Linux-Terminals - wenn
+  // der Browser die Zwischenablage herausgibt (HTTPS oder localhost).
+  if (clipboardUsable) {
     event.preventDefault()
     try {
       const text = await navigator.clipboard.readText()
       if (text) send(normalizePaste(text))
     } catch {
-      // Zugriff verweigert - beim naechsten Mal kommt das normale Menue.
+      // Abgelehnt: ab jetzt das Menue des Browsers (mit "Einfuegen").
+      clipboardUsable = false
     }
     resetInputPosition()
     focusScreen()
     return
   }
-  // Sonst: das Browsermenue erscheint auf dem Eingabefeld (siehe onMouseDown).
-  setTimeout(resetInputPosition, 1000)
+  // Sonst (HTTP): das Browsermenue geht auf dem Eingabefeld auf, das
+  // onMouseDown unter den Zeiger geschoben hat - dort steht "Einfuegen".
+  // Zurueckgeschoben wird beim Einfuegen bzw. beim naechsten Linksklick.
 }
 
 function resetInputPosition() {
-  inputPosition.value = {}
+  const input = inputEl.value
+  if (!input) return
+  for (const prop of ['left', 'top', 'width', 'height', 'zIndex']) input.style[prop] = ''
 }
 
 /** Zeilenenden aus der Zwischenablage so, wie eine Shell sie erwartet. */
