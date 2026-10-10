@@ -2,6 +2,14 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.10.23.45.00
+
+### Fixed
+- **Konsole (`views/Terminal.vue`): Einfügen ging nicht.** Strg+V und Rechtsklick → Einfügen funktionieren auf einem fokussierbaren `div` nicht. Tastatur und Zwischenablage laufen jetzt über ein unsichtbares `textarea`; Rechtsklick fügt direkt ein (Clipboard-API, nur HTTPS/localhost), sonst öffnet das Browsermenü auf dem Eingabefeld. Zeilenumbrüche aus der Zwischenablage werden zu `\r`. Umschalt+Einfg, Strg+Umschalt+C, Eingabe über Handy-Tastaturen (`input`-Ereignis).
+
+### Added
+- Warnhinweis unter der Konsole: Updates nicht dort starten (die Sitzung läuft über den Container, den das Update neu baut).
+
 ## 2026.10.10.23.30.00
 
 ### Fixed

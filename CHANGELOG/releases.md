@@ -11,6 +11,18 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.10.23.45.00 (2026-10-10)
+
+- **Konsole: Einfügen mit Strg+V und Rechtsklick.** Der Bildschirm war ein `div` —
+  dort löst der Browser weder bei Strg+V ein Einfügen aus noch bietet er im
+  Rechtsklick-Menü „Einfügen“ an. Die Tastatur läuft jetzt über ein unsichtbares
+  Eingabefeld (wie bei xterm.js). Rechtsklick fügt direkt ein wie in PuTTY; über
+  HTTP, wo der Browser die Zwischenablage nicht direkt herausgibt, erscheint das
+  normale Menü mit „Einfügen“. Dazu Umschalt+Einfg, Strg+Umschalt+C und
+  Handy-Tastaturen.
+- Hinweis unter der Konsole: LogBot-Updates nicht dort starten — das Update baut den
+  Container neu, über den die Konsole läuft.
+
 ## v2026.10.10.23.30.00 (2026-10-10)
 
 - **Kanalauswahl verschwand beim zweiten Öffnen der Update-Seite.** Die Antwort

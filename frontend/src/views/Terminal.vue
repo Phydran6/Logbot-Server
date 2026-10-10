@@ -57,16 +57,36 @@
         <div class="card-body">
           <!-- Der Bildschirm. tabindex macht ihn fokussierbar, damit er
                Tastatureingaben bekommt, ohne dass ein Eingabefeld nötig wäre. -->
+          <!-- Die Tastatur geht in ein unsichtbares Eingabefeld, nicht in den
+               Bildschirm selbst: nur auf einem echten Eingabefeld loest der
+               Browser bei Strg+V ein Einfuegen aus und bietet im Rechtsklick-
+               Menue "Einfuegen" an. Auf einem div passiert beides nicht - so
+               macht es auch xterm.js. -->
           <div
             ref="screenEl"
             class="screen"
-            tabindex="0"
-            role="textbox"
+            :class="{ 'is-focused': inputFocused }"
+            role="log"
             aria-label="Terminal"
-            @keydown="onKey"
-            @paste="onPaste"
-            @click="focusScreen"
+            @mousedown="onMouseDown"
+            @mouseup="onMouseUp"
+            @contextmenu="onContextMenu"
           >
+            <textarea
+              ref="inputEl"
+              class="screen-input"
+              :style="inputPosition"
+              aria-label="Terminal-Eingabe"
+              autocapitalize="off"
+              autocomplete="off"
+              autocorrect="off"
+              spellcheck="false"
+              @keydown="onKey"
+              @paste="onPaste"
+              @input="onInput"
+              @focus="inputFocused = true"
+              @blur="inputFocused = false"
+            />
             <div v-for="(line, index) in visibleLines" :key="index" class="screen-line">
               <span
                 v-for="(span, spanIndex) in line"
@@ -80,8 +100,18 @@
           </div>
 
           <p class="hint mt-2">
+            Einfügen mit <kbd>Strg</kbd>+<kbd>V</kbd> oder Rechtsklick, kopieren durch Markieren
+            und <kbd>Strg</kbd>+<kbd>C</kbd>.
             Programme mit eigener Bildschirmsteuerung (top, nano, vim) stellt dieser
             schlanke Bildschirm nicht sauber dar — dafür weiterhin SSH benutzen.
+          </p>
+          <!-- Diese Konsole laeuft ueber den Backend-Container. Ein Update baut
+               genau den neu - und risse die Sitzung samt Update mittendrin ab. -->
+          <p class="hint mt-1" style="color: var(--color-warning)">
+            LogBot-Updates bitte nicht hier starten: das Update baut den Container neu, über
+            den diese Konsole läuft, und bräche dabei ab. Dafür
+            <router-link to="/updates" style="text-decoration: underline">System → Updates</router-link>
+            oder SSH nutzen.
           </p>
         </div>
       </section>
@@ -259,7 +289,76 @@ function scrollToBottom() {
 }
 
 function focusScreen() {
-  screenEl.value?.focus()
+  inputEl.value?.focus({ preventScroll: true })
+}
+
+// =============================================================================
+// Maus: Klick = Fokus (Markieren zum Kopieren bleibt moeglich),
+// Rechtsklick = Einfuegen wie in PuTTY
+// =============================================================================
+const inputEl = ref(null)
+const inputFocused = ref(false)
+const inputPosition = ref({})
+
+function onMouseDown(event) {
+  if (event.button !== 2) return
+  // Rechtsklick: das Eingabefeld unter den Mauszeiger schieben. Kann der
+  // Browser die Zwischenablage nicht direkt lesen (HTTP statt HTTPS), oeffnet
+  // er sein eigenes Menue dann auf dem Eingabefeld - mit "Einfuegen".
+  const box = screenEl.value?.getBoundingClientRect()
+  if (box) {
+    inputPosition.value = {
+      left: `${event.clientX - box.left + screenEl.value.scrollLeft - 10}px`,
+      top: `${event.clientY - box.top + screenEl.value.scrollTop - 10}px`,
+      width: '20px',
+      height: '20px',
+      zIndex: 5,
+    }
+  }
+  focusScreen()
+}
+
+function onMouseUp(event) {
+  if (event.button !== 0) return
+  // Wer gerade Text markiert hat, will kopieren - Fokus erst danach holen,
+  // sonst geht die Markierung verloren.
+  if (window.getSelection()?.toString()) return
+  focusScreen()
+}
+
+async function onContextMenu(event) {
+  if (!connected.value) return
+  // Direkt einfuegen, wenn der Browser es erlaubt (HTTPS oder localhost).
+  if (window.isSecureContext && navigator.clipboard?.readText) {
+    event.preventDefault()
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text) send(normalizePaste(text))
+    } catch {
+      // Zugriff verweigert - beim naechsten Mal kommt das normale Menue.
+    }
+    resetInputPosition()
+    focusScreen()
+    return
+  }
+  // Sonst: das Browsermenue erscheint auf dem Eingabefeld (siehe onMouseDown).
+  setTimeout(resetInputPosition, 1000)
+}
+
+function resetInputPosition() {
+  inputPosition.value = {}
+}
+
+/** Zeilenenden aus der Zwischenablage so, wie eine Shell sie erwartet. */
+function normalizePaste(text) {
+  return text.replace(/\r\n/g, '\r').replace(/\n/g, '\r')
+}
+
+/** Was nicht ueber keydown kam (Handy-Tastatur, Eingabehilfen), steht hier. */
+function onInput(event) {
+  const value = event.target.value
+  event.target.value = ''
+  if (value && connected.value) send(value)
 }
 
 function clear() {
@@ -362,8 +461,16 @@ function onKey(event) {
 
   // Kopieren muss der Browser behalten dürfen - sonst kommt man an die Ausgabe
   // nicht heran. Strg+C zum Abbrechen geht weiterhin, wenn nichts markiert ist.
-  if (event.ctrlKey && event.key === 'c' && window.getSelection()?.toString()) return
-  if (event.ctrlKey && event.key === 'v') return
+  const key = event.key.toLowerCase()
+  if (event.ctrlKey && key === 'c' && window.getSelection()?.toString()) return
+  // Einfuegen: Strg+V, Strg+Umschalt+V und Umschalt+Einfg ueberlaesst man dem
+  // Browser - er loest dann auf dem Eingabefeld das paste-Ereignis aus.
+  if ((event.ctrlKey && key === 'v') || (event.shiftKey && event.key === 'Insert')) return
+  // Strg+Umschalt+C: kopieren wie in Linux-Terminals.
+  if (event.ctrlKey && event.shiftKey && key === 'c') return
+  // Handy-Tastatur und Eingabehilfen: kein echter Tastenname - der Text kommt
+  // gleich ueber das input-Ereignis (onInput).
+  if (event.isComposing || event.key === 'Unidentified' || event.key === 'Process') return
 
   event.preventDefault()
 
@@ -385,8 +492,10 @@ function onKey(event) {
 
 function onPaste(event) {
   event.preventDefault()
+  resetInputPosition()
+  if (!connected.value) return
   const text = event.clipboardData?.getData('text') || ''
-  if (text) send(text)
+  if (text) send(normalizePaste(text))
 }
 
 onMounted(loadStatus)
@@ -410,9 +519,33 @@ onBeforeUnmount(disconnect)
   cursor: text;
 }
 
-.screen:focus {
+.screen {
+  position: relative;
+}
+
+.screen.is-focused {
   outline: 2px solid var(--color-primary);
   outline-offset: 1px;
+}
+
+/* Unsichtbar, aber fokussierbar und an seinem Platz - display:none oder
+   visibility:hidden wuerden Tastatur und Zwischenablage abschalten. */
+.screen-input {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: 0;
+  opacity: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: nowrap;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
 }
 
 .screen-line {
