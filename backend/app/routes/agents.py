@@ -310,7 +310,9 @@ async def decommission_agent(
 
     # Nur abmelden: Eintrag und Logs bleiben, das Geraet gilt aber als stillgelegt.
     for agent in agents:
-        extra = getattr(agent, "extra_data", {}) or {}
+        # Kopie: dasselbe Objekt geaendert und wieder zugewiesen erkennt
+        # SQLAlchemy nicht als Aenderung - die Stilllegung wurde nie gespeichert.
+        extra = dict(getattr(agent, "extra_data", {}) or {})
         extra.update({
             "decommissioned": True,
             "decommissioned_at": datetime.utcnow().isoformat(),

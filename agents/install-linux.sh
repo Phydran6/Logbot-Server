@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.09.15.20.00.00
+# Version:     2026.10.10.22.00.00
 # Changelog:   ../CHANGELOG/agents.md
 # Beschreibung: LogBot Linux Agent - Installer (teilautomatisch)
 #
@@ -48,7 +48,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-AGENT_VERSION="2026.09.15.20.00.00"
+AGENT_VERSION="2026.10.10.22.00.00"
 
 # --- Pfade: Syslog-Modus (rsyslog) ---
 CONFIG_FILE="/etc/rsyslog.d/99-logbot.conf"
@@ -403,7 +403,8 @@ write_agent_script() {
 # ==============================================================================
 # LogBot Linux Agent - HTTPS Log Forwarder
 # Liest ALLE Logs aus journald und sendet sie verschlüsselt + Token-authentifiziert
-# an  https://<FQDN>/api/agents/ingest  (Batches von max. 50 Events).
+# an  https://<FQDN>/api/agents/ingest  (Pakete von max. 500 Events, Cursor
+# rueckt nach jedem angekommenen Paket vor, Rueckstand wird gedrosselt geholt).
 # Nur Python-Standardbibliothek - keine externen Abhängigkeiten.
 # ==============================================================================
 import json
@@ -415,6 +416,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 CONFIG_FILE = os.environ.get("LOGBOT_CONFIG", "/opt/logbot-agent/config.json")
 CURSOR_FILE = os.environ.get("LOGBOT_CURSOR", "/opt/logbot-agent/cursor")
@@ -422,8 +424,14 @@ CURSOR_FILE = os.environ.get("LOGBOT_CURSOR", "/opt/logbot-agent/cursor")
 # Beim Deinstallieren wird genau dieser abgeraeumt - und nicht der eines
 # Rechners, der zufaellig genauso heisst.
 AGENT_ID_FILE = os.environ.get("LOGBOT_AGENT_ID", "/opt/logbot-agent/agent_id")
-BATCH_SIZE = 50
+# Pro Anfrage bis zu 500 Eintraege (der Server nimmt bis 5000). Weniger
+# Anfragen = weit weg vom Limit des Servers (600 Anfragen/Minute).
+BATCH_SIZE = 500
 MSG_MAX = 2048
+SOURCE_MAX = 100          # Feldgrenze des Servers
+MAX_LINES = 5000          # Journal-Zeilen pro Durchlauf (begrenzt Speicher + Paketzahl)
+CATCHUP_PAUSE = 2         # Sekunden zwischen Durchlaeufen, solange Rueckstand anliegt
+MAX_BACKOFF = 300         # laengste Pause nach Sendefehlern (Sekunden)
 
 # journald PRIORITY (syslog severity 0-7) -> Level-String
 PRIO_TO_LEVEL = {0: "critical", 1: "critical", 2: "critical", 3: "error",
@@ -542,33 +550,58 @@ def read_agent_id():
         return None
 
 
+def _retry_after(e):
+    try:
+        return max(1, min(int(e.headers.get("Retry-After") or 0), MAX_BACKOFF))
+    except Exception:
+        return 0
+
+
 def send(events):
+    """Ein Paket senden. Rueckgabe: (ergebnis, wartezeit).
+
+    ergebnis "ok"    - angekommen (auch: vom Server als Duplikat erkannt)
+             "retry" - spaeter GENAU DIESES Paket nochmal (Netz, Server weg,
+                       429/5xx, Schluessel abgelehnt)
+             "drop"  - der Server lehnt den Inhalt dauerhaft ab (400/413/422).
+                       Erneut schicken wuerde ewig scheitern und alles
+                       dahinter blockieren - also protokollieren und weiter.
+    """
     if not events:
-        return True
+        return "ok", 0
     url = ingest_url()
     if not url:
         log("Kein Ziel (FQDN/IP) konfiguriert")
-        return False
+        return "retry", 0
     body = payload(events)
     req = urllib.request.Request(url, data=body, method="POST", headers={
         "Authorization": "Bearer " + TOKEN,
         "Content-Type": "application/json",
     })
     try:
-        with urllib.request.urlopen(req, timeout=15, context=build_ctx()) as r:
-            ok = 200 <= r.status < 300
-            if ok:
-                try:
-                    remember_agent_id(json.loads(r.read().decode("utf-8", "replace")))
-                except Exception:
-                    pass
-            return ok
+        with urllib.request.urlopen(req, timeout=30, context=build_ctx()) as r:
+            if not 200 <= r.status < 300:
+                log("HTTP %s von %s" % (r.status, url))
+                return "retry", 0
+            try:
+                remember_agent_id(json.loads(r.read().decode("utf-8", "replace")))
+            except Exception:
+                pass
+            return "ok", 0
     except urllib.error.HTTPError as e:
+        if e.code in (400, 413, 422):
+            detail = ""
+            try:
+                detail = e.read().decode("utf-8", "replace")[:300]
+            except Exception:
+                pass
+            log("HTTP %s - Paket mit %d Eintraegen verworfen: %s" % (e.code, len(events), detail))
+            return "drop", 0
         log("HTTP %s von %s" % (e.code, url))
-        return False
+        return "retry", _retry_after(e)
     except Exception as e:
         log("Sendefehler (%s): %s" % (url, e))
-        return False
+        return "retry", 0
 
 
 def read_cursor():
@@ -625,6 +658,17 @@ def decode_message(m):
     return m
 
 
+def event_time(j):
+    # Zeitpunkt des Ereignisses (nicht der Zustellung). Damit erkennt der
+    # Server doppelt gelieferte Eintraege und verwirft sie, und nachgeholte
+    # Logs landen zur richtigen Zeit statt alle "jetzt".
+    try:
+        us = int(j.get("__REALTIME_TIMESTAMP"))
+        return datetime.fromtimestamp(us / 1000000.0, timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
 def to_event(j):
     try:
         prio = int(j.get("PRIORITY", 6))
@@ -639,38 +683,84 @@ def to_event(j):
     message = decode_message(j.get("MESSAGE"))
     if not message:
         return None
-    return {"level": level, "source": source, "message": message}
+    # Der Server nimmt hoechstens 100 Zeichen - ein laengerer Unit-Name liess
+    # frueher das ganze Paket abweisen.
+    ev = {"level": level, "source": str(source)[:SOURCE_MAX], "message": message}
+    ts = event_time(j)
+    if ts:
+        ev["timestamp"] = ts
+    try:
+        facility = int(j.get("SYSLOG_FACILITY"))
+        if 0 <= facility <= 23:
+            ev["facility"] = facility
+    except Exception:
+        pass
+    return ev
 
 
 def collect_since(cursor):
-    # Rückgabe: (events, new_cursor, ok)  - ok=False signalisiert Reseed
+    """Hoechstens MAX_LINES Journal-Zeilen nach `cursor` lesen.
+
+    Rueckgabe: (batches, ok, more)
+      batches - Liste von (events, cursor_danach). Jedes Paket traegt die
+                Position, bis zu der es reicht - so rueckt der Cursor nach
+                JEDEM angekommenen Paket vor und ein Fehler wiederholt nur
+                dieses eine Paket, nie alles davor.
+      ok      - False: journalctl hat den Cursor abgelehnt -> neu aufsetzen
+      more    - True: es liegt noch Rueckstand an (MAX_LINES erreicht)
+
+    Frueher las der Agent den GESAMTEN Rueckstand in einem Rutsch und schickte
+    bei einem einzigen Fehler alles noch einmal. Nach einer laengeren Pause
+    wurde daraus eine Endlosschleife, die den Server geflutet hat.
+    """
     args = ["journalctl", "-o", "json", "--no-pager", "--after-cursor", cursor]
     try:
-        out = subprocess.run(args, capture_output=True, text=True, timeout=60)
+        # stderr verwerfen: gelesen wird nur stdout, ein volles stderr-Rohr
+        # wuerde journalctl sonst blockieren.
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, errors="replace")
     except Exception as e:
         log("journalctl Fehler: %s" % e)
-        return [], cursor, True
-    if out.returncode != 0:
-        log("journalctl rc=%s: %s" % (out.returncode, (out.stderr or "").strip()[:200]))
-        return [], cursor, False
+        return [], True, False
+    batches = []
     events = []
-    newcursor = cursor
-    for line in out.stdout.splitlines():
+    last = cursor
+    lines = 0
+    more = False
+    try:
+        for line in proc.stdout:
+            try:
+                j = json.loads(line)
+            except Exception:
+                continue
+            if "__CURSOR" not in j:
+                continue
+            last = j["__CURSOR"]
+            lines += 1
+            ev = to_event(j)
+            if ev:
+                events.append(ev)
+                if len(events) >= BATCH_SIZE:
+                    batches.append((events, last))
+                    events = []
+            if lines >= MAX_LINES:
+                more = True
+                break
+    finally:
+        if more:
+            proc.kill()
         try:
-            j = json.loads(line)
+            proc.communicate(timeout=30)
         except Exception:
-            continue
-        if "__CURSOR" in j:
-            newcursor = j["__CURSOR"]
-        ev = to_event(j)
-        if ev:
-            events.append(ev)
-    return events, newcursor, True
-
-
-def chunks(lst, n):
-    for i in range(0, len(lst), n):
-        yield lst[i:i + n]
+            proc.kill()
+    if not more and proc.returncode not in (0, None) and lines == 0:
+        log("journalctl rc=%s (Cursor ungueltig/rotiert?) - setze neu auf" % proc.returncode)
+        return [], False, False
+    # Rest - auch ganz ohne Events (alles unter MinLevel), damit der Cursor
+    # trotzdem ueber die gefilterten Zeilen hinweg vorrueckt.
+    if events or last != cursor:
+        batches.append((events, last))
+    return batches, True, more
 
 
 def main():
@@ -681,6 +771,7 @@ def main():
         % (SERVER_FQDN or SERVER_IP, SERVER_PORT, HOSTNAME, MIN_LEVEL))
 
     cursor = read_cursor()
+    failures = 0
     while True:
         if not cursor:
             cursor = latest_cursor()
@@ -690,29 +781,36 @@ def main():
                 time.sleep(POLL)
                 continue
 
-        events, newcursor, ok = collect_since(cursor)
+        batches, ok, more = collect_since(cursor)
         if not ok:
             # journalctl-Fehler (evtl. ungültiger/rotierter Cursor) -> neu setzen
             cursor = None
             time.sleep(POLL)
             continue
 
-        if events:
-            sent_ok = True
-            for chunk in chunks(events, BATCH_SIZE):
-                if not send(chunk):
-                    sent_ok = False
-                    break
-            if sent_ok:
-                cursor = newcursor
-                write_cursor(cursor)
-            # bei Sendefehler: Cursor NICHT vorrücken -> nächster Durchlauf erneut
+        wait = 0
+        for events, upto in batches:
+            result, wait = send(events)
+            if result == "retry":
+                break
+            # "ok" oder "drop": dieses Paket ist erledigt -> Position merken.
+            cursor = upto
+            write_cursor(cursor)
+            failures = 0
         else:
-            if newcursor and newcursor != cursor:
-                cursor = newcursor
-                write_cursor(cursor)
+            if more:
+                # Rueckstand gedrosselt abarbeiten, nicht im Dauerfeuer.
+                time.sleep(CATCHUP_PAUSE)
+                continue
+            time.sleep(POLL)
+            continue
 
-        time.sleep(POLL)
+        # Senden gescheitert: nur ab dem gescheiterten Paket neu versuchen,
+        # mit wachsender Pause (5 s, 10 s, 20 s ... bis 5 min), damit ein
+        # angeschlagener Server nicht zusaetzlich unter Beschuss geraet.
+        failures += 1
+        backoff = min(POLL * (2 ** min(failures - 1, 10)), MAX_BACKOFF)
+        time.sleep(max(wait, backoff))
 
 
 if __name__ == "__main__":

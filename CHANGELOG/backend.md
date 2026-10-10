@@ -2,6 +2,33 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.10.22.00.00
+
+### Added
+- **Wachhund** (`app/watchdog.py`): prüft jede Minute Datenbank, Platte, jüngsten Log (Funkstille), Flut je Gerät und verstummte Geräte. Zustand in `/api/health`.
+- **Meldungen nach außen** (`app/alerts.py`, `routes/alerts.py`, `/api/alerts/*`): Mail (über System → Mail), Telegram (Bot-Token + Chat-ID, ohne Zusatzdienst) und Webhook (JSON-POST, z. B. n8n, optional `X-LogBot-Secret`). Sperrfrist je Meldung, Entwarnung bei Behebung. Einstellungen gespiegelt nach `data/alerts.json` (0600), damit Meldungen auch ohne Datenbank rausgehen; Rückfall per `ALERT_TELEGRAM_BOT_TOKEN`/`ALERT_TELEGRAM_CHAT_ID`/`ALERT_WEBHOOK_URL`.
+- **`/api/health/ready`**: 200 nur, wenn LogBot wirklich sammelt, sonst 503 — für Uptime Kuma & Co.
+- **Notreserve** (`DISK_RESERVE_MB`, Standard 1024, max. 5 % der Platte): wird ab `DISK_RESERVE_RELEASE` (97 %) gelöscht, damit Postgres weiterläuft; neu angelegt, sobald wieder unter 75 %.
+- **Annahme-Stopp** ab `DISK_INGEST_STOP` (95 %): `/api/agents/ingest` antwortet 503 mit `Retry-After`.
+- **Wiederholungen zusammenfassen** (`LOG_REPEAT_WINDOW`, 60 s): gleiche Meldung (Stufe, Quelle, Text) innerhalb einer Lieferung → eine Zeile mit `extra_data.repeat`/`repeat_last`. FRITZ!Box ausgenommen (Dedup über den Puffer). Logliste liefert `repeat` mit.
+- **Kürzere Aufbewahrung für debug/info/notice** (Einstellung `log_retention_days_info`).
+- Update-Seite: `command` und `install_dir` in `/api/updates/status` (genau die Zeile, die auf dem Host läuft — eine Quelle über `build_command`).
+
+### Fixed
+- **`/api/health` meldete immer „healthy“** — auch während die Datenbank 17 Tage stand. Jetzt `status`, `database`, `last_log_at`, `problems`. Der Statuscode bleibt 200 (das Update-Skript wartet darauf).
+- **Aufbewahrung wurde nur unter Platzdruck durchgesetzt** (ab 80 %). Jetzt stündlich (`LOG_RETENTION_INTERVAL`).
+- **Plattenwächter halbierte die Aufbewahrung bei 80–88 % jede Minute weiter** bis auf 24 h, weil ein gewöhnliches VACUUM keinen Platz ans System zurückgibt. Stufe 2 jetzt erst ab der hohen Stufe und pro Lauf nur ein Schritt (außer kritisch).
+- **Mail-Benachrichtigungen hatten keinen Aufrufer** — `mail.notify` wurde nie benutzt. Die Haken werden in die neuen Meldungen übernommen.
+- **Halb gebaute Indizes** nach abgebrochenem `CREATE INDEX CONCURRENTLY` blieben ungültig liegen; beim Dedup-Index scheiterte danach jede Lieferung mit Zeitstempel. Werden beim Start erkannt und neu gebaut.
+- **Ingest:** NUL-Zeichen (500), zu lange Quellnamen (422 für die ganze Lieferung) und Lieferungen über ~2.700 Einträge (asyncpg-Parametergrenze, 500) brachten Sammler in Wiederholschleifen. Jetzt bereinigt, gekürzt bzw. in Stücken zu 1.000 gespeichert.
+- **Ingest 403 wurde zu 500** (Nachladen nach Rollback in der async-Session).
+- **JSON-Felder wurden an Ort und Stelle geändert** und deshalb nicht gespeichert: Mail-Einstellungen (`notify_on`), Archivierungs-Verlauf, „Gerät stilllegen“.
+- Archivierung: fehlendes Rollback nach DB-Fehler.
+- SSE: abgehängte Verbindung lief mit Herzschlägen weiter und bekam nie wieder ein Ereignis.
+- Systemtagebuch: Aufräumen erst nach 24 h Laufzeit — bei häufigen Neustarts nie.
+- `update.log` wurde nie geleert (wächst endlos, Live-Ansicht begann mit dem alten Lauf) — wird pro Lauf rotiert (`update.log.1`).
+- `/api/health/detailed` rechnete die Plattenbelegung anders als der Plattenwächter.
+
 ## 2026.10.08.22.00.00
 
 ### Added

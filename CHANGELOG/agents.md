@@ -2,6 +2,18 @@
 
 Installer & Log-Forwarder für Linux/Windows (`agents/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.10.22.00.00
+
+### Fixed
+- **Linux-Agent: Endlosschleife bei Teilfehlern** — die Ursache des Ausfalls vom 2026-10-10. Der Agent las den gesamten Rückstand ab der gemerkten Position und schickte ihn in Paketen. Scheiterte *ein* Paket (Server weg, 429, 422 wegen eines zu langen Quellnamens), rückte die Position nicht vor und beim nächsten Durchlauf ging **alles** erneut raus — alle 5 s, für immer. Auf einem Proxmox-Host wurden daraus 14 Mio. Zeilen am Tag, die Platte lief voll. Jetzt: Position rückt nach **jedem** angekommenen Paket vor, höchstens 5.000 Journal-Zeilen pro Durchlauf (gedrosselt, 2 s Pause bei Rückstand), Pakete zu 500 statt 50 Einträgen.
+- **Linux-Agent: wachsende Wartezeit nach Fehlern** (5 s, 10 s, 20 s … bis 5 min) statt starr alle 5 s; `Retry-After` vom Server wird beachtet.
+- **Linux-Agent: dauerhaft abgelehnte Pakete** (400/413/422) werden protokolliert und übersprungen, statt alles dahinter für immer zu blockieren.
+- **Linux-Agent: Zeitstempel und Facility** werden mitgeschickt (`__REALTIME_TIMESTAMP`, `SYSLOG_FACILITY`). Der Server verwirft damit doppelt gelieferte Einträge, nachgeholte Logs landen zur richtigen Zeit. Quellnamen werden auf die 100 Zeichen des Servers gekürzt.
+- **Linux-Agent: `journalctl` blockiert nicht mehr** an vollem stderr-Puffer und lädt den Rückstand nicht mehr komplett in den Speicher.
+- **Windows-Agent: mehrzeilige Meldungen gingen verloren** — `Substring` rechnete mit der Länge vor dem Ersetzen der Zeilenumbrüche und warf; `catch {}` verschluckte das samt Rest des Kanals (Test: 119 von 300 Ereignissen kamen an, jetzt 300).
+- **Windows-Agent: Umlaute** — PowerShell 5.1 schickte den Text als ISO-8859-1, der Server lehnte die ganze Lieferung ab. Jetzt UTF-8-Bytes.
+- **Windows-Agent: Zeitfenster je Kanal** statt eines gemeinsamen — Ereignisse, die während des Lesens anderer Kanäle entstanden, fielen durch die Lücke.
+
 ## 2026.09.23.10.00.00
 
 ### Security

@@ -81,8 +81,22 @@
         <div>
           <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Aufbewahrung (Tage)</label>
           <input v-model.number="retentionDays" type="number" min="1" class="w-full rounded px-3 py-2" :style="inputStyle">
-          <p class="text-xs mt-1" :style="{ color: 'var(--color-text-muted)' }">Logs älter als diese Anzahl Tage werden bei Cleanup gelöscht</p>
+          <p class="text-xs mt-1" :style="{ color: 'var(--color-text-muted)' }">Logs älter als diese Anzahl Tage werden stündlich gelöscht – unabhängig davon, wie voll die Platte ist.</p>
         </div>
+        <div>
+          <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">INFO/DEBUG kürzer aufbewahren (Tage, 0 = wie oben)</label>
+          <input v-model.number="retentionInfoDays" type="number" min="0" class="w-full rounded px-3 py-2" :style="inputStyle">
+          <p class="text-xs mt-1" :style="{ color: 'var(--color-text-muted)' }">
+            Gespeichert wird zunächst alles. INFO-, NOTICE- und DEBUG-Meldungen altern nur früher heraus –
+            Warnungen und Fehler bleiben die volle Frist.
+          </p>
+        </div>
+        <button @click="saveRetention" :disabled="retentionSaving" class="w-full py-2 rounded text-white hover:opacity-90 disabled:opacity-50" :style="{ backgroundColor: 'var(--color-primary)' }">
+          {{ retentionSaving ? 'Speichere…' : 'Aufbewahrung speichern' }}
+        </button>
+        <p v-if="retentionMessage" class="text-sm text-center" :style="{ color: retentionMessage.startsWith('Fehler') ? 'var(--color-danger)' : 'var(--color-success)' }">
+          {{ retentionMessage }}
+        </p>
         <button @click="previewRetention" class="w-full py-2 rounded hover:opacity-80" :style="buttonSecondaryStyle">
           Vorschau anzeigen
         </button>
@@ -618,7 +632,32 @@ const settings = ref({
 })
 
 const retentionDays = ref(90)
+const retentionInfoDays = ref(0)
+const retentionSaving = ref(false)
+const retentionMessage = ref('')
 const retentionPreview = ref(null)
+
+/** Aufbewahrung speichern - gilt ab jetzt stündlich, nicht erst bei voller Platte. */
+async function saveRetention() {
+  retentionSaving.value = true
+  retentionMessage.value = ''
+  try {
+    if (retentionInfoDays.value && retentionInfoDays.value >= retentionDays.value) {
+      throw new Error('Die Frist für INFO/DEBUG muss kürzer sein als die allgemeine (oder 0).')
+    }
+    await authStore.api('/api/settings/log_retention_days', {
+      method: 'PUT', body: { value: retentionDays.value },
+    })
+    await authStore.api('/api/settings/log_retention_days_info', {
+      method: 'PUT', body: { value: retentionInfoDays.value || 0 },
+    })
+    retentionMessage.value = '✓ Gespeichert – wird ab jetzt stündlich durchgesetzt.'
+  } catch (e) {
+    retentionMessage.value = 'Fehler: ' + e.message
+  } finally {
+    retentionSaving.value = false
+  }
+}
 const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
@@ -769,6 +808,9 @@ onMounted(async () => {
     settings.value = { ...settings.value, ...data.settings }
     if (data.settings.log_retention_days) {
       retentionDays.value = data.settings.log_retention_days
+    }
+    if (data.settings.log_retention_days_info !== undefined) {
+      retentionInfoDays.value = Number(data.settings.log_retention_days_info) || 0
     }
     if (authStore.isAdmin) {
       // lazy: nur laden, wenn Tab geöffnet wird
@@ -1124,7 +1166,7 @@ async function saveAllSettings() {
       })
     }
     
-    saveMessage.value = 'âœ“ Einstellungen gespeichert!'
+    saveMessage.value = '✓ Einstellungen gespeichert!'
     setTimeout(() => { saveMessage.value = '' }, 3000)
   } catch (e) {
     saveError.value = true

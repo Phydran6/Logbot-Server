@@ -30,6 +30,18 @@
 #   Adresse wie `http://logbot-n8n:5678` funktioniert also weiter.
 # ==============================================================================
 
+# Container-Protokolle begrenzen. Docker hebt sie sonst ohne Obergrenze auf -
+# jede Ingest-Anfrage ist eine Zeile im Backend-Protokoll, jeder gescheiterte
+# Syslog-Stapel eine im Syslog-Protokoll. Ein Agent in einer
+# Wiederholschleife fuellt damit die Platte, und zwar an einer Stelle, die der
+# Plattenwaechter nicht aufraeumen kann. 5 x 10 MB je Container reichen fuer
+# `docker logs` voellig.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
 
   # ============================================================================
@@ -45,6 +57,7 @@ services:
     container_name: logbot-ext-postgres
     hostname: postgres
     restart: unless-stopped
+    logging: *default-logging
     labels:
       de.logbot.stack: "core"
       de.logbot.origin: "upstream"          # fremdes Image
@@ -85,6 +98,7 @@ services:
     container_name: logbot-app-syslog
     hostname: syslog
     restart: unless-stopped
+    logging: *default-logging
     labels:
       de.logbot.stack: "core"
       de.logbot.origin: "logbot"            # aus diesem Quellcode gebaut
@@ -102,6 +116,9 @@ services:
       DB_NAME: ${DB_NAME:-logbot}
       DATABASE_URL: ${DATABASE_URL:-}
       DB_SSLMODE: ${DB_SSLMODE:-}
+      # Ab dieser Plattenbelegung (%) wird Syslog verworfen statt gespeichert -
+      # damit die Datenbank nicht an voller Platte stirbt. Gleicher Wert wie im Backend.
+      DISK_INGEST_STOP: ${DISK_INGEST_STOP:-95}
     ports:
       - "514:514/udp"
       - "514:514/tcp"
@@ -123,6 +140,7 @@ services:
     container_name: logbot-app-backend
     hostname: backend
     restart: unless-stopped
+    logging: *default-logging
     labels:
       de.logbot.stack: "core"
       de.logbot.origin: "logbot"
@@ -193,6 +211,19 @@ services:
       DISK_USAGE_TARGET: ${DISK_USAGE_TARGET:-75}
       DISK_MIN_KEEP_HOURS: ${DISK_MIN_KEEP_HOURS:-24}
       DISK_ALLOW_TRUNCATE: ${DISK_ALLOW_TRUNCATE:-false}
+      # Ab hier keine Annahme mehr (Agents bekommen 503 und liefern spaeter nach).
+      DISK_INGEST_STOP: ${DISK_INGEST_STOP:-95}
+      # Notreserve in MB: wird bei voller Platte geloescht, damit die Datenbank
+      # weiterlaeuft. 0 = aus.
+      DISK_RESERVE_MB: ${DISK_RESERVE_MB:-1024}
+      # Gleiche Meldungen innerhalb von N Sekunden zu einer Zeile mit Anzahl
+      # zusammenfassen. 0 = aus.
+      LOG_REPEAT_WINDOW: ${LOG_REPEAT_WINDOW:-60}
+      # Meldungen nach aussen - eingestellt wird unter System -> Benachrichtigungen.
+      # Diese Variablen sind nur der Rueckfall fuer Betrieb ganz ohne Datenbank.
+      ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
+      ALERT_TELEGRAM_CHAT_ID: ${ALERT_TELEGRAM_CHAT_ID:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       # Anmeldung ueber Microsoft 365 / Entra ID (OpenID Connect).
       # Eingerichtet wird das in der Oberflaeche unter Sicherheit -> Single Sign-on.
       OIDC_ENABLED: ${OIDC_ENABLED:-}
@@ -225,6 +256,7 @@ services:
     container_name: logbot-app-frontend
     hostname: frontend
     restart: unless-stopped
+    logging: *default-logging
     labels:
       de.logbot.stack: "core"
       de.logbot.origin: "logbot"
@@ -250,6 +282,7 @@ services:
     container_name: logbot-ext-caddy
     hostname: caddy
     restart: unless-stopped
+    logging: *default-logging
     labels:
       de.logbot.stack: "core"
       de.logbot.origin: "upstream"

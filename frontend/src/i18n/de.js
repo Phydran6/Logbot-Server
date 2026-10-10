@@ -88,6 +88,7 @@ export default {
     console: 'Konsole',
     connectivity: 'Netzwerk & Mail',
     mail: 'Mail',
+    alerts: 'Benachrichtigungen',
     // Bereich 5: Was ist das eigentlich?
     help: 'Hilfe',
     about: 'Über LogBot & FAQ',

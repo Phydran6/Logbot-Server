@@ -11,6 +11,93 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.10.22.00.00 (2026-10-10)
+
+Ein Release aus einem echten Ausfall. Am 10.10. reagierte LogBot „nicht mehr“:
+Die Platte war zu 100 % voll, Postgres startete nicht mehr, und **seit dem 23.09.
+war kein einziger Log gespeichert worden — ohne dass es jemand gemerkt hat.**
+Die Oberfläche lud, `/api/health` meldete „healthy“. Ursache war eine
+Endlosschleife im Linux-Agent, die einen Proxmox-Host 14 Millionen Zeilen am Tag
+schicken ließ. Der rote Faden dieses Releases: **ein Log-Sammler darf nie still
+stehen bleiben — und wenn doch, muss er es laut sagen.**
+
+### Die Ursache: Wiederholschleifen
+
+- **Linux-Agent schickte bei jedem Fehler alles noch einmal.** Scheiterte ein
+  Paket mitten im Rückstand (Server kurz weg, „zu viele Anfragen“, ein abgelehntes
+  Paket), rückte die Position nicht vor — beim nächsten Durchlauf ging der ganze
+  Rückstand erneut raus, alle 5 s, für immer. Jetzt rückt die Position nach jedem
+  angekommenen Paket vor, Fehler führen zu wachsender Wartezeit (5 s … 5 min),
+  Rückstand wird gedrosselt nachgeholt, und ein dauerhaft abgelehntes Paket
+  blockiert nicht mehr alles dahinter.
+- **Der Agent schickt jetzt den echten Zeitstempel mit.** Der Server erkennt damit
+  doppelt gelieferte Einträge und verwirft sie, und nachgeholte Logs landen zur
+  richtigen Uhrzeit statt alle „jetzt“.
+- **Server lehnt keine ganzen Pakete mehr wegen Kleinigkeiten ab:** zu lange
+  Quellnamen werden gekürzt (vorher 422 für das ganze Paket), NUL-Zeichen
+  entfernt (vorher 500), große Lieferungen in Stücken gespeichert (vorher 500 ab
+  ~2.700 Einträgen). Gilt auch für ältere Agents, sofort.
+- **Windows-Agent:** mehrzeilige Meldungen gingen fast alle verloren, Umlaute
+  ließen den Server ganze Pakete ablehnen, und zwischen den Kanälen gingen
+  Ereignisse durch die Lücke.
+
+### Nie wieder unbemerkt
+
+- **Benachrichtigungen per Mail, Telegram oder Webhook (n8n)** — neue Seite
+  System → Benachrichtigungen. Gemeldet wird: Datenbank weg, Platte voll,
+  keine neuen Logs mehr, ein Gerät flutet, ein Gerät verstummt, neues Update.
+  Mit Entwarnung, sobald es wieder passt. **Funktioniert auch ohne Datenbank** —
+  die Einstellungen liegen zusätzlich als Datei auf dem Server.
+- **Ehrlicher Health-Check.** `/api/health` meldet jetzt `degraded` samt Grund,
+  wenn die Datenbank fehlt oder nichts mehr ankommt. Neu: `/api/health/ready`
+  für Uptime Kuma & Co. — 503, sobald LogBot nicht sammelt.
+- **Die alten Mail-Haken „Benachrichtigen bei …“ hatten nie eine Wirkung** (es gab
+  keinen Aufrufer). Ihre Einstellung wird übernommen.
+
+### Die Platte darf den Server nicht mehr umbringen
+
+- **Notreserve:** LogBot legt eine Platzhalter-Datei an (Standard 1 GB, höchstens
+  5 % der Platte) und gibt sie bei 97 % frei — dann hat Postgres Luft zum Weiterlaufen
+  und der Wächter zum Aufräumen. Vorher half nur Handarbeit per SSH.
+- **Annahme-Stopp ab 95 %:** Agents bekommen „später nochmal“ und puffern bei
+  sich, statt die Datenbank zu ersticken.
+- **Die eingestellte Aufbewahrung gilt jetzt immer** — stündlich. Bisher wurde sie
+  erst durchgesetzt, wenn die Platte schon zu 80 % voll war.
+- **INFO/DEBUG dürfen früher altern** als Warnungen und Fehler (Einstellungen →
+  Aufbewahrung). Gespeichert wird weiterhin alles.
+- **Plattenwächter kürzt sanfter:** Zwischen 80 und 88 % halbierte er jede Minute
+  weiter, bis nur noch 24 h übrig waren — auch wenn ganz andere Dateien die Platte
+  füllten.
+- **Docker-Protokolle haben eine Obergrenze** (5 × 10 MB je Container). Vorher wuchsen
+  sie ohne Grenze — 1,3 GB beim Ausfall.
+
+### Wiederholungen zusammenfassen statt wegwerfen
+
+- Dieselbe Meldung mehrfach innerhalb einer Minute wird **eine Zeile mit Anzahl**
+  („×5.000“ in der Logliste). Die Information bleibt vollständig, der Platz nicht.
+  Gilt für HTTPS-Agents und Syslog; die FRITZ!Box ist ausgenommen.
+
+### Updates: Konsole wie bei Proxmox
+
+- Die Update-Seite hat jetzt ein Terminal: die fertige Befehlszeile steht da,
+  **Enter** → Rückfrage `[J/n]` zur Sicherung → das Update läuft, und die Ausgabe
+  vom Server läuft live mit. Das Update-Protokoll beginnt pro Lauf neu (vorher
+  wuchs es endlos und die Live-Ansicht zeigte zuerst den alten Lauf).
+
+### Weitere Fehler aus der Code-Prüfung
+
+- Halb gebaute Indizes (abgebrochener Start) ließen jede Lieferung mit Zeitstempel
+  scheitern — werden jetzt erkannt und neu gebaut.
+- Mail-Benachrichtigungs-Schalter, Archivierungs-Verlauf und „Gerät stilllegen“
+  zeigten „gespeichert“, speicherten aber nichts.
+- Ein Syslog-Stapel scheiterte komplett an einer einzigen kaputten Meldung.
+- Der Live-Kanal ins Browserfenster konnte unbemerkt abreißen.
+- Ein Geräteschlüssel für das falsche Gerät bekam 500 statt 403.
+- Das Systemtagebuch wurde bei häufigen Neustarts nie aufgeräumt.
+
+> **Für bestehende Linux-Agents:** den Installations-Einzeiler einfach noch einmal
+> ausführen. Er ersetzt das Agent-Skript, behält die Position und startet neu.
+
 ## v2026.10.08.22.00.00 (2026-10-08)
 
 **Was im Netz hängt, findet und bindet sich selbst ein.**

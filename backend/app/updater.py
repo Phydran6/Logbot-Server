@@ -321,6 +321,10 @@ async def update_status(force: bool = False) -> dict:
         "webhook": webhook_info(),
         "watcher": {"interval_seconds": WATCH_INTERVAL, "enabled": WATCH_ENABLED},
         "oneliner": oneliner,
+        # Fuer das Terminal auf der Update-Seite: genau die Zeile, die nach dem
+        # Enter auf dem Host laeuft (Sicherungs-Schalter wird dort umgesetzt).
+        "command": build_command("apply", database_backup=True, ref=ref),
+        "install_dir": hostexec.host_paths()["install_dir"],
     }
 
 
@@ -514,6 +518,29 @@ async def _install_script() -> Optional[str]:
     return None
 
 
+def build_command(action: str, database_backup: bool = True,
+                  backup_name: str = "", ref: str = "") -> list:
+    """Die Befehlszeile, die auf dem Host laeuft.
+
+    Eine Stelle fuer beides: den echten Start und die Anzeige im Terminal der
+    Oberflaeche. So steht dort genau das, was nach dem Enter auch passiert.
+    """
+    paths = hostexec.host_paths()
+    command = [
+        "/bin/bash", paths["script"], action,
+        "--dir", paths["install_dir"],
+        "--repo", REPO_URL,
+        "--branch", REPO_BRANCH,
+    ]
+    if action == "apply":
+        command.append("--db-backup" if database_backup else "--no-db-backup")
+        if ref and ref != REPO_BRANCH:
+            command.extend(["--ref", ref])
+    if action == "rollback" and backup_name:
+        command.extend(["--backup", backup_name])
+    return command
+
+
 async def start_run(action: str, database_backup: bool = True,
                     backup_name: str = "", ref: str = "") -> dict:
     """Startet `apply` oder `rollback` auf dem Host.
@@ -540,20 +567,19 @@ async def start_run(action: str, database_backup: bool = True,
         return {"started": False, "error": f"Wartungsskript konnte nicht abgelegt werden: {script_error}"}
 
     paths = hostexec.host_paths()
-    command = [
-        "/bin/bash", paths["script"], action,
-        "--dir", paths["install_dir"],
-        "--repo", REPO_URL,
-        "--branch", REPO_BRANCH,
-    ]
     if action == "apply":
-        command.append("--db-backup" if database_backup else "--no-db-backup")
         # Welchen Stand holen? Ohne Angabe der Zweig, sonst das gewaehlte Release.
-        target = (ref or await resolve_target_ref(await load_channel())).strip()
-        if target and target != REPO_BRANCH:
-            command.extend(["--ref", target])
-    if action == "rollback" and backup_name:
-        command.extend(["--backup", backup_name])
+        ref = (ref or await resolve_target_ref(await load_channel())).strip()
+    command = build_command(action, database_backup=database_backup,
+                            backup_name=backup_name, ref=ref)
+
+    # Jeder Lauf bekommt ein frisches Protokoll, der vorige bleibt als .1
+    # liegen. Frueher wurde nur angehaengt: die Datei wuchs mit jedem Update,
+    # und die Live-Ansicht begann mit der Ausgabe des *vorigen* Laufs.
+    log_file = paths["log_file"]
+    await hostexec.run_host(
+        ["sh", "-c", f'[ -f "{log_file}" ] && mv -f "{log_file}" "{log_file}.1"; : > "{log_file}" 2>/dev/null; true'],
+        timeout=10.0)
 
     unit = f"logbot-{action}-{int(time.time())}"
     result = await hostexec.spawn_host(command, unit_name=unit, log_path=paths["log_file"])
@@ -854,6 +880,15 @@ async def announce_if_new(reason: str = "watcher", force_check: bool = True) -> 
     bus.publish(UPDATE_AVAILABLE, payload)
     logger.warning("Neuer Stand auf GitHub gemeldet (%s): %s",
                    reason, remote.get("commit_short") or remote.get("version"))
+    # Auch nach aussen (Mail/Telegram/Webhook), falls so eingestellt.
+    from . import alerts
+    await alerts.dispatch(
+        "update_available", "Neuer Stand auf GitHub",
+        (f"Installiert: {payload['installed_version'] or '?'}\n"
+         f"Verfügbar:   {payload['available_version'] or payload['commit'] or '?'}\n"
+         f"{payload['commit_message'] or ''}\n\n"
+         f"Einspielen unter System → Updates."),
+        level="info", key=f"update:{commit}", detail=payload)
     return {"announced": True, **payload}
 
 

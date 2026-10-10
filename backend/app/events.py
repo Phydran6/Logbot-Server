@@ -101,6 +101,12 @@ class EventBus:
                 yield _format(message)
 
             while True:
+                # Wegen Ueberlastung abgehaengt (siehe publish): Rest ausliefern,
+                # dann die Verbindung beenden. Sonst kamen nur noch Herzschlaege,
+                # der Browser hielt sich fuer verbunden und bekam nie wieder ein
+                # Ereignis. So baut EventSource die Verbindung selbst neu auf.
+                if queue not in self._subscribers and queue.empty():
+                    return
                 try:
                     message = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
                 except asyncio.TimeoutError:

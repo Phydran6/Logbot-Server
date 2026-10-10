@@ -147,15 +147,13 @@
             >
           </div>
 
-          <div>
-            <span class="label">{{ t('mail.notifyOn') }}</span>
-            <div class="event-grid mt-2">
-              <label v-for="event in events" :key="event.id" class="toggle">
-                <input v-model="config.notify_on[event.id]" type="checkbox">
-                <span>{{ event.label }}</span>
-              </label>
-            </div>
-          </div>
+          <!-- Die Haken "Benachrichtigen bei ..." standen frueher hier - und
+               bewirkten nichts (es gab keinen Aufrufer). Was wann gemeldet
+               wird, steht jetzt fuer alle Wege gemeinsam auf einer Seite. -->
+          <p class="hint">
+            Wann LogBot eine Mail (oder Telegram/Webhook) schickt, stellst du unter
+            <router-link class="link" to="/alerts">{{ t('nav.alerts') }}</router-link> ein.
+          </p>
         </template>
 
         <div class="flex flex-wrap gap-2">

@@ -35,6 +35,9 @@ LIST_COLUMNS = (
     Log.level,
     Log.source,
     Log.message,
+    # Zusammengefasste Wiederholungen ("5.000x"): steht in extra_data, wird
+    # hier als eigene kleine Spalte mitgegeben statt das ganze JSON.
+    Log.extra_data["repeat"].as_integer().label("repeat"),
 )
 
 # Dieselbe Liste, aber mit allem, was der Anzeige-Parser braucht.

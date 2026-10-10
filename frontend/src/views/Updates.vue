@@ -25,88 +25,103 @@
     <p v-if="error" class="note note-fail">{{ error }}</p>
 
     <!-- ================================================================
-         LAUFENDER VORGANG
+         TERMINAL
+         Wie die Upgrade-Konsole in Proxmox: Die Befehlszeile steht fertig
+         da, Enter startet sie, und man sieht live, was auf dem Server
+         passiert. Bewusst KEINE echte Shell - das Update baut genau den
+         Container neu, in dem eine solche Shell laufen wuerde, und risse sie
+         mitten im Lauf ab. Der Lauf selbst haengt am Host (systemd-run), die
+         Ausgabe kommt per Server-Sent Events und ueberlebt den Neubau.
          ================================================================ -->
-    <div v-if="run && run.status === 'running'" class="card mb-4" style="border-color: var(--color-primary)">
-      <div class="card-body">
-        <div class="flex items-center gap-3 mb-3">
-          <AppIcon name="refresh" :size="20" class="spin" style="color: var(--color-primary)" />
-          <div class="min-w-0">
-            <p class="font-semibold" style="color: var(--color-primary)">
-              {{ run.action === 'rollback' ? 'Rückfall läuft' : 'Update läuft' }} – {{ run.step || 'Vorbereitung' }}
-            </p>
-            <p class="text-sm" style="color: var(--color-text-muted)">{{ run.message }}</p>
-          </div>
-        </div>
-        <div class="bar-track">
-          <div class="bar-fill" :style="{ width: (run.progress || 0) + '%', backgroundColor: 'var(--color-primary)' }" />
-        </div>
-        <p class="text-xs mt-2" style="color: var(--color-text-muted)">
-          <template v-if="offline">
-            Der Server ist gerade nicht erreichbar – das ist während des Neubaus normal.
-            Diese Seite meldet sich von selbst zurück.
-          </template>
-          <template v-else>
-            Bitte das Fenster offen lassen. Die Oberfläche ist gleich kurz nicht erreichbar.
-          </template>
-        </p>
-
-        <!-- Die Ausgabe des Wartungsskripts, live.
-
-             Ein Fortschrittsbalken sagt „43 %". Er sagt nicht, woran es gerade
-             hängt, und wenn etwas schiefgeht, sagt er gar nichts. Hier läuft
-             stattdessen mit, was auf dem Server tatsächlich passiert — so, wie
-             in einer Shell danebenzustehen. -->
-        <div class="mt-4">
-          <div class="flex items-center justify-between gap-2 mb-1">
-            <span class="text-xs font-medium" style="color: var(--color-text-secondary)">
-              Ausgabe vom Server
-              <span v-if="liveConnected" class="badge badge-success ml-1">live</span>
-              <span v-else class="badge badge-neutral ml-1">Verbindung unterbrochen</span>
-            </span>
-            <label class="flex items-center gap-1.5 text-xs cursor-pointer" style="color: var(--color-text-muted)">
-              <input type="checkbox" v-model="followOutput">
-              mitscrollen
-            </label>
-          </div>
-          <pre ref="liveBox" class="log-box log-box--live">{{ liveLines.join('\n') || 'Warte auf die erste Ausgabe…' }}</pre>
-        </div>
+    <div class="term mb-4" :class="{ 'is-running': isRunning }">
+      <div class="term-bar">
+        <span class="term-dots" aria-hidden="true"><i /><i /><i /></span>
+        <span class="term-title">{{ termTitle }}</span>
+        <span v-if="isRunning" class="term-chip" :class="liveConnected ? 'is-live' : 'is-off'">
+          {{ liveConnected ? 'live' : (offline ? 'Server baut neu…' : 'verbinde…') }}
+        </span>
+        <label class="term-follow">
+          <input v-model="followOutput" type="checkbox">
+          mitscrollen
+        </label>
       </div>
-    </div>
+      <div v-if="isRunning" class="term-progress">
+        <div :style="{ width: (run?.progress || 0) + '%' }" />
+      </div>
 
-    <!-- Ergebnis des letzten Laufs -->
-    <div
-      v-else-if="run && (run.status === 'success' || run.status === 'failed')"
-      class="card mb-4"
-      :style="{ borderColor: run.status === 'success' ? 'var(--color-success)' : 'var(--color-danger)' }"
-    >
-      <div class="card-body">
-        <div class="flex items-start gap-3">
-          <AppIcon
-            :name="run.status === 'success' ? 'check' : 'warning'"
-            :size="20"
-            class="shrink-0"
-            :style="{ color: run.status === 'success' ? 'var(--color-success)' : 'var(--color-danger)' }"
-          />
-          <div class="min-w-0 flex-1">
-            <p class="font-semibold" :style="{ color: run.status === 'success' ? 'var(--color-success)' : 'var(--color-danger)' }">
-              {{ run.status === 'success' ? 'Letzter Vorgang erfolgreich' : 'Letzter Vorgang fehlgeschlagen' }}
-            </p>
-            <p class="text-sm mt-1" style="color: var(--color-text-secondary)">{{ run.message }}</p>
-            <p class="text-xs mt-1" style="color: var(--color-text-muted)">
-              {{ run.action === 'rollback' ? 'Rückfall' : 'Update' }} vom {{ formatTime(run.updated_at) }}
-              <template v-if="run.rolled_back"> · auf den vorherigen Stand zurückgesetzt</template>
-              <template v-if="run.backup"> · Sicherung {{ run.backup }}</template>
-            </p>
-            <div class="flex flex-wrap gap-2 mt-3">
-              <button class="btn btn-secondary btn-sm" @click="reloadPage">Seite neu laden</button>
-              <button class="btn btn-ghost btn-sm" @click="toggleLog">
-                {{ showLog ? 'Protokoll ausblenden' : 'Protokoll anzeigen' }}
-              </button>
-            </div>
-          </div>
+      <div
+        ref="liveBox"
+        class="term-body"
+        tabindex="0"
+        role="log"
+        aria-label="Update-Terminal"
+        @keydown="onTermKey"
+        @focus="termFocused = true"
+        @blur="termFocused = false"
+      >
+        <template v-if="historyLines.length">
+          <div class="term-line term-muted"># ── Protokoll des letzten Laufs ──</div>
+          <div v-for="(line, i) in historyLines" :key="'h' + i" class="term-line term-muted">{{ line }}</div>
+          <div class="term-line">&nbsp;</div>
+        </template>
+        <div v-for="(line, i) in echoLines" :key="'e' + i" class="term-line" :class="line.cls">
+          <span v-if="line.prompt" class="term-prompt">{{ line.prompt }}</span>{{ line.text }}
         </div>
-        <pre v-if="showLog" class="log-box">{{ logText }}</pre>
+        <div v-for="(line, i) in liveLines" :key="'l' + i" class="term-line">{{ line }}</div>
+
+        <!-- Laufender Vorgang: Ausgabe kommt gleich -->
+        <div v-if="isRunning && !liveLines.length" class="term-line term-muted">
+          Warte auf die erste Ausgabe vom Server…
+        </div>
+
+        <!-- Ergebnis, sobald der Lauf durch ist -->
+        <div v-if="!isRunning && finishedLine" class="term-line" :class="finishedLine.cls">{{ finishedLine.text }}</div>
+
+        <!-- Eingabezeile -->
+        <template v-if="!isRunning && !starting">
+          <div v-if="termMode === 'ask'" class="term-line term-warn">
+            Vorher sichern (LogBot-Sicherung + Datenbank-Abzug)? [J/n] {{ termAnswer }}<span class="term-cursor" :class="{ 'is-on': termFocused }" />
+          </div>
+          <div v-else class="term-line">
+            <span class="term-prompt">{{ promptText }}</span>{{ termBlocked ? '' : commandText }}<span class="term-cursor" :class="{ 'is-on': termFocused }" />
+          </div>
+        </template>
+        <div v-else-if="starting" class="term-line term-muted">Wird gestartet…</div>
+      </div>
+
+      <div class="term-foot">
+        <span class="term-hint">
+          <template v-if="isRunning && offline">
+            Der Server baut gerade neu und ist kurz weg. Das ist normal, die Ausgabe läuft gleich weiter.
+          </template>
+          <template v-else-if="isRunning">
+            {{ run?.step || 'Vorbereitung' }} – bitte das Fenster offen lassen.
+          </template>
+          <template v-else-if="termBlocked">{{ termBlocked }}</template>
+          <template v-else-if="termMode === 'ask'">J + Enter = mit Sicherung · n + Enter = ohne · Esc = abbrechen</template>
+          <template v-else>Ins Terminal klicken und <kbd>Enter</kbd> drücken, um das Update zu starten.</template>
+        </span>
+        <span class="term-actions">
+          <template v-if="!isRunning && !starting && termMode === 'ask'">
+            <button class="btn btn-primary btn-sm" @click="answerAsk('j')">Ja, sichern</button>
+            <button class="btn btn-secondary btn-sm" @click="answerAsk('n')">Ohne</button>
+            <button class="btn btn-ghost btn-sm" @click="cancelAsk">Abbrechen</button>
+          </template>
+          <button
+            v-else-if="!isRunning && !starting && !termBlocked"
+            class="btn btn-primary btn-sm"
+            @click="beginAsk"
+          >
+            ⏎ Enter
+          </button>
+          <button
+            v-if="!isRunning && run && (run.status === 'success' || run.status === 'failed')"
+            class="btn btn-secondary btn-sm"
+            @click="reloadPage"
+          >
+            Seite neu laden
+          </button>
+        </span>
       </div>
     </div>
 
@@ -186,6 +201,7 @@
               class="btn btn-primary"
               :disabled="!canStart"
               @click="askUpdate"
+              title="Startet das Update im Terminal oben"
             >
               <AppIcon name="download" :size="16" />
               {{ applyLabel }}
@@ -333,9 +349,7 @@
     <div v-if="dialog" class="modal-backdrop" @click.self="dialog = null">
       <div class="modal max-w-lg">
         <div class="card-header">
-          <span class="card-title">
-            {{ dialog.mode === 'update' ? 'Update wirklich einspielen?' : 'Wirklich zurückfallen?' }}
-          </span>
+          <span class="card-title">Wirklich zurückfallen?</span>
         </div>
         <div class="card-body space-y-3 text-sm overflow-y-auto">
           <div class="warn-box">
@@ -348,14 +362,7 @@
             </p>
           </div>
 
-          <p v-if="dialog.mode === 'update'">
-            Eingespielt wird der Stand
-            <strong>{{ status?.remote?.version || status?.remote?.commit_short }}</strong>
-            aus <span class="font-mono">{{ status?.remote?.repo }}@{{ status?.remote?.branch }}</span>.
-            Alle Container werden neu gebaut und gestartet; die Oberfläche ist dabei einige
-            Minuten nicht erreichbar.
-          </p>
-          <p v-else>
+          <p>
             Wiederhergestellt wird die Sicherung
             <strong class="font-mono">{{ dialog.backup?.name }}</strong>
             <template v-if="dialog.backup?.version"> (Version {{ dialog.backup.version }})</template>.
@@ -368,17 +375,6 @@
             </template>
           </p>
 
-          <label v-if="dialog.mode === 'update'" class="flex items-start gap-2 cursor-pointer">
-            <input v-model="databaseBackup" type="checkbox" class="mt-1">
-            <span>
-              Datenbank vorher sichern (empfohlen).
-              <span class="block text-xs" style="color: var(--color-text-muted)">
-                Bei vielen Logs dauert das eine Weile und braucht Platz auf der Platte.
-                Ohne Haken geht es schneller, aber ohne Netz.
-              </span>
-            </span>
-          </label>
-
           <label class="flex items-start gap-2 cursor-pointer">
             <input v-model="understood" type="checkbox" class="mt-1">
             <span>Ich habe verstanden, dass dabei Logdaten verloren gehen können.</span>
@@ -387,7 +383,7 @@
         <div class="modal-actions">
           <button class="btn btn-ghost" @click="dialog = null">Abbrechen</button>
           <button class="btn btn-danger" :disabled="!understood || starting" @click="confirmDialog">
-            {{ starting ? 'Wird gestartet…' : (dialog.mode === 'update' ? 'Weiter' : 'Weiter') }}
+            {{ starting ? 'Wird gestartet…' : 'Weiter' }}
           </button>
         </div>
       </div>
@@ -431,10 +427,16 @@ const error = ref('')
 const offline = ref(false)
 const dialog = ref(null)
 const understood = ref(false)
-const databaseBackup = ref(true)
-const showLog = ref(false)
-const logText = ref('')
 const copied = ref(false)
+
+// Terminal: Eingabezustand und die Zeilen, die nicht vom Server kommen
+// (eingegebener Befehl, Rueckfrage, Antwort) - wie in einer echten Shell
+// bleiben sie im Verlauf stehen.
+const termFocused = ref(false)
+const termMode = ref('ready')          // 'ready' | 'ask'
+const termAnswer = ref('')
+const echoLines = ref([])              // { prompt?, text, cls? }
+const historyLines = ref([])           // Protokoll des letzten Laufs beim Öffnen
 
 // Mitlaufende Ausgabe des Wartungslaufs (Server-Sent Events).
 const liveLines = ref([])
@@ -506,10 +508,54 @@ const channelLabel = computed(() => {
   return channels.value.find(c => c.id === key)?.label || key || '—'
 })
 
-onMounted(() => {
-  load()
+const promptText = computed(() => {
+  const host = (typeof window !== 'undefined' && window.location.hostname) || 'logbot'
+  return `root@${host}:${status.value?.install_dir || '/opt/logbot'}# `
+})
+
+/** Genau die Zeile, die nach dem Enter auf dem Host läuft (kommt vom Server). */
+const commandText = computed(() => (status.value?.command || []).join(' '))
+
+/** Warum gerade nichts gestartet werden kann - oder '' wenn es geht. */
+const termBlocked = computed(() => {
+  if (!status.value) return 'Lade den Stand vom Server…'
+  if (!status.value.can_update) {
+    return 'Dem Backend fehlt der Zugriff auf den Host – Update nur per Einzeiler (unten).'
+  }
+  if (status.value.is_downgrade) return 'Einspielen wäre ein Rückschritt – siehe Hinweis unter „Versionsstand“.'
+  if (!commandText.value) return 'Der Server kennt diese Funktion noch nicht – bitte einmal per Einzeiler aktualisieren.'
+  return ''
+})
+
+const termTitle = computed(() => {
+  if (isRunning.value) {
+    const what = run.value?.action === 'rollback' ? 'Rückfall' : 'Update'
+    return `${what} läuft – ${run.value?.step || 'Vorbereitung'} (${run.value?.progress || 0} %)`
+  }
+  return 'Update-Konsole'
+})
+
+/** Abschlusszeile nach einem Lauf, so wie eine Shell den Exit-Status meldet. */
+const finishedLine = computed(() => {
+  const r = serverRun.value
+  if (!r || !['success', 'failed'].includes(r.status)) return null
+  // Nur zeigen, wenn es in diesem Fenster etwas zu dem Lauf gibt - sonst
+  // stuende eine alte Erfolgsmeldung ueber einer frischen Eingabezeile.
+  if (!liveLines.value.length && !historyLines.value.length) return null
+  const ok = r.status === 'success'
+  return {
+    cls: ok ? 'term-ok' : 'term-fail',
+    text: `${ok ? '✔ Fertig' : '✘ Fehlgeschlagen'}: ${r.message || ''}`
+      + (r.rolled_back ? ' (auf den vorherigen Stand zurückgesetzt)' : ''),
+  }
+})
+
+onMounted(async () => {
+  await load()
   loadReleases()
   loadBackupScopes()
+  // Wie beim Öffnen einer Konsole: der letzte Lauf steht noch im Verlauf.
+  if (!isRunning.value) loadLog()
 })
 
 onUnmounted(() => {
@@ -592,10 +638,89 @@ async function poll() {
   }
 }
 
+/** Der Knopf unter „Versionsstand" führt ins Terminal - dort läuft das Update. */
 function askUpdate() {
-  understood.value = false
-  databaseBackup.value = true
-  dialog.value = { mode: 'update' }
+  liveBox.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  liveBox.value?.focus({ preventScroll: true })
+  beginAsk()
+}
+
+// =============================================================================
+// Terminal
+// =============================================================================
+function onTermKey(event) {
+  if (isRunning.value || starting.value) return
+  const key = event.key
+  if (termMode.value === 'ready') {
+    if (key === 'Enter') {
+      event.preventDefault()
+      beginAsk()
+    }
+    return
+  }
+  // Rueckfrage: einzelne Zeichen sammeln wie an einer echten Eingabeaufforderung.
+  if (key === 'Enter') {
+    event.preventDefault()
+    answerAsk()
+  } else if (key === 'Escape' || (event.ctrlKey && key.toLowerCase() === 'c')) {
+    event.preventDefault()
+    cancelAsk()
+  } else if (key === 'Backspace') {
+    event.preventDefault()
+    termAnswer.value = termAnswer.value.slice(0, -1)
+  } else if (key.length === 1 && !event.ctrlKey && !event.metaKey && termAnswer.value.length < 4) {
+    event.preventDefault()
+    termAnswer.value += key
+  }
+}
+
+function echo(text, cls = '', prompt = '') {
+  echoLines.value = [...echoLines.value, { text, cls, prompt }]
+  scrollToEnd()
+}
+
+function beginAsk() {
+  if (isRunning.value || starting.value || termMode.value === 'ask') return
+  echo(termBlocked.value ? '' : commandText.value, '', promptText.value)
+  if (termBlocked.value) {
+    echo(`# ${termBlocked.value}`, 'term-fail')
+    return
+  }
+  const from = status.value?.local?.version || status.value?.local?.commit_short || '?'
+  const to = status.value?.remote?.version || status.value?.remote?.commit_short || status.value?.target_ref || '?'
+  echo(`Stand: ${from} → ${to}  (${status.value?.target_ref || status.value?.remote?.branch || ''})`, 'term-muted')
+  echo('Alle Container werden neu gebaut. Die Oberfläche ist dabei ein paar Minuten weg.', 'term-warn')
+  echo('Normalerweise bleiben die Logs erhalten – verlassen sollte man sich darauf nicht.', 'term-warn')
+  termAnswer.value = ''
+  termMode.value = 'ask'
+  scrollToEnd()
+}
+
+function cancelAsk() {
+  echo(`Vorher sichern (LogBot-Sicherung + Datenbank-Abzug)? [J/n] ${termAnswer.value}^C`, 'term-warn')
+  echo('Abgebrochen.', 'term-muted')
+  termAnswer.value = ''
+  termMode.value = 'ready'
+}
+
+async function answerAsk(forced) {
+  const raw = (forced ?? termAnswer.value).trim().toLowerCase()
+  echo(`Vorher sichern (LogBot-Sicherung + Datenbank-Abzug)? [J/n] ${forced ?? termAnswer.value}`, 'term-warn')
+  termAnswer.value = ''
+  let withBackup
+  if (['', 'j', 'ja', 'y', 'yes'].includes(raw)) withBackup = true
+  else if (['n', 'nein', 'no'].includes(raw)) withBackup = false
+  else {
+    echo('Bitte „j" oder „n" eingeben.', 'term-muted')
+    return
+  }
+  termMode.value = 'ready'
+  echo(withBackup
+    ? 'Sicherung wird vorher angelegt, dann startet das Update…'
+    : 'Ohne Sicherung – das Update startet…', 'term-muted')
+  // Die Sicherungsfrage ist serverseitig Pflicht (app/guard.py): die Antwort
+  // hier ist genau diese Entscheidung, nur eben im Terminal gestellt.
+  await launch('update', { create: withBackup }, { databaseBackup: withBackup })
 }
 
 function askRollback(backup) {
@@ -619,21 +744,28 @@ function confirmDialog() {
   promptOpen.value = true
 }
 
-/** Startet den Lauf, sobald die Sicherungsfrage beantwortet ist. */
+/** Rückfall: startet, sobald die Sicherungsfrage beantwortet ist. */
 async function startRun(decision) {
   promptOpen.value = false
   if (!dialog.value) return
+  const backupName = dialog.value.backup?.name || ''
+  dialog.value = null
+  echo(`${commandText.value.replace(/ apply .*$/, ' rollback')}${backupName ? ' --backup ' + backupName : ''}`,
+    '', promptText.value)
+  await launch('rollback', decision, { backupName })
+}
 
+/** Schickt Update oder Rückfall los. Die Ausgabe landet im Terminal. */
+async function launch(mode, decision, { databaseBackup = true, backupName = '' } = {}) {
   starting.value = true
   error.value = ''
-  const mode = dialog.value.mode
   try {
     if (mode === 'update') {
       await auth.api('/api/updates/apply', {
         method: 'POST',
         body: {
           confirm: 'UPDATE',
-          database_backup: databaseBackup.value,
+          database_backup: databaseBackup,
           ref: status.value?.target_ref || '',
           backup: decision,
         },
@@ -645,14 +777,14 @@ async function startRun(decision) {
           confirm: 'ROLLBACK',
           // Die Sicherung des Wartungsskripts auf dem Host - nicht zu
           // verwechseln mit der ZIP-Sicherung aus der Rueckfrage oben.
-          backup_dir: dialog.value.backup?.name || '',
+          backup_dir: backupName,
           backup: decision,
         },
       })
     }
-    dialog.value = null
-    logText.value = ''
-    showLog.value = false
+    // Neuer Lauf, neue Ausgabe - der alte Verlauf hat ausgedient.
+    historyLines.value = []
+    liveLines.value = []
     // Der Lauf braucht einen Moment, bis er den ersten Zustand schreibt.
     pendingAction.value = mode === 'update' ? 'apply' : 'rollback'
     pendingSince = Date.now()
@@ -660,7 +792,7 @@ async function startRun(decision) {
     startPolling()
   } catch (e) {
     error.value = e.message || 'Der Vorgang konnte nicht gestartet werden.'
-    dialog.value = null
+    echo(`✘ ${error.value}`, 'term-fail')
   } finally {
     starting.value = false
   }
@@ -769,18 +901,16 @@ function scrollToEnd() {
   })
 }
 
+/** Verlauf des letzten Laufs - nur, solange das Terminal nichts Eigenes zeigt. */
 async function loadLog() {
+  if (liveLines.value.length) return
   try {
     const data = await auth.api('/api/updates/log?lines=300')
-    logText.value = (data.lines || []).join('\n') || 'Kein Protokoll vorhanden.'
+    historyLines.value = data.lines || []
+    scrollToEnd()
   } catch {
-    logText.value = 'Das Protokoll konnte nicht gelesen werden.'
+    historyLines.value = []
   }
-}
-
-async function toggleLog() {
-  showLog.value = !showLog.value
-  if (showLog.value && !logText.value) await loadLog()
 }
 
 function reloadPage() {
@@ -903,17 +1033,158 @@ function formatTime(value) {
   max-width: 60%;
 }
 
-.bar-track {
-  height: 0.5rem;
-  border-radius: var(--radius-full);
-  background-color: var(--hover-surface);
+/* Terminal: dunkel auch im hellen Design - eine Konsole liest sich so besser,
+   und man verwechselt sie nicht mit dem Rest der Seite. */
+.term {
+  border-radius: var(--radius);
+  border: 1px solid #1e293b;
+  background-color: #0b1220;
   overflow: hidden;
 }
 
-.bar-fill {
-  height: 100%;
+.term.is-running {
+  border-color: var(--color-primary);
+}
+
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.4375rem 0.75rem;
+  background-color: #111a2e;
+  border-bottom: 1px solid #1e293b;
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+
+.term-dots {
+  display: inline-flex;
+  gap: 0.3125rem;
+  flex-shrink: 0;
+}
+
+.term-dots i {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  background-color: #334155;
+}
+
+.term-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.term-chip {
+  flex-shrink: 0;
+  padding: 0.0625rem 0.5rem;
   border-radius: var(--radius-full);
+  font-size: 0.6875rem;
+}
+
+.term-chip.is-live { background-color: rgba(34, 197, 94, 0.18); color: #4ade80; }
+.term-chip.is-off { background-color: rgba(234, 179, 8, 0.18); color: #facc15; }
+
+.term-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.term-progress {
+  height: 3px;
+  background-color: #1e293b;
+}
+
+.term-progress > div {
+  height: 100%;
+  background-color: var(--color-primary);
   transition: width var(--duration) var(--ease);
+}
+
+.term-body {
+  max-height: 28rem;
+  min-height: 9rem;
+  overflow: auto;
+  padding: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: #cbd5e1;
+  cursor: text;
+  outline: none;
+}
+
+.term-body:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.term-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.term-prompt { color: #4ade80; }
+.term-muted { color: #64748b; }
+.term-warn { color: #facc15; }
+.term-ok { color: #4ade80; font-weight: 600; }
+.term-fail { color: #f87171; font-weight: 600; }
+
+/* Block-Cursor: blinkt nur, solange das Terminal den Fokus hat - wie echt. */
+.term-cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  border: 1px solid #94a3b8;
+}
+
+.term-cursor.is-on {
+  background-color: #e2e8f0;
+  border-color: #e2e8f0;
+  animation: term-blink 1s step-end infinite;
+}
+
+@keyframes term-blink {
+  50% { opacity: 0; }
+}
+
+.term-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid #1e293b;
+  background-color: #111a2e;
+}
+
+.term-hint {
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+
+.term-hint kbd {
+  padding: 0 0.3125rem;
+  border: 1px solid #334155;
+  border-radius: 0.25rem;
+  font-family: var(--font-mono);
+  color: #e2e8f0;
+}
+
+.term-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
 }
 
 .backup-row {
@@ -963,34 +1234,6 @@ function formatTime(value) {
   color: var(--color-text-primary);
   overflow-x: auto;
   white-space: nowrap;
-}
-
-.log-box {
-  margin-top: 0.75rem;
-  padding: 0.75rem;
-  max-height: 20rem;
-  overflow: auto;
-  border-radius: var(--radius);
-  background-color: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  line-height: 1.5;
-  color: var(--color-text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* Die mitlaufende Ausgabe darf hoeher sein und sieht aus wie eine Konsole -
-   sie ist ja eine. Dunkler Hintergrund auch im hellen Design: eine
-   Terminalausgabe liest sich so besser, und man verwechselt sie nicht mit dem
-   Rest der Seite. */
-.log-box--live {
-  max-height: 26rem;
-  margin-top: 0;
-  background-color: #0b1220;
-  border-color: #1e293b;
-  color: #cbd5e1;
 }
 
 .modal-actions {

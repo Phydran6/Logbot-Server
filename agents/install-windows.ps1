@@ -91,7 +91,7 @@ function Read-Answer {
 $INSTALL_DIR = "$env:ProgramData\LogBot-Agent"
 $SCRIPT_NAME = "LogBotAgent.ps1"
 $TASK_NAME = "LogBotAgent"
-$AGENT_VERSION = "2026.09.15.20.00.00"
+$AGENT_VERSION = "2026.10.10.22.00.00"
 
 # ==============================================================================
 # Hilfsfunktionen
@@ -193,7 +193,11 @@ function Process-Event {
     if ($Level -gt $MinLevelNum) { return }
     $Message = $Event.Message
     if (-not $Message) { $Message = "EventID: $($Event.Id)" }
-    $Message = ($Message -replace "`r`n|`n|`r", " ").Substring(0, [Math]::Min(1024, $Message.Length))
+    # Erst ersetzen, dann kuerzen: aus CRLF wird EIN Zeichen, der Text wird
+    # kuerzer. Mit der alten Laenge warf Substring() bei jeder mehrzeiligen
+    # Meldung - sie und der Rest des Kanals in diesem Durchlauf fehlten.
+    $Message = $Message -replace "`r`n|`n|`r", " "
+    if ($Message.Length -gt 1024) { $Message = $Message.Substring(0, 1024) }
     Send-Syslog -Message $Message -Severity $Level -Source "$LogName/$($Event.ProviderName)"
 }
 
@@ -333,7 +337,11 @@ function Send-LogBatch {
     } | ConvertTo-Json -Depth 3
 
     try {
-        $response = Invoke-RestMethod -Uri $url -Method POST -Headers $Headers -Body $body @script:TlsParam
+        # Als UTF-8-Bytes senden: Windows PowerShell 5.1 kodiert einen Text-Body
+        # sonst als ISO-8859-1. Aus "ue" (Umlaut) wird ein ungueltiges Byte, der
+        # Server lehnt die GANZE Lieferung ab - 50 Ereignisse still verloren.
+        $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+        $response = Invoke-RestMethod -Uri $url -Method POST -Headers $Headers -Body $bodyBytes @script:TlsParam
         Save-AgentId -Response $response
     } catch {
         Write-Warning "Sendefehler ($url): $_"
@@ -359,6 +367,11 @@ Write-Host "Gefunden: $($AllLogs.Count) aktive Log-Kanaele"
 Write-Host "---"
 
 $StartTime = (Get-Date).AddMinutes(-1)
+# Pro Kanal: bis zu welchem Zeitpunkt schon gelesen wurde. Frueher galt ein
+# gemeinsamer Startzeitpunkt, der erst nach dem Durchlauf ALLER Kanaele neu
+# gesetzt wurde - was in einem schon gelesenen Kanal waehrenddessen dazukam,
+# fiel durchs Raster (bei hunderten Kanaelen der Grossteil jedes Durchlaufs).
+$LastRead = @{}
 # Log-Liste alle 5 Minuten aktualisieren
 $LogRefreshTime = Get-Date
 
@@ -372,9 +385,14 @@ while ($true) {
     $Batch = @()
 
     foreach ($LogName in $AllLogs) {
+        # Lesezeitpunkt VOR der Abfrage festhalten und nur Ereignisse bis
+        # dorthin nehmen - spaetere holt der naechste Durchlauf, ohne Luecke
+        # und ohne Doppelte.
+        $Since = if ($LastRead.ContainsKey($LogName)) { $LastRead[$LogName] } else { $StartTime }
+        $ReadAt = Get-Date
         try {
             $Events = Get-WinEvent -LogName $LogName -MaxEvents 100 -ErrorAction SilentlyContinue |
-                      Where-Object { $_.TimeCreated -gt $StartTime }
+                      Where-Object { $_.TimeCreated -gt $Since -and $_.TimeCreated -le $ReadAt }
 
             foreach ($Event in $Events) {
                 $Level = $LevelMap[[int]$Event.Level]
@@ -385,7 +403,11 @@ while ($true) {
 
                 $Message = $Event.Message
                 if (-not $Message) { $Message = "EventID: $($Event.Id)" }
-                $Message = ($Message -replace "`r`n|`n|`r", " ").Substring(0, [Math]::Min(2048, $Message.Length))
+                # Erst ersetzen, dann kuerzen: aus CRLF wird EIN Zeichen, der Text
+                # wird kuerzer. Mit der alten Laenge warf Substring() bei jeder
+                # mehrzeiligen Meldung - sie und der Rest des Kanals fehlten.
+                $Message = $Message -replace "`r`n|`n|`r", " "
+                if ($Message.Length -gt 2048) { $Message = $Message.Substring(0, 2048) }
 
                 $Batch += @{
                     level = $Level
@@ -401,6 +423,7 @@ while ($true) {
                 }
             }
         } catch {}
+        $LastRead[$LogName] = $ReadAt
     }
 
     # Restliche Events senden
@@ -408,6 +431,7 @@ while ($true) {
         Send-LogBatch -Events $Batch
     }
 
+    # Nur noch Startpunkt fuer Kanaele, die neu hinzukommen.
     $StartTime = Get-Date
     Start-Sleep -Seconds 5
 }

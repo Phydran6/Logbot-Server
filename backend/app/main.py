@@ -31,6 +31,7 @@ from . import journal
 from . import shell
 from . import tokens
 from . import updater
+from . import watchdog
 from .config import settings, validate_security_settings
 from .database import get_db, async_session, engine
 from .limiter import limiter, client_ip as real_client_ip
@@ -44,6 +45,7 @@ from .routes import (auth_router, mfa_router, health_router, users_router, agent
                      ai_router, stacks_router, mail_router, shell_router,
                      journal_router, containers_router, sso_router, about_router,
                      discovery_router,
+                     alerts_router,
                      caddy as caddy_router, network as network_router)
 from .branding import branding_router
 
@@ -137,6 +139,7 @@ app.include_router(containers_router)
 app.include_router(sso_router)
 app.include_router(about_router)
 app.include_router(discovery_router)
+app.include_router(alerts_router)
 app.include_router(caddy_router.router)
 app.include_router(network_router.router)
 
@@ -390,6 +393,26 @@ async def ensure_app_login_tokens_table():
         logger.warning("app_login_tokens migration skipped: %s", exc)
 
 
+async def _drop_invalid_index(conn, name: str) -> None:
+    """Raeumt einen halb gebauten Index weg.
+
+    Bricht `CREATE INDEX CONCURRENTLY` ab (Container neu gestartet, Update-
+    Rueckfall, Platte voll), bleibt ein als ungueltig markierter Index liegen.
+    `IF NOT EXISTS` ueberspringt ihn danach fuer immer - und beim Dedup-Index
+    findet `ON CONFLICT (dedup_key)` keinen gueltigen Index mehr: dann scheitert
+    JEDE Lieferung mit Zeitstempel. Also vorher pruefen und neu anfangen.
+    """
+    # `name` ist immer eine feste Konstante aus diesem Modul, nie eine Eingabe.
+    invalid = (await conn.exec_driver_sql(
+        "SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+        f"WHERE c.relname = '{name}' AND NOT i.indisvalid"
+    )).first()
+    if invalid:
+        logging.getLogger("logbot.startup").warning(
+            "Index %s ist ungueltig (abgebrochener Aufbau) - wird neu gebaut", name)
+        await conn.exec_driver_sql(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+
+
 @app.on_event("startup")
 async def ensure_log_indexes():
     """Index fuer den Facility-Filter der Log-Ansicht (Migration fuer Bestands-DBs).
@@ -401,6 +424,7 @@ async def ensure_log_indexes():
     try:
         async with engine.connect() as conn:
             conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await _drop_invalid_index(conn, "idx_logs_facility")
             await conn.exec_driver_sql(
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_logs_facility ON logs(facility)"
             )
@@ -424,6 +448,7 @@ async def ensure_log_dedup_key():
             await conn.exec_driver_sql(
                 "ALTER TABLE logs ADD COLUMN IF NOT EXISTS dedup_key VARCHAR(64)"
             )
+            await _drop_invalid_index(conn, "idx_logs_dedup_key")
             await conn.exec_driver_sql(
                 "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_logs_dedup_key "
                 "ON logs(dedup_key) WHERE dedup_key IS NOT NULL"
@@ -567,6 +592,35 @@ def _to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
     return value
 
 
+# So viele Zeilen gehen hoechstens in EINE INSERT-Anweisung. asyncpg erlaubt
+# pro Anweisung maximal 32767 Parameter, eine Logzeile braucht 12. Ohne
+# Stueckelung scheiterte jede Lieferung ab etwa 2700 Eintraegen (erlaubt sind
+# 5000) mit einem 500 - und ein Sammler, der bei Fehler wiederholt, schickte
+# dieselbe Lieferung endlos erneut.
+INGEST_INSERT_CHUNK = 1000
+
+# Gleiche Meldungen innerhalb dieses Zeitfensters (Sekunden) werden zu einer
+# Zeile mit Anzahl zusammengefasst. 0 = aus.
+REPEAT_WINDOW = max(0, int(os.getenv("LOG_REPEAT_WINDOW", "60")))
+
+# Breite der Spalte logs.source. Laengere Angaben werden gekuerzt statt die
+# ganze Lieferung abzulehnen (siehe LogIngestEntry.source).
+SOURCE_MAX_LENGTH = 100
+
+
+def _strip_nul(value: Optional[str]) -> Optional[str]:
+    """NUL-Zeichen entfernen.
+
+    PostgreSQL nimmt in Text- und JSONB-Spalten kein NUL an. Ein einziges
+    solches Zeichen (kommt in Windows-Ereignistexten und binaeren
+    journald-Meldungen vor) liess sonst die ganze Lieferung mit 500 scheitern,
+    und der Agent schickte sie immer wieder.
+    """
+    if value is None:
+        return None
+    return value.replace("\x00", "")
+
+
 def _dedup_key(hostname: str, timestamp: datetime, event_id: Optional[int], message: str) -> str:
     """Fingerabdruck eines Ereignisses. Gleiche Box + Zeit + Ereignis + Text = gleicher Eintrag."""
     raw = f"{hostname}|{timestamp.isoformat()}|{'' if event_id is None else event_id}|{message}"
@@ -610,6 +664,15 @@ async def ingest_logs(
     derselben Ereignisse (die FRITZ!Box liefert immer ihren kompletten Puffer) werden
     von der Datenbank verworfen statt doppelt gespeichert.
     """
+    # Platte fast voll: nicht annehmen statt die Datenbank zu ersticken. Der
+    # Linux-Agent wartet bei 503 und schickt spaeter genau dieses Paket noch
+    # einmal - es geht also nichts verloren, es kommt nur spaeter an.
+    if diskguard.ingest_blocked():
+        raise HTTPException(
+            status_code=503,
+            detail="Platte fast voll - Annahme pausiert, bitte später erneut senden.",
+            headers={"Retry-After": "300"})
+
     source_ip = real_client_ip(request)
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer Token erforderlich")
@@ -668,11 +731,16 @@ async def ingest_logs(
     # Domaenencontrollers erfinden.
     allowed, why = tokens.may_ingest(agent_token, data.hostname, agent.id)
     if not allowed:
+        # Den Namen VOR dem Rollback merken: rollback() laesst alle geladenen
+        # Objekte verfallen, und das Nachladen von agent_token.name wirft in
+        # der async-Session (MissingGreenlet). Aus dem 403 wurde so ein 500,
+        # und der Tagebucheintrag fehlte.
+        token_name = agent_token.name
         await db.rollback()
         await journal.record(
             db, category="token", event="ingest.denied", level="warning",
-            message=f"'{agent_token.name}' wollte für '{data.hostname}' liefern: {why}",
-            actor=agent_token.name, source_ip=source_ip, target=data.hostname, ok=False)
+            message=f"'{token_name}' wollte für '{data.hostname}' liefern: {why}",
+            actor=token_name, source_ip=source_ip, target=data.hostname, ok=False)
         raise HTTPException(status_code=403, detail=why)
 
     # Erste Lieferung eines frisch angemeldeten Geraeteschluessels: ab jetzt
@@ -688,22 +756,41 @@ async def ingest_logs(
     now = datetime.utcnow()
     unique_rows = {}   # dedup_key -> Zeile, entfernt Doppelte schon innerhalb einer Lieferung
     plain_rows = []    # ohne Zeitstempel: keine Duplikatpruefung moeglich
+    repeats = {}       # (Stufe, Quelle, Text) -> erste Zeile dieser Wiederholung
 
     for event in data.events:
-        level = (event.level or "").strip().lower() or None
-        source = (event.source or "").strip() or None
+        message = _strip_nul(event.message)
+        level = _strip_nul(event.level or "").strip().lower() or None
+        source = _strip_nul(event.source or "").strip()[:SOURCE_MAX_LENGTH] or None
         if is_fritzbox and (level is None or source is None):
             mapped_level, mapped_source = fritzbox.classify(event.event_id, event.group, event.message)
             level = level or mapped_level
             source = source or mapped_source
 
+        # Wiederholungen zusammenfassen statt verwerfen: dieselbe Meldung
+        # mehrfach innerhalb von REPEAT_WINDOW wird EINE Zeile mit Anzahl und
+        # letztem Zeitpunkt ("5.000x zwischen 19:27 und 19:28"). Die
+        # Information bleibt vollstaendig, der Platz nicht. Die FRITZ!Box ist
+        # ausgenommen: sie liefert ihren Puffer immer wieder komplett, und
+        # dort muss jede Zeile ihren eigenen Duplikat-Schluessel behalten.
+        ts = _to_naive_utc(event.timestamp)
+        collapse = REPEAT_WINDOW > 0 and not is_fritzbox
+        if collapse:
+            group_key = (level, source, message)
+            first = repeats.get(group_key)
+            moment = ts or now
+            if first is not None and abs((moment - first["timestamp"]).total_seconds()) <= REPEAT_WINDOW:
+                extra_first = first["extra_data"]
+                extra_first["repeat"] = extra_first.get("repeat", 1) + 1
+                extra_first["repeat_last"] = moment.isoformat()
+                continue
+
         extra = {"ingested_via": "https"}
         if event.event_id is not None:
             extra["event_id"] = event.event_id
         if event.group:
-            extra["group"] = event.group
+            extra["group"] = _strip_nul(event.group)
 
-        ts = _to_naive_utc(event.timestamp)
         row = {
             "agent_id": agent.id,
             "hostname": data.hostname,
@@ -712,8 +799,8 @@ async def ingest_logs(
             "facility": 1 if event.facility is None else event.facility,
             "level": level or "info",
             "source": source or "unknown",
-            "message": event.message,
-            "raw_message": event.message,
+            "message": message,
+            "raw_message": message,
             "extra_data": extra,
             "created_at": now,
             "dedup_key": None,
@@ -721,22 +808,24 @@ async def ingest_logs(
         if ts is None:
             plain_rows.append(row)
         else:
-            key = _dedup_key(data.hostname, ts, event.event_id, event.message)
+            key = _dedup_key(data.hostname, ts, event.event_id, message)
             row["dedup_key"] = key
             unique_rows[key] = row
+        if collapse:
+            repeats[(level, source, message)] = row
 
     rows = plain_rows + list(unique_rows.values())
     inserted = 0
-    if rows:
+    for start in range(0, len(rows), INGEST_INSERT_CHUNK):
         stmt = (
-            pg_insert(Log).values(rows)
+            pg_insert(Log).values(rows[start:start + INGEST_INSERT_CHUNK])
             .on_conflict_do_nothing(
                 index_elements=[Log.dedup_key],
                 index_where=Log.dedup_key.is_not(None),
             )
             .returning(Log.id)
         )
-        inserted = len((await db.execute(stmt)).scalars().all())
+        inserted += len((await db.execute(stmt)).scalars().all())
 
     await db.commit()
     # agent_id mitgeben: damit weiss der Agent, welcher Eintrag auf dem Server
@@ -876,8 +965,11 @@ async def housekeeping_task():
     die falsche Reihenfolge: Hausarbeit macht man, wenn Zeit dafuer ist.
     """
     logger = logging.getLogger("logbot.housekeeping")
+    # Erster Lauf kurz nach dem Start, nicht erst nach 24 h: ein Server, der
+    # oefter als einmal am Tag neu startet (Updates, Absturz), kam sonst nie
+    # dazu - das Tagebuch wuchs dann ohne Grenze.
+    await asyncio.sleep(600)
     while True:
-        await asyncio.sleep(24 * 3600)
         try:
             async with async_session() as session:
                 removed = await journal.prune(session)
@@ -885,6 +977,7 @@ async def housekeeping_task():
                     logger.info("Systemtagebuch: %s alte Einträge entfernt", removed)
         except Exception as exc:
             logger.warning("Hausarbeit fehlgeschlagen: %s", exc)
+        await asyncio.sleep(24 * 3600)
 
 
 # Hintergrundaufgaben werden hier festgehalten. Ohne eine Referenz kann der
@@ -903,6 +996,9 @@ def _spawn(coro) -> None:
 async def start_background_tasks():
     # Raeumt auf, BEVOR die Platte voll ist (app/diskguard.py).
     _spawn(diskguard.watch_task())
+    # Merkt, wenn LogBot selbst nicht mehr sammelt, und meldet es nach aussen
+    # (app/watchdog.py + app/alerts.py).
+    _spawn(watchdog.watch_task())
     _spawn(agent_retention_task())
     _spawn(archiving_task())
     _spawn(housekeeping_task())

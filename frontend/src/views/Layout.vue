@@ -403,6 +403,7 @@ const navGroups = computed(() => {
   const networkChildren = [
     { to: '/settings/network', name: 'Settings', tab: 'network', label: t('nav.network') },
     { to: '/mail', name: 'Mail', label: t('nav.mail') },
+    { to: '/alerts', name: 'Alerts', label: t('nav.alerts') },
   ]
 
   return [

@@ -3,6 +3,12 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.10.22.00.00
+
+### Added
+- `docker-compose.yml`: Log-Rotation für alle Kern-Container (`x-logging`, json-file 5 × 10 MB). Vorher wuchsen die Container-Protokolle ohne Grenze — und genau dort landet jede Zeile einer Wiederholschleife, außer Reichweite des Plattenwächters.
+- Neue Umgebungsvariablen: `DISK_INGEST_STOP`, `DISK_RESERVE_MB`, `LOG_REPEAT_WINDOW`, `ALERT_TELEGRAM_BOT_TOKEN`, `ALERT_TELEGRAM_CHAT_ID`, `ALERT_WEBHOOK_URL` (alle optional, sinnvolle Vorgaben).
+
 ## 2026.10.08.22.00.00
 
 ### Added

@@ -51,6 +51,7 @@ import asyncio
 import logging
 import os
 import shutil
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
@@ -110,6 +111,27 @@ MAX_BATCHES = max(1, _env_int("DISK_CLEANUP_MAX_BATCHES", 40))
 # Der Rundumschlag ("alle Logs weg") ist ausgeschaltet. Bewusst.
 ALLOW_TRUNCATE = os.getenv("DISK_ALLOW_TRUNCATE", "false").strip().lower() in ("1", "true", "yes", "on")
 
+# Ab hier nimmt der Server keine Logs mehr an (HTTPS-Agents bekommen 503 und
+# puffern bei sich, Syslog verwirft). Lieber ein paar Minuten nichts annehmen
+# als eine Datenbank, die wegen voller Platte gar nicht mehr startet - genau
+# das ist am 2026-10-10 passiert.
+INGEST_STOP = _env_float("DISK_INGEST_STOP", 95.0)
+
+# Notreserve: eine Platzhalter-Datei, die bei voller Platte geloescht wird.
+# Dann hat Postgres wieder Luft zum Starten und der Waechter zum Aufraeumen.
+# Ohne sie half am 2026-10-10 nur Handarbeit per SSH.
+RESERVE_MB = max(0, _env_int("DISK_RESERVE_MB", 1024))
+RESERVE_RELEASE = _env_float("DISK_RESERVE_RELEASE", 97.0)
+RESERVE_PATH = os.path.join(os.getenv("LOGBOT_DATA_DIR", "/app/data"), ".notreserve")
+
+# Die eingestellte Aufbewahrung gilt immer - nicht erst, wenn die Platte voll
+# wird. Frueher wurde sie nur ab der Vorwarnstufe durchgesetzt: bis 80 %
+# wuchs alles einfach weiter, egal was eingestellt war.
+RETENTION_INTERVAL = max(300, _env_int("LOG_RETENTION_INTERVAL", 3600))
+
+# Unwichtige Stufen, die auf Wunsch kuerzer aufbewahrt werden.
+LOW_LEVELS = ("debug", "info", "notice")
+
 # Nicht bei jedem Takt dieselbe Warnung ins Tagebuch schreiben.
 _ANNOUNCE_EVERY = timedelta(minutes=30)
 _last_announced: Optional[datetime] = None
@@ -149,6 +171,106 @@ def usage(path: str = "") -> dict:
     }
 
 
+_ingest_checked_at = 0.0
+_ingest_blocked = False
+
+
+def ingest_blocked() -> bool:
+    """Ist die Platte so voll, dass keine Logs mehr angenommen werden sollen?
+
+    Wird bei jeder Lieferung gefragt - deshalb hoechstens alle 5 s gemessen.
+    """
+    global _ingest_checked_at, _ingest_blocked
+    now = time.monotonic()
+    if now - _ingest_checked_at > 5:
+        _ingest_checked_at = now
+        try:
+            _ingest_blocked = usage()["percent"] >= INGEST_STOP
+        except Exception:                                           # defensiv
+            _ingest_blocked = False
+    return _ingest_blocked
+
+
+# =============================================================================
+# Notreserve
+# =============================================================================
+def _reserve_bytes() -> int:
+    """Groesse der Reserve: wie eingestellt, aber hoechstens 5 % der Platte."""
+    if RESERVE_MB <= 0:
+        return 0
+    try:
+        total = usage(os.path.dirname(RESERVE_PATH))["total_bytes"]
+    except Exception:
+        return 0
+    return int(min(RESERVE_MB * 1024 * 1024, total * 0.05))
+
+
+def reserve_present() -> bool:
+    try:
+        return os.path.getsize(RESERVE_PATH) > 0
+    except OSError:
+        return False
+
+
+def _create_reserve(size: int) -> None:
+    tmp = RESERVE_PATH + ".tmp"
+    with open(tmp, "wb") as handle:
+        try:
+            os.posix_fallocate(handle.fileno(), 0, size)
+        except (AttributeError, OSError):
+            # Dateisystem ohne fallocate: echte Nullen schreiben. Sparse-Dateien
+            # (truncate) taugen nicht - die belegen keinen Platz.
+            chunk = b"\0" * (8 * 1024 * 1024)
+            written = 0
+            while written < size:
+                handle.write(chunk[: min(len(chunk), size - written)])
+                written += len(chunk)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, RESERVE_PATH)
+
+
+async def ensure_reserve(percent: float) -> None:
+    """Legt die Reserve an, wenn wieder reichlich Platz ist."""
+    size = _reserve_bytes()
+    if not size or reserve_present() or percent >= TARGET_USAGE:
+        return
+    try:
+        await asyncio.to_thread(_create_reserve, size)
+        logger.info("Notreserve angelegt: %s (%s)", RESERVE_PATH, _human(size))
+    except Exception as exc:                                        # defensiv
+        logger.warning("Notreserve nicht angelegt: %s", exc)
+        try:
+            os.remove(RESERVE_PATH + ".tmp")
+        except OSError:
+            pass
+
+
+async def release_reserve(percent: float) -> bool:
+    """Gibt die Reserve frei - der letzte Ausweg, bevor die Datenbank stirbt."""
+    if not reserve_present():
+        return False
+    try:
+        size = os.path.getsize(RESERVE_PATH)
+        os.remove(RESERVE_PATH)
+    except OSError as exc:
+        logger.error("Notreserve konnte nicht freigegeben werden: %s", exc)
+        return False
+    logger.critical("Platte bei %s %% - Notreserve (%s) freigegeben", percent, _human(size))
+    from . import alerts
+    await alerts.dispatch(
+        "disk", "Platte voll – Notreserve freigegeben",
+        (f"Die Platte war bei {percent} %. LogBot hat seine Notreserve "
+         f"({_human(size)}) gelöscht, damit die Datenbank weiterläuft. "
+         f"Das verschafft nur Zeit: bitte Platz schaffen oder die Aufbewahrung kürzen."),
+        level="critical", key="disk:reserve")
+    await journal.write(
+        category="retention", event="disk.reserve.released", level="critical",
+        message=f"Notreserve freigegeben ({_human(size)}) bei {percent} % Belegung.",
+        actor="system", ok=False, detail={"percent": percent, "bytes": size})
+    return True
+
+
 async def _database_size(session) -> Tuple[int, int]:
     """(Groesse der logs-Tabelle, Groesse der ganzen Datenbank) in Bytes."""
     try:
@@ -177,22 +299,39 @@ async def _retention_days(session) -> int:
         return FALLBACK_RETENTION_DAYS
 
 
+async def _low_level_days(session) -> int:
+    """Kuerzere Aufbewahrung fuer debug/info/notice in Tagen (0 = wie alle)."""
+    row = (await session.execute(
+        select(Setting).where(Setting.key == "log_retention_days_info")
+    )).scalar_one_or_none()
+    try:
+        return max(0, int(row.value)) if row is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 # =============================================================================
 # Loeschen in Haeppchen
 # =============================================================================
-async def delete_older_than(session, cutoff: datetime, budget: int = MAX_BATCHES) -> int:
+async def delete_older_than(session, cutoff: datetime, budget: int = MAX_BATCHES,
+                            levels: Optional[Tuple[str, ...]] = None) -> int:
     """Loescht Logzeilen aelter als `cutoff` - haeppchenweise.
 
     Jedes Haeppchen wird einzeln festgeschrieben. Das ist wichtig: ein einziges
     DELETE ueber Millionen Zeilen haelt eine Transaktion offen, laesst das
     Transaktionslog wachsen und macht die Platte waehrend des Aufraeumens
     *voller* statt leerer.
+
+    `levels`: nur diese Stufen (z.B. INFO frueher altern lassen als FEHLER).
     """
     removed = 0
     for _ in range(max(1, budget)):
+        condition = Log.timestamp < cutoff
+        if levels:
+            condition = condition & Log.level.in_(levels)
         oldest = (
             select(Log.id)
-            .where(Log.timestamp < cutoff)
+            .where(condition)
             .order_by(Log.timestamp.asc())
             .limit(BATCH_SIZE)
             .scalar_subquery()
@@ -257,6 +396,46 @@ def _human(size: float) -> str:
 
 
 # =============================================================================
+# Regelmaessige Aufbewahrung - unabhaengig vom Platz
+# =============================================================================
+async def enforce_retention(session) -> Tuple[int, list]:
+    """Setzt die eingestellte Aufbewahrung durch. Gibt (geloescht, Schritte)."""
+    steps: list = []
+    deleted = 0
+    days = await _retention_days(session)
+    count = await delete_older_than(session, datetime.utcnow() - timedelta(days=days))
+    if count:
+        deleted += count
+        steps.append(f"{count:,} Logzeilen älter als {days} Tage entfernt".replace(",", "."))
+
+    low_days = await _low_level_days(session)
+    if 0 < low_days < days:
+        count = await delete_older_than(
+            session, datetime.utcnow() - timedelta(days=low_days), levels=LOW_LEVELS)
+        if count:
+            deleted += count
+            steps.append(f"{count:,} INFO/DEBUG-Zeilen älter als {low_days} Tage entfernt"
+                         .replace(",", "."))
+    return deleted, steps
+
+
+async def retention_pass() -> None:
+    """Der stuendliche Lauf. Ein gewoehnliches VACUUM danach gibt den Platz
+    innerhalb der Datenbank frei - dann waechst die Datei nicht weiter."""
+    from .database import async_session
+
+    async with async_session() as session:
+        deleted, steps = await enforce_retention(session)
+        if not deleted:
+            return
+        await vacuum("logs", full=False)
+        await journal.record(
+            session, category="retention", event="retention.auto", level="notice",
+            message=f"Aufbewahrung durchgesetzt: {'; '.join(steps)}.",
+            actor="system", detail={"deleted": deleted, "steps": steps})
+
+
+# =============================================================================
 # Ein Aufraeumlauf
 # =============================================================================
 async def cleanup(reason: str = "automatisch", force: bool = False,
@@ -305,11 +484,10 @@ async def cleanup(reason: str = "automatisch", force: bool = False,
 
         # -- Stufe 1: die eingestellte Aufbewahrung durchsetzen ----------------
         days = await _retention_days(session)
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        count = await delete_older_than(session, cutoff)
+        count, retention_steps = await enforce_retention(session)
         if count:
             deleted_logs += count
-            steps.append(f"{count:,} Logzeilen älter als {days} Tage entfernt".replace(",", "."))
+            steps.extend(retention_steps)
             await vacuum("logs", full=False)
 
         current = usage()
@@ -318,21 +496,29 @@ async def cleanup(reason: str = "automatisch", force: bool = False,
                            "Die eingestellte Aufbewahrung hat gereicht.")
 
         # -- Stufe 2: Aufbewahrung schrittweise verkuerzen ---------------------
-        # Halbieren statt gleich auf Null: so verliert man nur so viel, wie
-        # noetig ist, um wieder Luft zu haben.
-        window_hours = max(MIN_KEEP_HOURS, days * 24)
-        while current["percent"] > TARGET_USAGE and window_hours > MIN_KEEP_HOURS:
-            window_hours = max(MIN_KEEP_HOURS, window_hours // 2)
-            cutoff = datetime.utcnow() - timedelta(hours=window_hours)
-            count = await delete_older_than(session, cutoff)
-            if count:
-                deleted_logs += count
-                steps.append(f"Aufbewahrung auf {window_hours} h verkürzt, "
-                             f"{count:,} Logzeilen entfernt".replace(",", "."))
-                await vacuum("logs", full=False)
-            current = usage()
-            if not count and window_hours <= MIN_KEEP_HOURS:
-                break
+        # Erst ab der hohen Stufe, und pro Lauf nur EIN Halbierungsschritt -
+        # ausser es ist kritisch. Hintergrund: ein gewoehnliches VACUUM gibt den
+        # Platz nicht ans Betriebssystem zurueck, die Belegung bleibt also
+        # stehen, obwohl die Tabelle nicht mehr waechst. Die alte Fassung
+        # halbierte deshalb bei 80-88 % jede Minute weiter, bis nur noch 24 h
+        # uebrig waren - auch dann, wenn ganz andere Dateien die Platte fuellten.
+        if current["percent"] >= THRESHOLD_HIGH or force:
+            aggressive = current["percent"] >= THRESHOLD_CRIT or force
+            window_hours = max(MIN_KEEP_HOURS, days * 24)
+            while current["percent"] > TARGET_USAGE and window_hours > MIN_KEEP_HOURS:
+                window_hours = max(MIN_KEEP_HOURS, window_hours // 2)
+                cutoff = datetime.utcnow() - timedelta(hours=window_hours)
+                count = await delete_older_than(session, cutoff)
+                if count:
+                    deleted_logs += count
+                    steps.append(f"Aufbewahrung auf {window_hours} h verkürzt, "
+                                 f"{count:,} Logzeilen entfernt".replace(",", "."))
+                    await vacuum("logs", full=False)
+                current = usage()
+                if count and not aggressive:
+                    break
+                if not count and window_hours <= MIN_KEEP_HOURS:
+                    break
 
         # -- Stufe 3: Platz an das Betriebssystem zurueckgeben -----------------
         if current["percent"] > THRESHOLD_HIGH:
@@ -450,6 +636,11 @@ async def status() -> dict:
         "check_interval_seconds": CHECK_INTERVAL,
         "min_keep_hours": MIN_KEEP_HOURS,
         "truncate_allowed": ALLOW_TRUNCATE,
+        "ingest_stop": INGEST_STOP,
+        "ingest_blocked": percent >= INGEST_STOP,
+        "reserve_present": reserve_present(),
+        "reserve_human": _human(_reserve_bytes()),
+        "reserve_release": RESERVE_RELEASE,
     }
 
 
@@ -467,8 +658,28 @@ async def watch_task() -> None:
     # wartete hier fuenf Minuten - auf einer schon vollen Platte fuenf Minuten
     # zu viel.
     await asyncio.sleep(10)
+    # Erster Aufbewahrungslauf nach 5 min, dann stuendlich.
+    next_retention = time.monotonic() + 300
 
     while True:
+        # Notreserve zuerst und OHNE Datenbank: genau dann, wenn sie wegen
+        # voller Platte nicht startet, muss das hier noch funktionieren.
+        try:
+            info = usage()
+            if info["percent"] >= RESERVE_RELEASE:
+                await release_reserve(info["percent"])
+            else:
+                await ensure_reserve(info["percent"])
+        except Exception as exc:                                    # defensiv
+            logger.error("Notreserve: %s", exc)
+
+        if time.monotonic() >= next_retention:
+            next_retention = time.monotonic() + RETENTION_INTERVAL
+            try:
+                await retention_pass()
+            except Exception as exc:                                # defensiv
+                logger.error("Aufbewahrung: %s", exc)
+
         try:
             info = usage()
             if info["percent"] >= THRESHOLD_WARN:

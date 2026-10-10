@@ -300,6 +300,14 @@
                 {{ log.source || '–' }}
               </td>
               <td class="px-4 py-2.5 text-sm" :style="{ color: 'var(--color-text-secondary)', maxWidth: '40vw' }">
+                <!-- Zusammengefasste Wiederholung: dieselbe Meldung N-mal
+                     innerhalb einer Minute, gespeichert als eine Zeile. -->
+                <span
+                  v-if="log.repeat > 1"
+                  class="chip float-right ml-2"
+                  :style="chipStyleFor('warning')"
+                  :title="`Diese Meldung kam ${log.repeat.toLocaleString('de-DE')}-mal kurz hintereinander und wurde zu einer Zeile zusammengefasst.`"
+                >×{{ log.repeat.toLocaleString('de-DE') }}</span>
                 <template v-if="readable && log.parsed">
                   <span class="block truncate" :style="{ color: 'var(--color-text-primary)' }">
                     {{ log.parsed.summary || log.message }}
@@ -764,6 +772,7 @@ function chipStyleFor(kind) {
     state: 'var(--color-accent)',
     number: 'var(--color-text-secondary)',
     url: 'var(--color-primary)',
+    warning: 'var(--color-warning)',
   }
   const color = map[kind] || 'var(--color-text-secondary)'
   return {

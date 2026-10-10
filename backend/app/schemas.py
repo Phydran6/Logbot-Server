@@ -165,6 +165,8 @@ class LogResponse(BaseModel):
     level: Optional[str]
     source: Optional[str]
     message: Optional[str]
+    # Wie oft diese Meldung zusammengefasst wurde (None = einmal).
+    repeat: Optional[int] = None
     # Nur gefuellt, wenn die Liste mit readable=true abgefragt wurde.
     parsed: Optional[LogParsed] = None
     raw_message: Optional[str] = None
@@ -248,7 +250,11 @@ class LogIngestEntry(BaseModel):
     timestamp werden dedupliziert (sonst waeren sie ohnehin immer neu).
     """
     level: Optional[str] = Field(default=None, max_length=20)
-    source: Optional[str] = Field(default=None, max_length=100)
+    # Ohne Laengengrenze: der Server kuerzt auf die Spaltenbreite (100). Mit
+    # Grenze lehnte er die GANZE Lieferung ab (422), sobald eine einzige Quelle
+    # laenger war - beim Windows-Agent alltaeglich
+    # ("Microsoft-Windows-TerminalServices-LocalSessionManager/Operational/...").
+    source: Optional[str] = None
     message: str
     timestamp: Optional[datetime] = None
     event_id: Optional[int] = None
@@ -314,6 +320,10 @@ class DatabaseSettingsResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     version: str
+    # Vom Wachhund (app/watchdog.py): sammelt LogBot gerade wirklich?
+    database: Optional[bool] = None
+    last_log_at: Optional[str] = None
+    problems: List[str] = []
 
 class HealthDetailedResponse(HealthResponse):
     uptime_seconds: float

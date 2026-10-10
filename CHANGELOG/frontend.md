@@ -2,6 +2,20 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.10.22.00.00
+
+### Added
+- **System → Benachrichtigungen** (`views/Alerts.vue`): Zustand (Datenbank, letzter Log, Platte, Notreserve, Flut, verstummte Geräte), Wege Mail/Telegram/Webhook mit Probemeldung, Auswahl der Ereignisse und Schwellen.
+- **Update-Konsole** (`views/Updates.vue`): Terminal mit der fertigen Befehlszeile; Enter → `[J/n]`-Sicherungsfrage → Update mit Live-Ausgabe, Schritt und Fortschritt in der Titelleiste, Verlauf des letzten Laufs beim Öffnen. Bewusst keine echte Shell (das Update baut den Container neu, in dem sie liefe).
+- Logliste: Abzeichen **„×N“** für zusammengefasste Wiederholungen.
+- Einstellungen → Aufbewahrung: Frist für INFO/DEBUG und ein eigener Speichern-Knopf (vorher nur über „Allgemein“ speicherbar).
+
+### Changed
+- Mail-Einstellungen: die wirkungslosen Haken „Benachrichtigen bei …“ sind ersetzt durch einen Verweis auf die neue Seite.
+
+### Fixed
+- Einstellungen: Erfolgsmeldung zeigte „âœ““ (doppelt kodiertes ✓).
+
 ## 2026.10.08.22.00.00
 
 ### Added

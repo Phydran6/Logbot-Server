@@ -111,7 +111,10 @@ async def load_history(db: AsyncSession) -> list:
 
 async def add_history(db: AsyncSession, entry: dict) -> None:
     """Schreibt einen Lauf in die Historie (neueste zuerst, begrenzt)."""
-    history = await load_history(db)
+    # Kopie: load_history gibt die Liste der geladenen Zeile zurueck. An Ort und
+    # Stelle geaendert, sieht SQLAlchemy beim Zuweisen keinen Unterschied und
+    # schreibt nichts - die Historie blieb dann beim ersten Eintrag stehen.
+    history = list(await load_history(db))
     history.insert(0, entry)
     history = history[:HISTORY_LIMIT]
 
@@ -395,6 +398,13 @@ async def run_archiving(db: AsyncSession, config: dict, triggered_by: str = "man
     except Exception as exc:
         logger.error("Archivierung fehlgeschlagen: %s", exc)
         result = {"success": False, "message": str(exc)}
+        # Nach einem Datenbankfehler ist die Transaktion verdorben. Ohne
+        # Rollback scheitert gleich darauf auch add_history - der
+        # Fehlschlag stuende dann nirgends in der Historie.
+        try:
+            await db.rollback()
+        except Exception as rollback_exc:                           # defensiv
+            logger.warning("Rollback nach Archivierungsfehler: %s", rollback_exc)
     finally:
         if os.path.exists(temp_path):
             os.unlink(temp_path)

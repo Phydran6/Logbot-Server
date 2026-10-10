@@ -74,6 +74,7 @@ export default {
     ai: 'AI analysis',
     stacks: 'Add-on services',
     mail: 'Mail',
+    alerts: 'Notifications',
     terminal: 'Console',
     analysis: 'Analysis',
     app: 'Connect app',

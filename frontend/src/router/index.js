@@ -164,6 +164,12 @@ const routes = [
         meta: { admin: true }
       },
       {
+        path: 'alerts',
+        name: 'Alerts',
+        component: () => import('../views/Alerts.vue'),
+        meta: { admin: true }
+      },
+      {
         path: 'terminal',
         name: 'Terminal',
         component: () => import('../views/Terminal.vue'),

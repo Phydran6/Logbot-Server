@@ -39,6 +39,56 @@ BATCH_SIZE       = 100
 BATCH_INTERVAL   = 2.0
 AGENT_CACHE_TTL  = 300
 
+# Platte fast voll: Syslog verwerfen statt die Datenbank zu ersticken. Bei
+# UDP gibt es kein "spaeter nochmal" - aber eine Datenbank, die wegen voller
+# Platte nicht mehr startet, verliert ALLES (so geschehen am 2026-10-10).
+# Gleiche Grenze wie im Backend (DISK_INGEST_STOP).
+DISK_INGEST_STOP = float(os.getenv('DISK_INGEST_STOP', '95'))
+_disk_checked_at = 0.0
+_disk_blocked = False
+_dropped = 0
+_dropped_logged_at = 0.0
+
+
+def disk_blocked() -> bool:
+    """Wie `df` gerechnet, hoechstens alle 5 s gemessen."""
+    global _disk_checked_at, _disk_blocked
+    now = time.monotonic()
+    if now - _disk_checked_at > 5:
+        _disk_checked_at = now
+        try:
+            st = os.statvfs('/')
+            used = st.f_blocks - st.f_bfree
+            usable = used + st.f_bavail
+            _disk_blocked = usable > 0 and used / usable * 100.0 >= DISK_INGEST_STOP
+        except OSError:
+            _disk_blocked = False
+    return _disk_blocked
+
+# Spaltenbreiten in logs/agents. Ein einziger zu langer Wert liess sonst den
+# ganzen COPY-Stapel scheitern - bis zu 100 Meldungen anderer Geraete gleich mit.
+FIELD_LIMITS = {'hostname': 255, 'ip_address': 45, 'level': 20, 'source': 100,
+                'device_type': 50}
+
+
+def sanitize(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Textfelder auf Typ und Spaltenbreite bringen.
+
+    JSON-Logs duerfen 'app' oder 'host' als Zahl liefern; COPY verlangt fuer
+    VARCHAR aber Text und verwirft sonst den ganzen Stapel.
+    """
+    for key in ('hostname', 'ip_address', 'level', 'source', 'device_type',
+                'message', 'raw_message'):
+        value = data.get(key)
+        if value is None:
+            continue
+        value = str(value).replace('\x00', '')
+        limit = FIELD_LIMITS.get(key)
+        if limit:
+            value = value[:limit]
+        data[key] = value
+    return data
+
 LEVEL_NAMES = {
     0: 'emergency', 1: 'alert', 2: 'critical', 3: 'error',
     4: 'warning',   5: 'notice', 6: 'info',    7: 'debug',
@@ -288,7 +338,10 @@ class SyslogParser:
                     msg     = data.get('message') or data.get('msg') or data.get('log') or rest
                     source  = data.get('app') or data.get('service') or data.get('program') or 'unknown'
                     host    = data.get('hostname') or data.get('host') or sender_ip
-                    j_level = data.get('level') or data.get('severity') or ''
+                    # str(): pino/bunyan liefern das Level als Zahl ("level": 30).
+                    # Ohne Umwandlung warf .lower() - die Meldung ging verloren,
+                    # bei TCP sogar die ganze Verbindung.
+                    j_level = str(data.get('level') or data.get('severity') or '')
                     if j_level.lower() in LEVEL_NAMES.values():
                         lvl = j_level.lower()
                     result.update({
@@ -339,6 +392,10 @@ class DatabaseManager:
         self.pool = None
         self._agent_cache: Dict[str, Tuple[int, float]] = {}
         self._log_buffer  = []
+        # (Geraet, Stufe, Quelle, Text) -> Zeile im aktuellen Stapel. Gleiche
+        # Meldungen innerhalb eines Stapels (BATCH_INTERVAL) werden zu einer
+        # Zeile mit Anzahl zusammengefasst statt hundertfach gespeichert.
+        self._repeat_index: Dict[tuple, list] = {}
         self._buffer_lock = asyncio.Lock()
         self._agents_to_update: set = set()
 
@@ -413,16 +470,38 @@ class DatabaseManager:
         return agent_id
 
     async def queue_log(self, data: Dict[str, Any]):
+        global _dropped, _dropped_logged_at
+        if disk_blocked():
+            _dropped += 1
+            now = time.monotonic()
+            if now - _dropped_logged_at > 60:
+                _dropped_logged_at = now
+                logger.error("Platte >= %s %% - %s Syslog-Meldungen verworfen",
+                             DISK_INGEST_STOP, _dropped)
+            return
+
+        data = sanitize(data)
         agent_id = await self.get_or_create_agent(
             data['hostname'], data['ip_address'], data.get('mac_address'),
             data['device_type'], data.get('extra_data', {}))
 
-        row = (
+        extra = data.get('extra_data') or {}
+        if not isinstance(extra, dict):
+            extra = {'value': extra}
+        row = [
             agent_id, data['hostname'], data['ip_address'], data['facility'],
             data['level'], data['source'], data['message'], data['raw_message'],
-            json.dumps(data.get('extra_data', {})),
-        )
+            extra,
+        ]
+        key = (agent_id, data['level'], data['source'], data['message'])
         async with self._buffer_lock:
+            first = self._repeat_index.get(key)
+            if first is not None:
+                first_extra = first[8]
+                first_extra['repeat'] = first_extra.get('repeat', 1) + 1
+                first_extra['repeat_last'] = datetime.utcnow().isoformat()
+                return
+            self._repeat_index[key] = row
             self._log_buffer.append(row)
             if len(self._log_buffer) >= BATCH_SIZE:
                 await self._flush_buffer()
@@ -430,8 +509,9 @@ class DatabaseManager:
     async def _flush_buffer(self):
         if not self._log_buffer:
             return
-        rows = self._log_buffer
+        rows = [tuple(row[:8]) + (json.dumps(row[8]),) for row in self._log_buffer]
         self._log_buffer = []
+        self._repeat_index = {}
         try:
             async with self.pool.acquire() as conn:
                 await conn.copy_records_to_table(
@@ -442,6 +522,13 @@ class DatabaseManager:
                 )
         except Exception as e:
             logger.error("Batch-Insert fehlgeschlagen (%s Logs): %s", len(rows), e)
+            # Ein Geraet wurde in der Oberflaeche geloescht, der Cache kennt
+            # aber noch seine alte ID: der Fremdschluessel laesst dann jeden
+            # Stapel mit seinen Meldungen scheitern - bis zu AGENT_CACHE_TTL
+            # lang, samt den Meldungen aller anderen Geraete im Stapel.
+            # Cache leeren = beim naechsten Mal neu nachschlagen.
+            if isinstance(e, asyncpg.exceptions.ForeignKeyViolationError):
+                self._agent_cache.clear()
 
     async def _flush_agent_timestamps(self):
         if not self._agents_to_update:
@@ -472,7 +559,9 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
         self.db = db
 
     def datagram_received(self, data: bytes, addr: Tuple[str, int]):
-        msg = data.decode('utf-8', errors='replace').strip()
+        # NUL-Zeichen entfernen: PostgreSQL nimmt sie weder in Text noch in
+        # JSONB an, und eine solche Meldung riss den ganzen Stapel mit.
+        msg = data.decode('utf-8', errors='replace').replace('\x00', '').strip()
         if msg:
             asyncio.create_task(self._process(msg, addr[0]))
 
@@ -492,12 +581,20 @@ async def handle_tcp(reader, writer, parser: SyslogParser, db: DatabaseManager):
             data = await reader.readline()
             if not data:
                 break
-            msg = data.decode('utf-8', errors='replace').strip()
+            msg = data.decode('utf-8', errors='replace').replace('\x00', '').strip()
             if msg:
-                parsed = parser.parse(msg, ip)
-                await db.queue_log(parsed)
-    except Exception:
-        pass
+                # Fehler pro Zeile abfangen: frueher beendete eine einzige
+                # unlesbare Zeile kommentarlos die ganze Verbindung.
+                try:
+                    parsed = parser.parse(msg, ip)
+                    await db.queue_log(parsed)
+                except Exception as e:
+                    logger.error("TCP-Verarbeitungsfehler (%s): %s", ip, e)
+    except ConnectionError:
+        pass                                # Gegenstelle hat aufgelegt - normal
+    except Exception as e:
+        # z.B. eine Zeile ueber 64 KiB (readline-Grenze)
+        logger.warning("TCP-Verbindung von %s beendet: %s", ip, e)
     finally:
         writer.close()
 

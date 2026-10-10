@@ -104,6 +104,14 @@ async def load_config(db: AsyncSession) -> dict:
     if row and isinstance(row.value, dict):
         for key, value in row.value.items():
             if key in config:
+                # Verschachteltes kopieren (notify_on, default_recipients):
+                # save_config aendert es an Ort und Stelle. Teilt es sich das
+                # Objekt mit der geladenen Zeile, sieht SQLAlchemy keinen
+                # Unterschied und speichert die Aenderung nicht.
+                if isinstance(value, dict):
+                    value = dict(value)
+                elif isinstance(value, list):
+                    value = list(value)
                 config[key] = value
     if config["mode"] not in MODES:
         config["mode"] = "off"
