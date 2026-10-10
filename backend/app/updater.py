@@ -196,6 +196,35 @@ async def remote_state(force: bool = False, ref: str = "") -> dict:
     return _cache_remote(info)
 
 
+_branch_version_cache: Optional[str] = None
+_branch_version_expires: float = 0.0
+
+
+async def branch_version(force: bool = False) -> Optional[str]:
+    """VERSION auf dem Zweig - eigener kleiner Zwischenspeicher.
+
+    Gebraucht, wenn der Kanal auf ein Release zeigt: dann soll die Seite
+    trotzdem sagen koennen, dass auf dem Zweig schon etwas Neueres liegt, fuer
+    das nur noch kein Release angelegt wurde. Sonst steht dort "entspricht
+    GitHub", obwohl GitHub laengst weiter ist.
+    """
+    global _branch_version_cache, _branch_version_expires
+    if not force and time.time() < _branch_version_expires:
+        return _branch_version_cache
+    version = None
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            raw = await client.get(
+                f"https://raw.githubusercontent.com/{REPO_SLUG}/{REPO_BRANCH}/VERSION")
+            if raw.status_code == 200 and raw.text.strip():
+                version = raw.text.strip().splitlines()[0].strip()
+    except Exception:                                               # defensiv
+        version = None
+    _branch_version_cache = version
+    _branch_version_expires = time.time() + (_REMOTE_CACHE_TTL if version else 60)
+    return version
+
+
 def _cache_remote(info: dict) -> dict:
     global _remote_cache, _remote_cache_expires
     _remote_cache = info
@@ -298,6 +327,14 @@ async def update_status(force: bool = False) -> dict:
     backups = await list_backups()
     available, reason, relation = compare(local, remote)
 
+    # Zeigt der Kanal auf ein Release, kann der Zweig schon weiter sein.
+    unreleased = None
+    if ref != REPO_BRANCH:
+        newest = await branch_version(force=force)
+        reference = remote.get("version") or ""
+        if newest and parse_version(newest) and parse_version(newest) > parse_version(reference):
+            unreleased = {"version": newest, "branch": REPO_BRANCH}
+
     oneliner = (f"curl -sSL https://raw.githubusercontent.com/{REPO_SLUG}/{REPO_BRANCH}/install.sh "
                 f"| sudo bash -s -- update -y")
     if ref != REPO_BRANCH:
@@ -321,6 +358,8 @@ async def update_status(force: bool = False) -> dict:
         "webhook": webhook_info(),
         "watcher": {"interval_seconds": WATCH_INTERVAL, "enabled": WATCH_ENABLED},
         "oneliner": oneliner,
+        # Neuerer Stand auf dem Zweig, fuer den es noch kein Release gibt.
+        "unreleased": unreleased,
         # Fuer das Terminal auf der Update-Seite: genau die Zeile, die nach dem
         # Enter auf dem Host laeuft (Sicherungs-Schalter wird dort umgesetzt).
         "command": build_command("apply", database_backup=True, ref=ref),

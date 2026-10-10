@@ -11,6 +11,20 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.10.23.00.00 (2026-10-10)
+
+Kleine Korrektur an der Update-Seite, gefunden beim ersten Test:
+
+- **„Entspricht GitHub“ stimmte nicht immer.** Beim Kanal „Stabil“ wird gegen das
+  neueste *Release* geprüft. Liegt auf `main` schon ein neuerer Stand ohne Release,
+  stand dort trotzdem „aktuell“ — und als Quelle `…@main`, obwohl gegen das
+  Release-Tag geprüft wurde. Jetzt steht dort „Geprüft gegen …@&lt;Tag&gt;“, und ein
+  Hinweis nennt den neueren Stand auf `main` samt Weg dorthin.
+- **Uhrzeiten passten scheinbar nicht zusammen.** Sicherungen heißen nach der
+  Serverzeit (meist UTC), „Update vom“ zeigte die Zeit des Browsers — zwei Stunden
+  auseinander. Die Sicherungsliste zeigt jetzt die Browserzeit (Name daneben),
+  die Zeilen im Update-Protokoll tragen ihre Zeitzone.
+
 ## v2026.10.10.22.00.00 (2026-10-10)
 
 Ein Release aus einem echten Ausfall. Am 10.10. reagierte LogBot „nicht mehr“:

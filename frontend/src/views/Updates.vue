@@ -164,14 +164,31 @@
             <span>Letzte Änderung</span>
             <span class="truncate" :title="status.remote.commit_message">{{ status.remote.commit_message }}</span>
           </div>
+          <!-- Gegen genau diesen Bezugspunkt wird geprueft - beim Kanal
+               "Stabil" ist das das neueste Release-Tag, nicht der Zweig. -->
           <div class="info-row">
-            <span>Quelle</span>
-            <span class="font-mono">{{ status?.remote?.repo }}@{{ status?.remote?.branch }}</span>
+            <span>Geprüft gegen</span>
+            <span class="font-mono">{{ status?.remote?.repo }}@{{ status?.target_ref || status?.remote?.branch }}</span>
           </div>
 
           <p v-if="status?.reason" class="text-xs pt-1" style="color: var(--color-text-muted)">
             {{ status.reason }}
           </p>
+
+          <!-- Auf dem Zweig liegt schon mehr, nur ohne Release: sonst stuende
+               hier "entspricht GitHub", obwohl GitHub laengst weiter ist. -->
+          <div v-if="status?.unreleased" class="downgrade-note">
+            <p class="font-semibold mb-1">
+              Auf <span class="font-mono">{{ status.unreleased.branch }}</span> liegt schon
+              <span class="font-mono">{{ status.unreleased.version }}</span> – noch ohne Release.
+            </p>
+            <p>
+              Der Kanal <strong>{{ channelLabel }}</strong> wartet auf ein veröffentlichtes Release.
+              Wer den Stand jetzt will: unten den Kanal auf
+              <strong>Aktuell ({{ status.unreleased.branch }})</strong> stellen – oder auf GitHub ein
+              Release dafür anlegen.
+            </p>
+          </div>
 
           <!-- Der Kanal zeigt auf einen aelteren Stand als den installierten.
                Meist fehlt einfach ein Release fuer den aktuellen Stand. Hier
@@ -233,9 +250,16 @@
 
           <div v-for="backup in backups" :key="backup.name" class="backup-row">
             <div class="min-w-0">
-              <p class="font-mono text-sm">{{ backup.name }}</p>
+              <!-- Der Name ist ein Zeitstempel in Serverzeit (meist UTC).
+                   Daneben steht die Uhrzeit in der Zeit dieses Browsers -
+                   sonst liegen Name und "Update vom" scheinbar Stunden
+                   auseinander. -->
+              <p class="text-sm">
+                <span class="font-medium">{{ backup.created_at ? formatTime(backup.created_at) : backup.name }}</span>
+                <span v-if="backup.created_at" class="font-mono text-xs ml-1" style="color: var(--color-text-muted)">{{ backup.name }}</span>
+              </p>
               <p class="text-xs" style="color: var(--color-text-muted)">
-                {{ backup.version || 'ohne Versionsangabe' }}
+                Stand davor: {{ backup.version || 'ohne Versionsangabe' }}
                 <template v-if="backup.size"> · {{ backup.size }}</template>
                 · {{ backup.database_dump ? 'mit Datenbank' : 'ohne Datenbank' }}
               </p>

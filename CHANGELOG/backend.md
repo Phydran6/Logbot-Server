@@ -2,6 +2,12 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.10.23.00.00
+
+### Fixed
+- **Update-Prüfung verschwieg neuere Stände ohne Release.** Beim Kanal „Stabil“ (= neuestes Release) meldete `/api/updates/status` „entspricht GitHub“, auch wenn auf dem Zweig längst mehr lag. Neu: `unreleased` (Version auf dem Zweig, eigener kleiner Zwischenspeicher über die `VERSION`-Datei, damit der Release-Cache nicht verdrängt wird).
+- Update-Protokoll: Zeitstempel tragen jetzt ihre Zeitzone (`%Z`) — vorher Serverzeit ohne Angabe, scheinbar zwei Stunden neben der Anzeige im Browser.
+
 ## 2026.10.10.22.00.00
 
 ### Added

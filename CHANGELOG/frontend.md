@@ -2,6 +2,12 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.10.23.00.00
+
+### Fixed
+- Updates: „Quelle …@main“ war falsch, wenn gegen ein Release geprüft wird — jetzt „Geprüft gegen …@&lt;Bezugspunkt&gt;“. Hinweis, wenn auf dem Zweig ein neuerer Stand ohne Release liegt.
+- Updates: Sicherungen zeigen ihre Uhrzeit in Browserzeit (der Name ist Serverzeit/UTC) und „Stand davor“ statt nur der Version — man sah nicht, dass die Sicherung den *vorherigen* Stand enthält.
+
 ## 2026.10.10.22.00.00
 
 ### Added

@@ -99,7 +99,7 @@ COMMIT_AFTER=""
 # ==============================================================================
 
 log() {
-    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')" "$*"
 }
 
 # Anfuehrungszeichen, Backslashes und Zeilenumbrueche fuer JSON entschaerfen.
