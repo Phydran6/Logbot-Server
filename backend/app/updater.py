@@ -762,9 +762,15 @@ async def list_releases(force: bool = False, limit: int = 30) -> dict:
     """
     global _releases_cache, _releases_cache_expires
 
+    channels = [{"id": key, **value} for key, value in CHANNELS.items()]
+
     if not force and _releases_cache is not None and time.time() < _releases_cache_expires:
+        # Die Kanaele gehoeren IMMER dazu. Frueher fehlten sie in der Antwort
+        # aus dem Zwischenspeicher - wer die Update-Seite ein zweites Mal
+        # oeffnete, sah keine Kanalauswahl mehr, nur noch "Uebernehmen".
         return {"releases": _releases_cache, "cached": True, "repo": REPO_SLUG,
-                "branch": REPO_BRANCH}
+                "branch": REPO_BRANCH, "source": "cache", "error": None,
+                "channels": channels}
 
     releases: list = []
     error = None
@@ -825,9 +831,7 @@ async def list_releases(force: bool = False, limit: int = 30) -> dict:
         "cached": False,
         "repo": REPO_SLUG,
         "branch": REPO_BRANCH,
-        "channels": [
-            {"id": key, **value} for key, value in CHANNELS.items()
-        ],
+        "channels": channels,
     }
 
 

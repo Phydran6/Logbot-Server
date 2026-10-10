@@ -296,7 +296,7 @@
             class="channel"
             :class="{ 'is-picked': channel.channel === option.id }"
           >
-            <input v-model="channel.channel" type="radio" :value="option.id">
+            <input v-model="channel.channel" type="radio" :value="option.id" @change="channelTouched = true">
             <span>
               <strong>{{ option.label }}</strong>
               <em>{{ option.hint }}</em>
@@ -436,9 +436,19 @@ const auth = useAuthStore()
 
 // Release-Auswahl und Sicherungsfrage
 const releases = ref([])
-const channels = ref([])
+// Die drei Kanaele stehen auch hier fest: die Auswahl darf nie davon abhaengen,
+// ob die Release-Liste von GitHub gerade geladen werden konnte.
+const FALLBACK_CHANNELS = [
+  { id: 'stable', label: 'Stabil (letztes Release)', hint: 'Nur veröffentlichte Releases. Empfohlen für den Regelbetrieb.' },
+  { id: 'edge', label: 'Aktuell (main)', hint: 'Jeder Push landet sofort als Angebot hier. Für Test- und Entwicklungsserver.' },
+  { id: 'pinned', label: 'Festgelegte Version', hint: 'Ein bestimmtes Release oder Tag. Der Server bleibt darauf stehen.' },
+]
+const channels = ref(FALLBACK_CHANNELS)
 const channel = ref({ channel: 'stable', ref: '', auto_offer: true })
 const channelSaving = ref(false)
+// Hat jemand einen Kanal angeklickt, aber noch nicht uebernommen, darf das
+// Nachladen des Status die Auswahl nicht zuruecksetzen.
+let channelTouched = false
 const backupScopes = ref([])
 const promptOpen = ref(false)
 const promptOperation = ref('')
@@ -600,6 +610,12 @@ async function load(force = false) {
     status.value = await auth.api(`/api/updates/status${force ? '?force=true' : ''}`)
     offline.value = false
     error.value = ''
+    // Gespeicherten Kanal anhaken - auch wenn die Release-Liste (GitHub)
+    // gerade nicht zu laden war. Nur solange nichts geaendert, aber noch
+    // nicht uebernommen wurde, bleibt die Auswahl des Nutzers stehen.
+    if (status.value?.channel && !channelSaving.value && !channelTouched) {
+      channel.value = { ...status.value.channel }
+    }
     if (isRunning.value) {
       startPolling()
       startOutputStream()
@@ -829,7 +845,7 @@ async function loadReleases() {
   try {
     const data = await auth.api('/api/updates/releases')
     releases.value = data.releases || []
-    channels.value = data.channels || []
+    if (data.channels?.length) channels.value = data.channels
     if (data.current_channel) channel.value = { ...data.current_channel }
   } catch (e) {
     // Ohne GitHub-Antwort bleibt die Liste leer - der Kanal laesst sich
@@ -851,6 +867,7 @@ async function saveChannel() {
       },
     })
     status.value = data.status
+    channelTouched = false
   } catch (e) {
     error.value = e.message
   } finally {

@@ -2,6 +2,11 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.10.23.30.00
+
+### Fixed
+- `GET /api/updates/releases` lieferte aus dem Zwischenspeicher keine `channels` (und kein `source`/`error`) — die Kanalauswahl der Update-Seite war dann leer.
+
 ## 2026.10.10.23.00.00
 
 ### Fixed

@@ -2,6 +2,11 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.10.23.30.00
+
+### Fixed
+- Updates: Kanalauswahl hängt nicht mehr an der Release-Liste von GitHub (feste Rückfallliste); der gespeicherte Kanal wird aus dem Status angehakt, eine noch nicht übernommene Auswahl bleibt beim Nachladen stehen.
+
 ## 2026.10.10.23.00.00
 
 ### Fixed

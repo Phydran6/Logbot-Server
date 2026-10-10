@@ -11,6 +11,14 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.10.23.30.00 (2026-10-10)
+
+- **Kanalauswahl verschwand beim zweiten Öffnen der Update-Seite.** Die Antwort
+  aus dem Zwischenspeicher der Release-Liste enthielt die drei Kanäle nicht — übrig
+  blieb nur „Übernehmen“, man kam nicht mehr von „Stabil“ weg. Behoben im Server;
+  die Oberfläche kennt die Kanäle zusätzlich selbst und hakt den gespeicherten an,
+  auch wenn GitHub gerade nicht antwortet.
+
 ## v2026.10.10.23.00.00 (2026-10-10)
 
 Kleine Korrektur an der Update-Seite, gefunden beim ersten Test:
