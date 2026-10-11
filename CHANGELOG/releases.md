@@ -11,6 +11,16 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.11.21.00.00 (2026-10-11)
+
+- **„Auf Updates prüfen“ sah ein frisch veröffentlichtes Release nicht.** Die
+  Release-Liste lag 15 Minuten im Zwischenspeicher, der Knopf fragte nur den
+  Commit neu ab — beim Kanal „Stabil“ blieb der alte Stand stehen. Der Knopf holt
+  jetzt auch die Release-Liste frisch. Der automatische Beobachter (alle 120 s)
+  lässt sie bewusst im Zwischenspeicher, sonst wäre das GitHub-Limit für anonyme
+  Abfragen (60/h) allein durch ihn verbraucht; er sieht neue Releases also nach
+  spätestens 15 Minuten.
+
 ## v2026.10.11.20.00.00 (2026-10-11)
 
 Die restlichen Funde aus der Code-Prüfung nach dem Ausfall vom 10.10. — alles

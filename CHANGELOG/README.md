@@ -21,7 +21,7 @@
 
 ## Aktuelle Stände
 
-**Projekt-/Release-Version:** `2026.10.11.20.00.00`
+**Projekt-/Release-Version:** `2026.10.11.21.00.00`
 
 Sie steht an fünf Stellen und muss bei jedem Release überall mitwandern:
 
@@ -40,7 +40,7 @@ Sie steht an fünf Stellen und muss bei jedem Release überall mitwandern:
 | Bereich | Aktuelle Version |
 |---------|------------------|
 | Agents | 2026.10.11.20.00.00 |
-| Backend | 2026.10.11.20.00.00 |
+| Backend | 2026.10.11.21.00.00 |
 | Frontend | 2026.10.11.00.15.00 |
 | Syslog | 2026.10.11.20.00.00 |
 | Datenbank / Deployment | 2026.10.11.20.00.00 |

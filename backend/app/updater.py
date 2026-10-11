@@ -318,9 +318,15 @@ async def version_check(force: bool = False) -> dict:
 
 
 async def update_status(force: bool = False) -> dict:
-    """Installierter Stand + GitHub-Stand + Bewertung + laufender Vorgang."""
+    """Installierter Stand + GitHub-Stand + Bewertung + laufender Vorgang.
+
+    `force` kommt nur vom Knopf "Auf Updates pruefen" - dann auch die
+    Release-Liste frisch. Der Beobachter (alle 120 s) nutzt version_check und
+    laesst sie im Zwischenspeicher: sonst waere das GitHub-Limit fuer anonyme
+    Abfragen (60 pro Stunde) allein durch ihn erschoepft.
+    """
     channel = await load_channel()
-    ref = await resolve_target_ref(channel)
+    ref = await resolve_target_ref(channel, force=force)
     local = await local_state()
     remote = await remote_state(force=force, ref=ref)
     run = await read_run_state()
@@ -725,8 +731,13 @@ async def save_channel(channel: str, ref: str = "", auto_offer: bool = True) -> 
     return config
 
 
-async def resolve_target_ref(config: Optional[dict] = None) -> str:
-    """Welcher Git-Bezugspunkt gehoert zum eingestellten Kanal?"""
+async def resolve_target_ref(config: Optional[dict] = None, force: bool = False) -> str:
+    """Welcher Git-Bezugspunkt gehoert zum eingestellten Kanal?
+
+    `force`: die Release-Liste neu von GitHub holen. Sonst sieht "Auf Updates
+    pruefen" ein gerade veroeffentlichtes Release bis zu 15 min lang nicht -
+    die Liste lag im Zwischenspeicher, nur der Commit wurde neu abgefragt.
+    """
     config = config or await load_channel()
     channel = config.get("channel", "stable")
 
@@ -735,7 +746,7 @@ async def resolve_target_ref(config: Optional[dict] = None) -> str:
     if channel == "pinned":
         return (config.get("ref") or "").strip() or REPO_BRANCH
 
-    latest = await latest_release()
+    latest = await latest_release(force=force)
     return (latest or {}).get("tag") or REPO_BRANCH
 
 
@@ -835,9 +846,9 @@ async def list_releases(force: bool = False, limit: int = 30) -> dict:
     }
 
 
-async def latest_release() -> Optional[dict]:
+async def latest_release(force: bool = False) -> Optional[dict]:
     """Das neueste veroeffentlichte Release (ohne Prerelease)."""
-    data = await list_releases()
+    data = await list_releases(force=force)
     for entry in data.get("releases", []):
         if not entry.get("prerelease"):
             return entry

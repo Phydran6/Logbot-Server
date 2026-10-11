@@ -2,6 +2,11 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.11.21.00.00
+
+### Fixed
+- `update_status(force=True)` holte die Release-Liste nicht neu (`resolve_target_ref`/`latest_release` ohne `force`) — ein gerade veröffentlichtes Release war bis zu 15 min unsichtbar. Der Beobachter (`version_check`) bleibt absichtlich beim Zwischenspeicher (GitHub-Limit 60/h ohne Token).
+
 ## 2026.10.11.20.00.00
 
 ### Fixed
