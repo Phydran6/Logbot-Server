@@ -465,6 +465,11 @@ class DatabaseManager:
                        VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id""",
                     hostname, ip, mac, device_type, json.dumps(extra_data))
 
+        if len(self._agent_cache) > 10_000:
+            # Abgelaufene Eintraege wegwerfen - viele wechselnde Absender
+            # (DHCP, Scanner) liessen den Zwischenspeicher sonst endlos wachsen.
+            self._agent_cache = {k: v for k, v in self._agent_cache.items()
+                                 if now - v[1] < AGENT_CACHE_TTL}
         self._agent_cache[key] = (agent_id, now)
         self._agents_to_update.add(agent_id)
         return agent_id
@@ -553,17 +558,38 @@ class DatabaseManager:
                 logger.error("Flush-Loop Fehler: %s", e)
 
 
+# Hoechstens so viele UDP-Meldungen gleichzeitig in Arbeit. Ist die Datenbank
+# langsam (nicht weg - dann scheitert es schnell), stauten sich frueher die
+# Aufgaben ohne Grenze im Speicher, bis der Container am Speicher erstickte.
+UDP_MAX_INFLIGHT = int(os.getenv('SYSLOG_UDP_MAX_INFLIGHT', '5000'))
+
+
 class SyslogUDPProtocol(asyncio.DatagramProtocol):
     def __init__(self, parser: SyslogParser, db: DatabaseManager):
         self.parser = parser
         self.db = db
+        # Referenzen halten: eine Aufgabe ohne Referenz darf der Garbage
+        # Collector mitten im Lauf einsammeln.
+        self._tasks: set = set()
+        self._dropped = 0
+        self._dropped_logged_at = 0.0
 
     def datagram_received(self, data: bytes, addr: Tuple[str, int]):
+        if len(self._tasks) >= UDP_MAX_INFLIGHT:
+            self._dropped += 1
+            now = time.monotonic()
+            if now - self._dropped_logged_at > 60:
+                self._dropped_logged_at = now
+                logger.error("Datenbank kommt nicht nach - %s UDP-Meldungen verworfen "
+                             "(%s in Arbeit)", self._dropped, len(self._tasks))
+            return
         # NUL-Zeichen entfernen: PostgreSQL nimmt sie weder in Text noch in
         # JSONB an, und eine solche Meldung riss den ganzen Stapel mit.
         msg = data.decode('utf-8', errors='replace').replace('\x00', '').strip()
         if msg:
-            asyncio.create_task(self._process(msg, addr[0]))
+            task = asyncio.create_task(self._process(msg, addr[0]))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
     async def _process(self, msg: str, ip: str):
         try:

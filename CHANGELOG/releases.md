@@ -11,6 +11,37 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.11.20.00.00 (2026-10-11)
+
+Die restlichen Funde aus der Code-Prüfung nach dem Ausfall vom 10.10. — alles
+dieselbe Fehlerklasse: Dinge, die still verloren gehen oder still wachsen.
+
+- **Windows-Agent verlor Ereignisse.** Er holte je Kanal die *neuesten* 100 und
+  filterte nach Zeit — kamen zwischen zwei Durchläufen mehr, waren die älteren
+  weg. Ein gescheitertes Senden verwarf das Paket. Jetzt liest er lückenlos ab
+  einer gemerkten Position je Kanal (RecordId, gespeichert in `positions.json`,
+  übersteht Neustarts), die erst nach dem erfolgreichen Senden vorrückt; wachsende
+  Pause nach Fehlern, `Retry-After` wird beachtet, dauerhaft abgelehnte Pakete
+  blockieren nichts. Zeitstempel und Event-ID gehen mit (Duplikat-Erkennung).
+  Auf einem Windows-Rechner getestet: 450 von 450 Ereignissen trotz simuliertem
+  Serverausfall, nichts doppelt. Die Aufgabenplanung beendete den Agent nach 365
+  Tagen und gab nach drei Abstürzen auf — beides behoben.
+- **Ingest-Limit pro Agent statt pro IP.** Hinter NAT teilten sich alle Agents ein
+  Limit und bekamen gemeinsam 429.
+- **Update-Skript:** kein Datenbank-Abzug mehr, wenn er nicht auf die Platte passt
+  (er hätte sie vollgeschrieben); alte Sicherungen werden auch nach Fehlschlägen
+  aufgeräumt — vorher häufte jeder gescheiterte Versuch einen vollen Abzug an.
+- **Aufbewahrung je Gerät** löscht häppchenweise statt mit einem riesigen DELETE.
+- **Abgewiesene Lieferungen** (zurückgezogener Schlüssel) schreiben höchstens alle
+  10 Minuten einen Tagebucheintrag statt alle 5 Sekunden.
+- **Syslog:** höchstens 5.000 UDP-Meldungen gleichzeitig in Arbeit (vorher ohne
+  Grenze, wenn die Datenbank langsam war); Geräte-Zwischenspeicher wird ausgedünnt.
+- **Zusatzdienste** (n8n, Open WebUI, Postfix, Portainer, Tugtainer) haben jetzt
+  auch eine Log-Obergrenze.
+
+> **Windows-Agents:** Installer einfach erneut ausführen. Beim ersten Start beginnt
+> jeder Kanal „ab jetzt“ — es gibt keine Flut alter Ereignisse.
+
 ## v2026.10.11.00.15.00 (2026-10-11)
 
 - **Konsole: Rechtsklick bot nur „Kopieren“.** Das unsichtbare Eingabefeld wurde über

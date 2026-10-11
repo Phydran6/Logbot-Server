@@ -2,6 +2,15 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.11.20.00.00
+
+### Fixed
+- **Ingest-Limit pro Agent statt pro IP** (`limiter.agent_key`, Abdruck des Schlüssels): hinter NAT/Proxy teilten sich alle Agents 600 Anfragen pro Minute.
+- **Aufbewahrung je Gerät** (`_enforce_agent_retention`) löscht in Häppchen mit Commit je Häppchen statt mit einem DELETE über alle Zeilen.
+- **Abgewiesene Lieferungen** (401/403) werden je Absender/Gerät/Grund höchstens alle 10 Minuten ins Tagebuch geschrieben, mit Zähler der unterdrückten.
+- **Update-Skript** (`scripts/logbot-update.sh`): Datenbank-Abzug wird übersprungen, wenn weniger als halbe Datenbankgröße + 1 GB frei ist; `prune_backups` läuft auch nach Fehlschlägen (die neueste Sicherung bleibt immer).
+- Ungültige Escape-Sequenz in einem Docstring (`routes/logs.py`, Warnung ab Python 3.12).
+
 ## 2026.10.10.23.30.00
 
 ### Fixed

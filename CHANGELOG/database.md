@@ -3,6 +3,11 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.11.20.00.00
+
+### Added
+- `deploy/optional.yml`: Log-Rotation (json-file 5 × 10 MB) auch für die Zusatzdienste Portainer, Tugtainer, n8n, Open WebUI und Postfix.
+
 ## 2026.10.10.22.00.00
 
 ### Added

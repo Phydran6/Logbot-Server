@@ -94,7 +94,7 @@ _LIKE_ESCAPE_TABLE = str.maketrans({
 
 
 def _escape_like(value: str) -> str:
-    """Escapt LIKE-Sonderzeichen (%, _, \) damit User-Input nicht als Wildcard wirkt."""
+    """Escapt LIKE-Sonderzeichen (%, _, \\) damit User-Input nicht als Wildcard wirkt."""
     return value.translate(_LIKE_ESCAPE_TABLE)
 
 

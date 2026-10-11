@@ -34,7 +34,7 @@ from . import updater
 from . import watchdog
 from .config import settings, validate_security_settings
 from .database import get_db, async_session, engine
-from .limiter import limiter, client_ip as real_client_ip
+from .limiter import limiter, agent_key, client_ip as real_client_ip
 from .models import Webhook, Log, Agent, AgentToken
 from sqlalchemy import func
 from .schemas import LogResponse, LogDetailResponse, LogIngestRequest, LogIngestResponse
@@ -599,6 +599,29 @@ def _to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
 # dieselbe Lieferung endlos erneut.
 INGEST_INSERT_CHUNK = 1000
 
+# Abgewiesene Lieferungen: hoechstens ein Tagebucheintrag je Absender/Geraet/
+# Grund alle 10 Minuten. Ein Agent mit zurueckgezogenem Schluessel versucht es
+# alle paar Sekunden - frueher war das jedes Mal ein Schreibzugriff plus eine
+# Meldung in jedes offene Fenster.
+REJECTION_LOG_EVERY = 600
+_rejections: dict = {}
+
+
+def _rejection_due(key: tuple) -> Optional[int]:
+    """None = noch in der Sperrfrist (zaehlt nur mit). Sonst: wie viele seit
+    dem letzten Eintrag unterdrueckt wurden."""
+    now = datetime.utcnow()
+    last, count = _rejections.get(key, (None, 0))
+    if last is not None and (now - last).total_seconds() < REJECTION_LOG_EVERY:
+        _rejections[key] = (last, count + 1)
+        return None
+    if len(_rejections) > 10_000:
+        # Obergrenze: wechselnde Absender sollen den Speicher nicht fuellen.
+        _rejections.clear()
+    _rejections[key] = (now, 0)
+    return count
+
+
 # Gleiche Meldungen innerhalb dieses Zeitfensters (Sekunden) werden zu einer
 # Zeile mit Anzahl zusammengefasst. 0 = aus.
 REPEAT_WINDOW = max(0, int(os.getenv("LOG_REPEAT_WINDOW", "60")))
@@ -647,7 +670,7 @@ def _agent_type_fallback(token_type: Optional[str], user_agent: Optional[str]) -
 
 
 @app.post("/api/agents/ingest", response_model=LogIngestResponse, tags=["Agent Ingest"])
-@limiter.limit("600/minute")
+@limiter.limit("600/minute", key_func=agent_key)
 async def ingest_logs(
     data: LogIngestRequest,
     request: Request,
@@ -682,10 +705,13 @@ async def ingest_logs(
         # Nach aussen immer dieselbe Antwort - von dort soll nicht erkennbar
         # sein, ob ein Schluessel unbekannt, abgelaufen oder nur aus dem
         # falschen Netz vorgelegt wurde. Der Grund steht im Systemtagebuch.
-        await journal.record(
-            db, category="token", event="ingest.rejected", level="warning",
-            message=f"Lieferung von '{data.hostname}' abgewiesen: {deny_reason}",
-            actor="agent", source_ip=source_ip, target=data.hostname, ok=False)
+        suppressed = _rejection_due(("rejected", source_ip, data.hostname, deny_reason))
+        if suppressed is not None:
+            await journal.record(
+                db, category="token", event="ingest.rejected", level="warning",
+                message=(f"Lieferung von '{data.hostname}' abgewiesen: {deny_reason}"
+                         + (f" (dazu {suppressed} weitere seit dem letzten Eintrag)" if suppressed else "")),
+                actor="agent", source_ip=source_ip, target=data.hostname, ok=False)
         raise HTTPException(status_code=401, detail="Ungültiger Agent-Token")
 
     device_ip = (data.ip_address or "").strip() or source_ip
@@ -737,10 +763,13 @@ async def ingest_logs(
         # und der Tagebucheintrag fehlte.
         token_name = agent_token.name
         await db.rollback()
-        await journal.record(
-            db, category="token", event="ingest.denied", level="warning",
-            message=f"'{token_name}' wollte für '{data.hostname}' liefern: {why}",
-            actor=token_name, source_ip=source_ip, target=data.hostname, ok=False)
+        suppressed = _rejection_due(("denied", token_name, data.hostname, why))
+        if suppressed is not None:
+            await journal.record(
+                db, category="token", event="ingest.denied", level="warning",
+                message=(f"'{token_name}' wollte für '{data.hostname}' liefern: {why}"
+                         + (f" (dazu {suppressed} weitere seit dem letzten Eintrag)" if suppressed else "")),
+                actor=token_name, source_ip=source_ip, target=data.hostname, ok=False)
         raise HTTPException(status_code=403, detail=why)
 
     # Erste Lieferung eines frisch angemeldeten Geraeteschluessels: ab jetzt
@@ -859,13 +888,28 @@ AGENT_RETENTION_INTERVAL = int(os.getenv("AGENT_RETENTION_INTERVAL", "3600"))
 async def _enforce_agent_retention(session, agent, logger: logging.Logger) -> int:
     """Retention-Policy für einen Agent durchsetzen. Gibt Anzahl gelöschter Logs zurück."""
     deleted = 0
+    # Haeppchenweise, jedes einzeln festgeschrieben - wie im Plattenwaechter.
+    # Frueher ein einziges DELETE: bei Millionen Zeilen eine stundenlang
+    # offene Transaktion, die das Transaktionslog aufblaeht und die Platte
+    # waehrend des Aufraeumens erst einmal VOLLER macht.
+    chunk = diskguard.BATCH_SIZE
 
     if agent.retention_days:
         cutoff = datetime.utcnow() - timedelta(days=agent.retention_days)
-        r = await session.execute(
-            delete(Log).where(Log.agent_id == agent.id, Log.timestamp < cutoff)
-        )
-        n = r.rowcount or 0
+        n = 0
+        for _ in range(diskguard.MAX_BATCHES):
+            oldest = (
+                select(Log.id)
+                .where(Log.agent_id == agent.id, Log.timestamp < cutoff)
+                .limit(chunk)
+                .scalar_subquery()
+            )
+            r = await session.execute(delete(Log).where(Log.id.in_(oldest)))
+            await session.commit()
+            step = r.rowcount or 0
+            n += step
+            if step < chunk:
+                break
         deleted += n
         if n:
             logger.info("Agent %s (%s): %s Logs älter als %s Tage gelöscht",
@@ -876,20 +920,26 @@ async def _enforce_agent_retention(session, agent, logger: logging.Logger) -> in
             select(func.count(Log.id)).where(Log.agent_id == agent.id)
         )).scalar() or 0
         excess = count - agent.retention_max_logs
-        if excess > 0:
+        n = 0
+        while excess > 0 and n < chunk * diskguard.MAX_BATCHES:
             subq = (
                 select(Log.id)
                 .where(Log.agent_id == agent.id)
                 .order_by(Log.timestamp.asc())
-                .limit(excess)
+                .limit(min(excess, chunk))
                 .scalar_subquery()
             )
             r = await session.execute(delete(Log).where(Log.id.in_(subq)))
-            n = r.rowcount or 0
-            deleted += n
-            if n:
-                logger.info("Agent %s (%s): %s älteste Logs gelöscht (Limit: %s)",
-                            agent.id, agent.hostname, n, agent.retention_max_logs)
+            await session.commit()
+            step = r.rowcount or 0
+            if not step:
+                break
+            n += step
+            excess -= step
+        deleted += n
+        if n:
+            logger.info("Agent %s (%s): %s älteste Logs gelöscht (Limit: %s)",
+                        agent.id, agent.hostname, n, agent.retention_max_logs)
 
     return deleted
 

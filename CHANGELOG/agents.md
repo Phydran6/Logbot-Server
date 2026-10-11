@@ -2,6 +2,17 @@
 
 Installer & Log-Forwarder für Linux/Windows (`agents/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.11.20.00.00
+
+### Fixed
+- **Windows-Agent (HTTPS): Ereignisse gingen verloren.** `Get-WinEvent -MaxEvents 100` holte die *neuesten* 100 Ereignisse und filterte dann nach Zeit — mehr als 100 zwischen zwei Durchläufen, und die älteren waren weg. Jetzt: Position je Kanal über die fortlaufende `EventRecordID` (`-FilterXPath "*[System[(EventRecordID > N)]]" -Oldest`), gespeichert in `positions.json` (übersteht Neustarts), höchstens 500 je Kanal und 5.000 je Durchlauf.
+- **Windows-Agent: gescheitertes Senden verwarf das Paket.** Die Position rückt jetzt erst nach dem erfolgreichen Senden vor; wiederholt wird nur ab dem gescheiterten Paket, mit wachsender Pause (5 s … 5 min) und `Retry-After`. 400/413/422 werden protokolliert und übersprungen.
+- **Windows-Agent: Zeitstempel und Event-ID** werden mitgeschickt — der Server erkennt doppelte Lieferungen, nachgeholte Ereignisse landen zur richtigen Zeit.
+- Windows-Agent: geleerte Protokolle (RecordId beginnt neu) werden erkannt.
+- Windows-Agent (Syslog-Modus): dieselbe lückenlose Leseposition.
+- Aufgabenplanung: kein Zeitlimit mehr (vorher 365 Tage, danach still beendet), 999 statt 3 Neustarts nach Absturz.
+- Test unter Windows PowerShell 5.1 mit echtem Systemprotokoll und simuliertem Serverausfall beim 2. Paket: 450 von 450 Ereignissen angekommen, keine doppelt gesendet.
+
 ## 2026.10.10.22.00.00
 
 ### Fixed

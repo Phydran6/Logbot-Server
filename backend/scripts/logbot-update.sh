@@ -150,6 +150,11 @@ finish_ok() {
 
 finish_fail() {
     log "FEHLER: $1"
+    # Auch nach einem Fehlschlag aufraeumen: sonst haeuft jeder gescheiterte
+    # Versuch eine weitere Sicherung samt Datenbank-Abzug an - auf derselben
+    # Platte, die dann irgendwann vollaeuft. Die neueste (die fuer den
+    # Rueckfall) bleibt dabei immer stehen.
+    prune_backups || true
     write_state "failed" "Abgebrochen" "$1"
     exit 1
 }
@@ -275,6 +280,22 @@ backup_database() {
     # Bei externer Datenbank gibt es keinen postgres-Container - dann kein Abzug.
     if ! compose ps --services 2>/dev/null | grep -qx "postgres"; then
         log "Kein postgres-Container in diesem Stack (externe Datenbank?) - kein Abzug."
+        return 0
+    fi
+
+    # Passt der Abzug ueberhaupt noch auf die Platte? Ein Abzug, der die Platte
+    # vollschreibt, legt genau die Datenbank lahm, die er sichern soll. Grobe,
+    # vorsichtige Rechnung: frei muss mindestens die halbe Datenbankgroesse
+    # sein (gzip schrumpft Logs meist auf ein Zehntel) plus 1 GB Reserve.
+    local db_bytes free_bytes
+    db_bytes="$(compose exec -T postgres sh -c \
+        'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT pg_database_size(current_database())"' \
+        2>/dev/null | tr -dc '0-9')"
+    free_bytes="$(df -PB1 "$(dirname "$target")" 2>/dev/null | awk 'NR==2 {print $4}')"
+    if [[ -n "$db_bytes" && -n "$free_bytes" ]] \
+        && (( free_bytes < db_bytes / 2 + 1073741824 )); then
+        log "WARNUNG: Zu wenig Platz fuer den Datenbank-Abzug (Datenbank $(( db_bytes / 1048576 )) MB," \
+            "frei $(( free_bytes / 1048576 )) MB) - Abzug wird uebersprungen, das Update laeuft weiter."
         return 0
     fi
 

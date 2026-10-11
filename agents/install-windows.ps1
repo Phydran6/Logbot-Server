@@ -91,7 +91,7 @@ function Read-Answer {
 $INSTALL_DIR = "$env:ProgramData\LogBot-Agent"
 $SCRIPT_NAME = "LogBotAgent.ps1"
 $TASK_NAME = "LogBotAgent"
-$AGENT_VERSION = "2026.10.10.22.00.00"
+$AGENT_VERSION = "2026.10.11.20.00.00"
 
 # ==============================================================================
 # Hilfsfunktionen
@@ -202,18 +202,36 @@ function Process-Event {
 }
 
 Write-Host "LogBot Agent (Syslog) gestartet - Server: $(Get-ActiveServer):$ServerPort"
-$StartTime = (Get-Date).AddMinutes(-1)
+
+# Leseposition je Kanal ueber die fortlaufende RecordId statt "die neuesten
+# 100 seit Zeitpunkt X": frueher fielen bei mehr als 100 Ereignissen zwischen
+# zwei Durchlaeufen die aelteren still weg.
+$Positions = @{}
+foreach ($LogName in $LogSources) {
+    $e = Get-WinEvent -LogName $LogName -MaxEvents 1 -ErrorAction SilentlyContinue
+    $Positions[$LogName] = if ($e) { [long]$e.RecordId } else { [long]0 }
+}
 
 while ($true) {
+    $More = $false
     foreach ($LogName in $LogSources) {
         try {
-            $Events = Get-WinEvent -LogName $LogName -MaxEvents 100 -ErrorAction SilentlyContinue |
-                      Where-Object { $_.TimeCreated -gt $StartTime }
-            foreach ($Event in $Events) { Process-Event -Event $Event -LogName $LogName }
+            $Events = @(Get-WinEvent -LogName $LogName `
+                -FilterXPath "*[System[(EventRecordID > $($Positions[$LogName]))]]" `
+                -MaxEvents 500 -Oldest -ErrorAction SilentlyContinue)
+            if ($Events.Count -ge 500) { $More = $true }
+            foreach ($Ev in $Events) {
+                Process-Event -Event $Ev -LogName $LogName
+                $Positions[$LogName] = [long]$Ev.RecordId
+            }
+            # Protokoll geleert: RecordId beginnt neu.
+            if (-not $Events.Count) {
+                $e = Get-WinEvent -LogName $LogName -MaxEvents 1 -ErrorAction SilentlyContinue
+                if ($e -and [long]$e.RecordId -lt $Positions[$LogName]) { $Positions[$LogName] = [long]0 }
+            }
         } catch {}
     }
-    $StartTime = Get-Date
-    Start-Sleep -Seconds 5
+    if ($More) { Start-Sleep -Seconds 1 } else { Start-Sleep -Seconds 5 }
 }
 '@
 
@@ -323,31 +341,98 @@ function Save-AgentId {
     }
 }
 
+# Ergebnis eines Sendeversuchs:
+#   ok    - angekommen (auch: vom Server als Duplikat erkannt)
+#   retry - spaeter GENAU DIESES Paket nochmal (Netz, Server weg, 429/5xx)
+#   drop  - der Server lehnt den Inhalt dauerhaft ab (400/413/422). Erneut
+#           schicken wuerde ewig scheitern und alles dahinter blockieren.
 function Send-LogBatch {
     param([array]$Events)
-    if ($Events.Count -eq 0) { return }
+    if ($Events.Count -eq 0) { return @{ Result = "ok"; Wait = 0 } }
 
     $url = Get-IngestUrl
-    if (-not $url) { Write-Warning "Kein Server erreichbar"; return }
+    if (-not $url) { Write-Warning "Kein Server erreichbar"; return @{ Result = "retry"; Wait = 0 } }
 
     $body = @{
         hostname = $Hostname
         device_type = "windows_agent"
-        events = $Events
-    } | ConvertTo-Json -Depth 3
+        events = @($Events)
+    } | ConvertTo-Json -Depth 4
 
     try {
         # Als UTF-8-Bytes senden: Windows PowerShell 5.1 kodiert einen Text-Body
         # sonst als ISO-8859-1. Aus "ue" (Umlaut) wird ein ungueltiges Byte, der
         # Server lehnt die GANZE Lieferung ab - 50 Ereignisse still verloren.
         $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
-        $response = Invoke-RestMethod -Uri $url -Method POST -Headers $Headers -Body $bodyBytes @script:TlsParam
+        $response = Invoke-RestMethod -Uri $url -Method POST -Headers $Headers -Body $bodyBytes -TimeoutSec 30 @script:TlsParam
         Save-AgentId -Response $response
+        return @{ Result = "ok"; Wait = 0 }
     } catch {
-        Write-Warning "Sendefehler ($url): $_"
+        $code = 0
+        try { $code = [int]$_.Exception.Response.StatusCode } catch {}
+        if ($code -in 400, 413, 422) {
+            Write-Warning "HTTP $code - Paket mit $($Events.Count) Eintraegen verworfen: $_"
+            return @{ Result = "drop"; Wait = 0 }
+        }
+        $wait = 0
+        if ($code -in 429, 503) {
+            # Der Server sagt, wann es wieder geht (z.B. Platte voll: 300 s).
+            try { $wait = [int]$_.Exception.Response.Headers["Retry-After"] } catch {}
+            if (-not $wait) { try { $wait = [int]$_.Exception.Response.Headers.RetryAfter.Delta.TotalSeconds } catch {} }
+        }
+        Write-Warning "Sendefehler ($url, HTTP $code): $_"
         # URL zuruecksetzen fuer naechsten Versuch (Fallback-Logik)
         $script:CurrentUrl = $null
+        return @{ Result = "retry"; Wait = [Math]::Min([Math]::Max($wait, 0), $MaxBackoff) }
     }
+}
+
+# ------------------------------------------------------------------------------
+# Leseposition je Kanal = RecordId des zuletzt ERFOLGREICH gesendeten
+# Ereignisses. Liegt auf der Platte, damit ein Neustart nichts verliert.
+#
+# Frueher: -MaxEvents 100 holte die NEUESTEN 100 Ereignisse und filterte nach
+# Zeit. Kamen zwischen zwei Durchlaeufen mehr, waren die aelteren still weg.
+# Und ein gescheitertes Senden verwarf das Paket, die Zeit lief trotzdem weiter.
+# ------------------------------------------------------------------------------
+$PositionFile = Join-Path $PSScriptRoot "positions.json"
+$MaxPerChannel = 500      # Ereignisse je Kanal und Durchlauf
+$MaxPerRound = 5000       # Ereignisse je Durchlauf insgesamt (Rueckstand gedrosselt)
+$BatchSize = 200          # Ereignisse je Anfrage (der Server nimmt bis 5000)
+$MaxBackoff = 300         # laengste Pause nach Sendefehlern (Sekunden)
+
+function Load-Positions {
+    $map = @{}
+    if (Test-Path $PositionFile) {
+        try {
+            $data = Get-Content $PositionFile -Raw | ConvertFrom-Json
+            foreach ($p in $data.PSObject.Properties) { $map[$p.Name] = [long]$p.Value }
+        } catch { Write-Warning "positions.json unlesbar - beginne bei jetzt" }
+    }
+    return $map
+}
+
+function Save-Positions {
+    param($Map)
+    try {
+        $tmp = "$PositionFile.tmp"
+        ($Map | ConvertTo-Json -Compress) | Set-Content -Path $tmp -Encoding UTF8
+        Move-Item -Path $tmp -Destination $PositionFile -Force
+    } catch { Write-Warning "Position nicht gespeichert: $_" }
+}
+
+function Get-NewestRecordId {
+    param([string]$LogName)
+    $e = Get-WinEvent -LogName $LogName -MaxEvents 1 -ErrorAction SilentlyContinue
+    if ($e) { return [long]$e.RecordId }
+    return [long]0
+}
+
+function Read-Channel {
+    param([string]$LogName, [long]$After, [int]$Max)
+    # Aelteste zuerst, lueckenlos ab der gemerkten Position.
+    return @(Get-WinEvent -LogName $LogName -FilterXPath "*[System[(EventRecordID > $After)]]" `
+                -MaxEvents $Max -Oldest -ErrorAction SilentlyContinue)
 }
 
 # Alle verfuegbaren Event Logs ermitteln
@@ -366,74 +451,112 @@ $AllLogs = Get-ActiveLogNames
 Write-Host "Gefunden: $($AllLogs.Count) aktive Log-Kanaele"
 Write-Host "---"
 
-$StartTime = (Get-Date).AddMinutes(-1)
-# Pro Kanal: bis zu welchem Zeitpunkt schon gelesen wurde. Frueher galt ein
-# gemeinsamer Startzeitpunkt, der erst nach dem Durchlauf ALLER Kanaele neu
-# gesetzt wurde - was in einem schon gelesenen Kanal waehrenddessen dazukam,
-# fiel durchs Raster (bei hunderten Kanaelen der Grossteil jedes Durchlaufs).
-$LastRead = @{}
-# Log-Liste alle 5 Minuten aktualisieren
+$Positions = Load-Positions
 $LogRefreshTime = Get-Date
+$Failures = 0
 
 while ($true) {
+    $Dirty = $false
+
     # Log-Kanaele regelmaessig aktualisieren (neue Logs koennen hinzukommen)
+    # und geleerte Protokolle erkennen: dort beginnt die RecordId neu, die
+    # gemerkte Position laege sonst fuer immer hinter dem Ende.
     if ((Get-Date) -gt $LogRefreshTime.AddMinutes(5)) {
         $AllLogs = Get-ActiveLogNames
         $LogRefreshTime = Get-Date
+        foreach ($LogName in @($Positions.Keys)) {
+            $Newest = Get-NewestRecordId -LogName $LogName
+            if ($Newest -lt $Positions[$LogName]) { $Positions[$LogName] = [long]0; $Dirty = $true }
+        }
     }
 
-    $Batch = @()
+    # Lesen: je Kanal ab der gemerkten Position. Jedes Paket merkt sich, bis
+    # zu welcher RecordId es je Kanal reicht - die Position rueckt erst vor,
+    # wenn genau dieses Paket angekommen ist.
+    $Pending = New-Object System.Collections.ArrayList
+    $Batch = New-Object System.Collections.ArrayList
+    $BatchPos = @{}
+    $Total = 0
+    $More = $false
 
     foreach ($LogName in $AllLogs) {
-        # Lesezeitpunkt VOR der Abfrage festhalten und nur Ereignisse bis
-        # dorthin nehmen - spaetere holt der naechste Durchlauf, ohne Luecke
-        # und ohne Doppelte.
-        $Since = if ($LastRead.ContainsKey($LogName)) { $LastRead[$LogName] } else { $StartTime }
-        $ReadAt = Get-Date
+        if (-not $Positions.ContainsKey($LogName)) {
+            # Neuer Kanal (oder erster Start): ab jetzt - keine Vorgeschichte.
+            $Positions[$LogName] = Get-NewestRecordId -LogName $LogName
+            $Dirty = $true
+            continue
+        }
+        if ($Total -ge $MaxPerRound) { $More = $true; break }
+
         try {
-            $Events = Get-WinEvent -LogName $LogName -MaxEvents 100 -ErrorAction SilentlyContinue |
-                      Where-Object { $_.TimeCreated -gt $Since -and $_.TimeCreated -le $ReadAt }
+            $Events = Read-Channel -LogName $LogName -After $Positions[$LogName] -Max $MaxPerChannel
+        } catch { continue }
+        if ($Events.Count -ge $MaxPerChannel) { $More = $true }
 
-            foreach ($Event in $Events) {
-                $Level = $LevelMap[[int]$Event.Level]
-                if (-not $Level) { $Level = "info" }
-                $LevelNum = $LevelPriority[$Level]
-                if (-not $LevelNum) { $LevelNum = 6 }
-                if ($LevelNum -gt $MinLevelNum) { continue }
+        foreach ($Ev in $Events) {
+            $Total++
+            # Position auch fuer herausgefilterte Ereignisse vorruecken.
+            $BatchPos[$LogName] = [long]$Ev.RecordId
 
-                $Message = $Event.Message
-                if (-not $Message) { $Message = "EventID: $($Event.Id)" }
-                # Erst ersetzen, dann kuerzen: aus CRLF wird EIN Zeichen, der Text
-                # wird kuerzer. Mit der alten Laenge warf Substring() bei jeder
-                # mehrzeiligen Meldung - sie und der Rest des Kanals fehlten.
-                $Message = $Message -replace "`r`n|`n|`r", " "
-                if ($Message.Length -gt 2048) { $Message = $Message.Substring(0, 2048) }
+            $Level = $LevelMap[[int]$Ev.Level]
+            if (-not $Level) { $Level = "info" }
+            $LevelNum = $LevelPriority[$Level]
+            if (-not $LevelNum) { $LevelNum = 6 }
+            if ($LevelNum -gt $MinLevelNum) { continue }
 
-                $Batch += @{
-                    level = $Level
-                    source = "$LogName/$($Event.ProviderName)"
-                    message = $Message
-                }
+            $Message = $null
+            try { $Message = $Ev.Message } catch {}
+            if (-not $Message) { $Message = "EventID: $($Ev.Id)" }
+            # Erst ersetzen, dann kuerzen: aus CRLF wird EIN Zeichen, der Text
+            # wird kuerzer. Mit der alten Laenge warf Substring() bei jeder
+            # mehrzeiligen Meldung - sie und der Rest des Kanals fehlten.
+            $Message = $Message -replace "`r`n|`n|`r", " "
+            if ($Message.Length -gt 2048) { $Message = $Message.Substring(0, 2048) }
 
-                # Batch senden wenn 50 erreicht
-                if ($Batch.Count -ge 50) {
-                    Send-LogBatch -Events $Batch
-                    $Batch = @()
-                    Start-Sleep -Milliseconds 500
-                }
+            # Zeitpunkt des Ereignisses + Event-ID: der Server erkennt damit
+            # doppelt gelieferte Eintraege, nachgeholte landen zur richtigen Zeit.
+            $null = $Batch.Add(@{
+                level = $Level
+                source = "$LogName/$($Ev.ProviderName)"
+                message = $Message
+                timestamp = $Ev.TimeCreated.ToUniversalTime().ToString("o")
+                event_id = [int]$Ev.Id
+            })
+
+            if ($Batch.Count -ge $BatchSize) {
+                $null = $Pending.Add(@{ Events = $Batch.ToArray(); Pos = $BatchPos.Clone() })
+                $Batch = New-Object System.Collections.ArrayList
+                $BatchPos = @{}
             }
-        } catch {}
-        $LastRead[$LogName] = $ReadAt
+        }
+    }
+    if ($Batch.Count -gt 0 -or $BatchPos.Count -gt 0) {
+        $null = $Pending.Add(@{ Events = $Batch.ToArray(); Pos = $BatchPos.Clone() })
     }
 
-    # Restliche Events senden
-    if ($Batch.Count -gt 0) {
-        Send-LogBatch -Events $Batch
+    # Senden: Paket fuer Paket. Scheitert eines, wird nur ab diesem wiederholt.
+    $Failed = $false
+    $Wait = 0
+    foreach ($Item in $Pending) {
+        $Result = Send-LogBatch -Events $Item.Events
+        if ($Result.Result -eq "retry") { $Failed = $true; $Wait = $Result.Wait; break }
+        foreach ($Key in $Item.Pos.Keys) { $Positions[$Key] = $Item.Pos[$Key] }
+        if ($Item.Pos.Count -gt 0) { $Dirty = $true }
+        $Failures = 0
+    }
+    if ($Dirty) { Save-Positions -Map $Positions }
+
+    if ($Failed) {
+        # Wachsende Pause (5 s, 10 s, 20 s ... bis 5 min), damit ein
+        # angeschlagener Server nicht zusaetzlich unter Beschuss geraet.
+        $Failures++
+        $Backoff = [Math]::Min(5 * [Math]::Pow(2, [Math]::Min($Failures - 1, 10)), $MaxBackoff)
+        Start-Sleep -Seconds ([int][Math]::Max($Wait, $Backoff))
+        continue
     }
 
-    # Nur noch Startpunkt fuer Kanaele, die neu hinzukommen.
-    $StartTime = Get-Date
-    Start-Sleep -Seconds 5
+    # Rueckstand gedrosselt abarbeiten, sonst im normalen Takt.
+    if ($More) { Start-Sleep -Seconds 2 } else { Start-Sleep -Seconds 5 }
 }
 '@
 
@@ -700,9 +823,13 @@ function Install-ScheduledTask {
         -AllowStartIfOnBatteries `
         -DontStopIfGoingOnBatteries `
         -StartWhenAvailable `
-        -RestartCount 3 `
+        -RestartCount 999 `
         -RestartInterval (New-TimeSpan -Minutes 1) `
-        -ExecutionTimeLimit (New-TimeSpan -Days 365)
+        -ExecutionTimeLimit ([TimeSpan]::Zero)
+    # Ohne Zeitlimit und mit vielen Neustarts: frueher beendete die
+    # Aufgabenplanung den Agent nach 365 Tagen Laufzeit, und nach drei
+    # Abstuerzen blieb er bis zum naechsten Neustart des Rechners aus - beides
+    # still, ohne dass es jemand merkt.
 
     $Principal = New-ScheduledTaskPrincipal `
         -UserId "SYSTEM" `
