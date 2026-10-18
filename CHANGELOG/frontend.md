@@ -2,6 +2,11 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.18.22.00.00
+
+### Fixed
+- Einstellungen → Caddy: Nach „Zertifikat speichern“ zeigt die Meldung, ob Caddy neu geladen wurde, und das Ablaufdatum.
+
 ## 2026.10.11.00.15.00
 
 ### Fixed

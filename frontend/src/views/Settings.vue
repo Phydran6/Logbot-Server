@@ -1038,12 +1038,12 @@ async function uploadCaddyCert() {
   form.append('cert_file', certUpload.cert)
   form.append('key_file', certUpload.key)
   try {
-    await authStore.api('/api/caddy/certificates', {
+    const res = await authStore.api('/api/caddy/certificates', {
       method: 'POST',
       body: form
     })
     caddyCertPresent.value = true
-    caddyMessage.value = 'Zertifikat gespeichert.'
+    caddyMessage.value = res.message + (res.not_after ? ` Gültig bis ${res.not_after}.` : '')
   } catch (e) {
     caddyError.value = e.message
   }

@@ -2,6 +2,12 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.18.22.00.00
+
+### Fixed
+- `_apply_caddyfile` sendet `Cache-Control: must-revalidate` an `/load` — ohne erzwang Caddy bei unveränderter Config kein Neuladen, ein ausgetauschtes `custom.crt` blieb unbenutzt.
+- `POST /api/caddy/certificates` lädt Caddy sofort neu, wenn die gespeicherte Config `custom.crt` nutzt, und prüft vorher Zertifikat/Key (`_check_cert_and_key`: PEM gültig, Key passt, kein Passwort). Antwort enthält `reloaded` und `not_after`.
+
 ## 2026.10.11.21.00.00
 
 ### Fixed

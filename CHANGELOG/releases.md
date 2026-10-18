@@ -11,6 +11,17 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.18.22.00.00 (2026-10-18)
+
+- **Hochgeladenes Zertifikat wurde nicht genutzt.** „Zertifikat speichern“
+  meldete Erfolg, Caddy lieferte aber weiter das alte aus: Die neue Datei heißt
+  wieder `custom.crt`, die Konfiguration blieb gleich — und bei gleicher
+  Konfiguration überspringt Caddy das Neuladen. Caddy wird jetzt immer neu
+  geladen; ist der Modus „Eigenes Zertifikat“ aktiv, direkt nach dem Hochladen.
+- **Zertifikat und Key werden vor dem Speichern geprüft:** ungültig,
+  vertauscht/nicht zusammengehörig oder passwortgeschützt gibt eine klare
+  Fehlermeldung. Die Erfolgsmeldung nennt das Ablaufdatum.
+
 ## v2026.10.11.21.00.00 (2026-10-11)
 
 - **„Auf Updates prüfen“ sah ein frisch veröffentlichtes Release nicht.** Die

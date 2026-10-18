@@ -1,7 +1,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.31.23.00.00
+# Version:     2026.10.18.22.00.00
 # Beschreibung: LogBot - Caddy Management API (Config Apply + Cert Upload)
 #
 # Grundsatz: Das UI darf sich NIE aussperren.
@@ -209,7 +209,10 @@ async def _load_json_config(config: dict) -> None:
 
 async def _apply_caddyfile(caddyfile: str) -> None:
     url = _admin_url("/load")
-    headers = {"Content-Type": "text/caddyfile"}
+    # must-revalidate: Caddy laedt auch bei unveraenderter Config neu. Sonst
+    # ueberspringt Caddy das Laden und behaelt ein ausgetauschtes Zertifikat
+    # (gleicher Dateiname custom.crt) weiter im Speicher.
+    headers = {"Content-Type": "text/caddyfile", "Cache-Control": "must-revalidate"}
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(url, content=caddyfile.encode("utf-8"), headers=headers)
@@ -380,13 +383,59 @@ async def upload_certificates(
     if b"-----BEGIN" not in cert_bytes or b"-----BEGIN" not in key_bytes:
         raise HTTPException(status_code=400, detail="Zertifikat und Key müssen im PEM-Format vorliegen")
 
+    not_after = _check_cert_and_key(cert_bytes, key_bytes)
+
     cert_path.write_bytes(cert_bytes)
     key_path.write_bytes(key_bytes)
     key_path.chmod(0o600)
 
     await _save_setting(db, "caddy_cert_uploaded", True)
 
-    return {"message": "Zertifikat gespeichert", "cert_path": str(cert_path), "key_path": str(key_path)}
+    # Nutzt die gespeicherte Config das eigene Zertifikat, sofort neu laden -
+    # sonst liefert Caddy bis zum naechsten Neustart das alte aus.
+    reloaded = False
+    saved = await _get_saved_caddyfile(db)
+    if saved and "custom.crt" in saved:
+        await _apply_caddyfile(saved)
+        reloaded = True
+
+    message = "Zertifikat gespeichert"
+    message += " und Caddy neu geladen." if reloaded else " - wird nach „Apply“ im Modus „Eigenes Zertifikat“ genutzt."
+    return {
+        "message": message,
+        "reloaded": reloaded,
+        "not_after": not_after,
+        "cert_path": str(cert_path),
+        "key_path": str(key_path),
+    }
+
+
+def _check_cert_and_key(cert_bytes: bytes, key_bytes: bytes) -> Optional[str]:
+    """Prueft, ob Zertifikat und Key lesbar sind und zusammenpassen."""
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+    except ImportError:  # ohne cryptography nur die Grundpruefung
+        return None
+
+    try:
+        cert = x509.load_pem_x509_certificate(cert_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Zertifikat ist kein gültiges PEM-Zertifikat") from exc
+    try:
+        key = serialization.load_pem_private_key(key_bytes, password=None)
+    except TypeError as exc:
+        raise HTTPException(status_code=400, detail="Der Key ist passwortgeschützt - bitte ohne Passwort exportieren") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Key ist kein gültiger privater PEM-Schlüssel") from exc
+
+    pub_format = serialization.PublicFormat.SubjectPublicKeyInfo
+    der = serialization.Encoding.DER
+    if cert.public_key().public_bytes(der, pub_format) != key.public_key().public_bytes(der, pub_format):
+        raise HTTPException(status_code=400, detail="Key passt nicht zum Zertifikat (vertauscht oder falsches Paar?)")
+
+    not_after = getattr(cert, "not_valid_after_utc", None) or cert.not_valid_after
+    return not_after.strftime("%d.%m.%Y")
 
 
 @router.post("/reset")
