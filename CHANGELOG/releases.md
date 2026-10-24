@@ -11,6 +11,18 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.25.12.00.00 (2026-10-25)
+
+- **Microsoft-365-Anmeldung im Browser verständlicher.** Nach der Zustimmung
+  landet der Browser auf `http://localhost/?code=…` und zeigt eine Fehlerseite –
+  das ist so gewollt, die Adresse muss in den Assistenten zurückkopiert werden.
+  Das stand bisher nur im ursprünglichen Tab, während der neue Tab sich schon
+  geöffnet hatte, und sah deshalb wie ein Abbruch aus. Jetzt zeigt der Assistent
+  zuerst die drei Schritte und öffnet die Anmeldeseite erst per Knopf; eine
+  eingefügte Adresse wird sofort abgeschlossen. Gilt genauso für Google und die
+  Postfach-Anmeldung. Hinweis: Der Gerätecode-Weg kommt ganz ohne
+  Zurückkopieren aus.
+
 ## v2026.10.23.12.00.00 (2026-10-23)
 
 **Melden, was wichtig ist. Container sehen. Agents von selbst aktuell. Und dichter.**

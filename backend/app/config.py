@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
-    app_version: str = "2026.10.23.12.00.00"
+    app_version: str = "2026.10.25.12.00.00"
     # Caddys Admin-Schnittstelle: Unix-Socket in einem Volume, das nur Caddy
     # und das Backend sehen (siehe app/caddyadmin.py).
     caddy_admin_url: str = "unix:///run/caddy-admin/admin.sock"

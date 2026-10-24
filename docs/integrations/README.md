@@ -113,10 +113,17 @@ Werkzeug *Microsoft Graph Command Line Tools* an – dieselbe Anwendung, die
 `Connect-MgGraph` in PowerShell benutzt. Der Admin-Zugang wird nur für diesen
 einen Schritt gebraucht und nirgends gespeichert.
 
-Kommt der Browser nach der Anmeldung nicht von selbst zurück (LogBot ohne
-öffentliche HTTPS-Adresse), landet er auf `http://localhost/…` bzw.
-`http://127.0.0.1:53682/…` – die Seite lädt nicht, das ist richtig: die Adresse
-aus der Adresszeile kopieren und im Assistenten einfügen.
+Der einfachste Weg ist der **Gerätecode**: Code eingeben, der Assistent macht
+von selbst weiter. Beim **Browser-Weg** kommt der Browser nicht immer von selbst
+zurück – bei der App-Registrierung nie (Microsofts Werkzeug kennt nur
+`http://localhost` als Rücksprung), sonst wenn LogBot keine öffentliche
+HTTPS-Adresse hat. Der Assistent zeigt dann drei Schritte: Anmeldeseite per Knopf
+öffnen, anmelden und zustimmen; der Tab landet auf `http://localhost/?code=…` bzw.
+`http://127.0.0.1:53682/?code=…` und zeigt eine Fehlerseite – **das ist
+richtig**; die komplette Adresse aus der Adresszeile kopieren und im Assistenten
+einfügen (er schließt sofort ab). Der Code gilt nur wenige Minuten; ist er
+abgelaufen, den Schritt einfach neu starten. Ohne den Assistenten, der die
+Anmeldung begonnen hat, ist der Code wertlos (PKCE).
 
 Alle Zugangsdaten (SMTP-Passwörter, Refresh-Token, Client-Geheimnisse) liegen
 **verschlüsselt** in der Datenbank (Schlüssel aus `JWT_SECRET`) und kommen nie

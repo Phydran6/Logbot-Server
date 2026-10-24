@@ -2,6 +2,11 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.25.12.00.00
+
+### Fixed
+- E-Mail-Assistent (Microsoft 365, Outlook.com, Google): Beim Browser-Weg mit Zurückkopieren öffnet sich die Anmeldeseite nicht mehr ungefragt, sondern per Knopf in einer Schritt-für-Schritt-Anleitung. Die Fehlerseite auf `http://localhost/?code=…` ist dort als „richtig“ erklärt; eine eingefügte Adresse mit Code wird sofort abgeschlossen. Hinweis, dass der Gerätecode-Weg ohne Zurückkopieren auskommt.
+
 ## 2026.10.23.12.00.00
 
 ### Changed

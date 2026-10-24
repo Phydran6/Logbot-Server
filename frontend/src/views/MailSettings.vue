@@ -132,6 +132,8 @@
               <button class="btn btn-primary btn-sm" :disabled="busy" @click="startRegister('device')">Automatisch anlegen (Gerätecode)</button>
               <button class="btn btn-secondary btn-sm" :disabled="busy" @click="startRegister('browser')">Automatisch anlegen (Browser)</button>
             </div>
+            <p class="hint">Gerätecode ist der einfachste Weg: Code eingeben, fertig – die Seite macht von selbst weiter.
+              Beim Browser-Weg muss die Adresse am Ende einmal hierher zurückkopiert werden.</p>
             <DeviceStep v-if="flow && flow.kind === 'device' && flow.purpose === 'register'" :flow="flow" />
             <PasteStep v-if="flow && flow.kind === 'register_authorize'" :flow="flow" :busy="busy" @submit="completePaste" />
             <ul v-if="registerReport" class="steps-report">
@@ -294,15 +296,28 @@ const PasteStep = defineComponent({
   emits: ['submit'],
   setup(props, { emit }) {
     const value = ref('')
-    return () => h('div', { class: 'device-box space-y-2' }, props.flow.returns_by_itself
+    // Eingefuegte Adresse mit Code: sofort abschliessen - der Code gilt nur wenige Minuten.
+    const onPaste = (e) => {
+      const text = (e.clipboardData?.getData('text') || '').trim()
+      if (text.includes('code=') && !props.busy) {
+        value.value = text
+        setTimeout(() => emit('submit', text))
+      }
+    }
+    return () => h('div', { class: 'device-box space-y-3' }, props.flow.returns_by_itself
       ? [h('p', { class: 'text-sm' }, 'Die Anmeldung läuft im neuen Fenster. Danach kommt der Browser von selbst hierher zurück.')]
       : [
-          h('p', { class: 'text-sm' }, ['Nach der Anmeldung landet der Browser auf ', h('code', props.flow.redirect_uri),
-            ' – die Seite lädt nicht, das ist richtig. Die komplette Adresse aus der Adresszeile kopieren und hier einfügen:']),
-          h('input', { class: 'input w-full', value: value.value, placeholder: `${props.flow.redirect_uri}?code=…`,
-            onInput: (e) => { value.value = e.target.value } }),
-          h('button', { class: 'btn btn-primary btn-sm', disabled: props.busy || !value.value,
-            onClick: () => emit('submit', value.value) }, 'Anmeldung abschließen'),
+          h('ol', { class: 'paste-steps' }, [
+            h('li', [h('a', { href: props.flow.auth_url, target: '_blank', rel: 'noopener', class: 'btn btn-primary btn-sm' },
+              'Anmeldeseite öffnen'), ' – anmelden und den Berechtigungen zustimmen.']),
+            h('li', ['Danach zeigt der neue Tab eine Fehlerseite wie „Diese Seite ist nicht erreichbar“, die Adresse beginnt mit ',
+              h('code', `${props.flow.redirect_uri.replace(/\/$/, '')}/?code=`), '. ', h('b', 'Das ist richtig – nichts ist kaputt.')]),
+            h('li', 'Die komplette Adresse aus der Adresszeile dieses Tabs kopieren und hier einfügen. Der Code gilt nur wenige Minuten.'),
+          ]),
+          h('input', { class: 'input w-full', value: value.value, placeholder: `${props.flow.redirect_uri.replace(/\/$/, '')}/?code=…`,
+            onInput: (e) => { value.value = e.target.value }, onPaste }),
+          h('button', { class: 'btn btn-secondary btn-sm', disabled: props.busy || !value.value,
+            onClick: () => emit('submit', value.value) }, props.busy ? 'Wird abgeschlossen …' : 'Anmeldung abschließen'),
         ])
   },
 })
@@ -417,7 +432,7 @@ async function startGoogle() {
     const data = await auth.api('/api/mail/oauth/google/start', { method: 'POST', body: {
       client_id: form.value.clientId, client_secret: form.value.clientSecret, return_mode: 'auto' } })
     flow.value = { ...data, kind: 'authorize' }
-    window.open(data.auth_url, '_blank', 'noopener')
+    if (data.returns_by_itself) window.open(data.auth_url, '_blank', 'noopener')
   } catch (e) { say(e.message, true) } finally { busy.value = false }
 }
 
@@ -431,8 +446,8 @@ async function startRegister(method) {
       flow.value = { ...data, kind: 'device', purpose: 'register' }
       poll()
     } else {
+      // Zurueckkopieren noetig: erst die Anleitung zeigen, die Seite oeffnet der Knopf darin.
       flow.value = { ...data, kind: 'register_authorize', returns_by_itself: false }
-      window.open(data.auth_url, '_blank', 'noopener')
     }
   } catch (e) { say(e.message, true) } finally { busy.value = false }
 }
@@ -450,7 +465,7 @@ async function startMailbox(method) {
       poll()
     } else {
       flow.value = { ...data, kind: 'authorize' }
-      window.open(data.auth_url, '_blank', 'noopener')
+      if (data.returns_by_itself) window.open(data.auth_url, '_blank', 'noopener')
     }
   } catch (e) { say(e.message, true) } finally { busy.value = false }
 }
@@ -548,6 +563,13 @@ onBeforeUnmount(stopPolling)
   gap: 0.375rem;
 }
 
+.paste-steps {
+  list-style: decimal;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  display: grid;
+  gap: 0.5rem;
+}
 .steps-report {
   font-size: 0.8125rem;
   color: var(--color-success);
