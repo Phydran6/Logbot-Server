@@ -64,10 +64,49 @@ def _try_sysrq_reboot() -> bool:
     except Exception:
         return False
 
+# Einstellungen, die ein eigenes Modul mit eigener Pruefung pflegt (KI, Mail,
+# LDAP, SSO, Archiv, Netzwerksuche, DNS, Caddy, Updates, Meldungen). Ueber den
+# allgemeinen Weg duerfen sie nicht geschrieben werden: wer hier z.B. die
+# geschwaerzte Fassung von `ai_config` zuruecksendet, haette den API-Schluessel
+# geloescht - und an der Pruefung des Moduls vorbei liesse sich Unsinn ablegen.
+MANAGED_KEYS = {
+    "ai_config", "mail_config", "ldap", "sso_config", "archiving", "archiving_history",
+    "discovery_config", "discovery_state", "dns_config", "update_channel",
+    "caddy_caddyfile", "caddy_cert_uploaded", "alerts_config", "alerts_state",
+}
+
+# Teile eines Schluesselnamens, an denen ein Geheimnis zu erkennen ist.
+_SECRET_MARKERS = ("password", "passwd", "secret", "api_key", "apikey", "token",
+                   "private_key", "passphrase", "credential", "bind_pw", "webhook_header")
+
+
+def _is_secret(name: str) -> bool:
+    lowered = str(name).lower()
+    return any(marker in lowered for marker in _SECRET_MARKERS)
+
+
+def redact(value):
+    """Schwaerzt Geheimnisse in verschachtelten Einstellungen.
+
+    `GET /api/settings` darf jeder Angemeldete lesen. Bis hierher kamen damit
+    auch der KI-API-Schluessel, das SMTP-Passwort, das LDAP-Bind-Passwort und
+    die Zugangsdaten des Archivziels mit - an Konten mit reinen Leserechten.
+    Herausgegeben wird jetzt nur noch, *ob* ein Wert gesetzt ist.
+    """
+    if isinstance(value, dict):
+        return {key: (bool(item) if _is_secret(key) and isinstance(item, str)
+                      else redact(item))
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
+
+
 @router.get("", response_model=SettingsResponse)
 async def get_settings(db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
     result = await db.execute(select(Setting))
-    return SettingsResponse(settings={s.key: s.value for s in result.scalars().all()})
+    return SettingsResponse(settings={s.key: redact(s.value) for s in result.scalars().all()
+                                      if not _is_secret(s.key)})
 
 @router.get("/database", response_model=DatabaseSettingsResponse)
 async def get_database_settings(_=Depends(get_current_admin)):
@@ -83,14 +122,19 @@ async def get_database_settings(_=Depends(get_current_admin)):
 async def get_setting(key: str, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
     result = await db.execute(select(Setting).where(Setting.key == key))
     setting = result.scalar_one_or_none()
-    if not setting:
+    if not setting or _is_secret(key):
         raise HTTPException(status_code=404, detail=f"Setting '{key}' nicht gefunden")
-    return {"key": setting.key, "value": setting.value}
+    return {"key": setting.key, "value": redact(setting.value)}
 
 @router.put("/{key}")
 async def update_setting(key: str, data: SettingUpdate, request: Request,
                          db: AsyncSession = Depends(get_db),
                          admin=Depends(get_current_admin)):
+    if key in MANAGED_KEYS:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"'{key}' wird in einem eigenen Bereich mit eigener Prüfung "
+                    f"verwaltet und lässt sich hier nicht überschreiben."))
     result = await db.execute(select(Setting).where(Setting.key == key))
     setting = result.scalar_one_or_none()
     previous = setting.value if setting else None
@@ -109,8 +153,8 @@ async def update_setting(key: str, data: SettingUpdate, request: Request,
         db, category="settings", event="setting.changed",
         message=f"Einstellung '{key}' geändert.",
         actor=admin.username, source_ip=real_client_ip(request), target=key,
-        detail={"before": previous, "after": data.value})
-    return {"key": setting.key, "value": setting.value}
+        detail={"before": redact(previous), "after": redact(data.value)})
+    return {"key": setting.key, "value": redact(setting.value)}
 
 @router.post("/retention/preview", response_model=RetentionResponse)
 async def preview_retention(days: int = Query(..., ge=1), db: AsyncSession = Depends(get_db), _=Depends(get_current_admin)):

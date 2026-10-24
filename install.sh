@@ -48,7 +48,7 @@ NC='\033[0m'
 # Konfiguration (Vorrang: Parameter > Umgebungsvariable > Default)
 # ==============================================================================
 
-LOGBOT_VERSION="2026.10.18.22.00.00"
+LOGBOT_VERSION="2026.10.23.12.00.00"
 
 INSTALL_DIR="${LOGBOT_DIR:-/opt/logbot}"
 REPO_URL="${LOGBOT_REPO:-https://github.com/Phydran6/Logbot-Server.git}"
@@ -507,7 +507,7 @@ apply_addon_config() {
                 # Eine leere Datei genuegt: env_file in der Compose-Datei
                 # verlangt sie, gefuellt wird sie spaeter aus dem Web-UI.
                 [[ -f "$INSTALL_DIR/data/postfix/settings.env" ]] || {
-                    printf '# Wird von LogBot geschrieben (System -> Mail).\n' \
+                    printf '# Wird von LogBot geschrieben (Meldungen -> Kanaele -> E-Mail).\n' \
                         > "$INSTALL_DIR/data/postfix/settings.env"
                     chmod 600 "$INSTALL_DIR/data/postfix/settings.env"
                 }
@@ -781,7 +781,7 @@ print_summary() {
                 openwebui)  echo "  Open WebUI   http://${local_ip}:3000  (erster Aufruf legt das Konto an)" ;;
                 n8n)        echo "  n8n          http://${local_ip}:5678  (Benutzer: admin)" ;;
                 watchtower) echo "  Watchtower   abgelöst durch Tugtainer - bitte entfernen" ;;
-                postfix)    echo "  Postfix      einzustellen im Web-UI unter System -> Mail" ;;
+                postfix)    echo "  Postfix      einzustellen im Web-UI unter Meldungen -> Kanaele -> E-Mail" ;;
             esac
         done
         echo ""

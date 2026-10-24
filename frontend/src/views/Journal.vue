@@ -202,6 +202,7 @@
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { openTicketStream } from '../utils/stream'
 import AppIcon from '../components/AppIcon.vue'
 
 const auth = useAuthStore()
@@ -316,23 +317,16 @@ async function prune() {
  */
 function listen() {
   if (typeof EventSource === 'undefined') return
-  stream = new EventSource(`/api/journal/stream?token=${encodeURIComponent(auth.token)}`)
-
-  stream.addEventListener('system.event', (event) => {
-    live.value = true
-    if (page.value !== 1) return
-    try {
-      const entry = JSON.parse(event.data)
+  // Ticket statt Zugangstoken in der Adresse (utils/stream.js).
+  stream = openTicketStream('/api/journal/stream', {
+    'system.event': (entry) => {
+      live.value = true
+      if (page.value !== 1 || typeof entry !== 'object') return
       items.value = [{ id: `live-${Date.now()}-${Math.random()}`, category_label: entry.category,
                        ...entry, detail: {} }, ...items.value].slice(0, pageSize.value)
       total.value += 1
-    } catch {
-      // Eine unlesbare Zeile ist kein Grund, den Strom aufzugeben.
-    }
-  })
-
-  stream.onopen = () => { live.value = true }
-  stream.onerror = () => { live.value = false }
+    },
+  }, { onOpen: () => { live.value = true }, onError: () => { live.value = false } })
 }
 
 onMounted(() => {
@@ -342,7 +336,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  stream?.close()
+  stream?.()
 })
 </script>
 

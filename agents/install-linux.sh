@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.10.10.22.00.00
+# Version:     2026.10.23.12.00.00
 # Changelog:   ../CHANGELOG/agents.md
 # Beschreibung: LogBot Linux Agent - Installer (teilautomatisch)
 #
@@ -48,7 +48,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-AGENT_VERSION="2026.10.10.22.00.00"
+AGENT_VERSION="2026.10.23.12.00.00"
 
 # --- Pfade: Syslog-Modus (rsyslog) ---
 CONFIG_FILE="/etc/rsyslog.d/99-logbot.conf"
@@ -78,6 +78,8 @@ TOKEN="${LOGBOT_TOKEN:-${PLACEHOLDER_TOKEN:-}}"
 MINLEVEL="${LOGBOT_MINLEVEL:-${PLACEHOLDER_MINLEVEL:-info}}"
 INSECURE="${LOGBOT_INSECURE:-false}"
 PROTO="${LOGBOT_PROTO:-udp}"            # nur Syslog-Modus: udp | tcp
+DOCKER_MODE="${LOGBOT_DOCKER:-auto}"    # auto = Container erfassen, wenn Docker da ist | off
+REMOTE_UPDATE="${LOGBOT_REMOTE_UPDATE:-true}"   # false = Server darf diesen Agent nicht aktualisieren
 
 # ==============================================================================
 # Hilfsfunktionen
@@ -157,7 +159,7 @@ show_help() {
 LogBot Linux Agent Installer v${AGENT_VERSION}
 
 Aufruf:   sudo bash install-linux.sh [aktion] [optionen]
-Aktionen: install (Standard) | uninstall | uninstall-purge | test
+Aktionen: install (Standard) | uninstall | uninstall-purge | test | upgrade
 
 Optionen (auch als Umgebungsvariable LOGBOT_*):
   --fqdn <name>       Server-FQDN            (LOGBOT_FQDN)   [Pflicht bei https]
@@ -168,6 +170,10 @@ Optionen (auch als Umgebungsvariable LOGBOT_*):
   --ip <ip>           Optionale IP als Fallback     (LOGBOT_IP)
   --min-level <info|warning|error>            (LOGBOT_MINLEVEL)
   --insecure          Selbstsignierte TLS-Zerts akzeptieren  (LOGBOT_INSECURE=true)
+                      Updates bleiben trotzdem geschuetzt: sie sind vom Server
+                      unterschrieben und werden vor dem Einspielen geprueft.
+  --no-docker         Docker-Container NICHT erfassen        (LOGBOT_DOCKER=off)
+  --no-remote-update  Server darf diesen Agent nicht aktualisieren (LOGBOT_REMOTE_UPDATE=false)
   --yes, --unattended Keine Rueckfragen, alles Default        (ASSUME_YES)
   --timeout <sek>     Countdown bis Auto-Start (Standard 5)  (LOGBOT_TIMEOUT)
                       Taste druecken => manueller Modus (alle Werte, kein Timeout)
@@ -184,6 +190,9 @@ parse_args() {
             uninstall|remove) ACTION="uninstall" ;;
             uninstall-purge|purge) ACTION="uninstall-purge" ;;
             test)            ACTION="test" ;;
+            upgrade)         ACTION="upgrade" ;;
+            --no-docker)     DOCKER_MODE="off" ;;
+            --no-remote-update) REMOTE_UPDATE="false" ;;
             --fqdn)          FQDN="${2:-}"; shift ;;
             --fqdn=*)        FQDN="${1#*=}" ;;
             --token)         TOKEN="${2:-}"; shift ;;
@@ -402,28 +411,43 @@ write_agent_script() {
 #!/usr/bin/env python3
 # ==============================================================================
 # LogBot Linux Agent - HTTPS Log Forwarder
-# Liest ALLE Logs aus journald und sendet sie verschlüsselt + Token-authentifiziert
-# an  https://<FQDN>/api/agents/ingest  (Pakete von max. 500 Events, Cursor
+# Liest ALLE Logs aus journald und - falls vorhanden - aus Docker-Containern und
+# sendet sie verschlüsselt + Token-authentifiziert an
+#   https://<FQDN>/api/agents/ingest  (Pakete von max. 500 Events, Cursor
 # rueckt nach jedem angekommenen Paket vor, Rueckstand wird gedrosselt geholt).
+# Meldet sich jede Minute beim Server (Heartbeat: Fassung, Container-Inventar)
+# und aktualisiert sich auf Anweisung selbst - nur mit gültiger Unterschrift.
 # Nur Python-Standardbibliothek - keine externen Abhängigkeiten.
 # ==============================================================================
+import base64
+import hashlib
+import http.client
 import json
 import os
+import platform
+import re
+import shutil
 import socket
 import ssl
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+
+AGENT_VERSION = "__AGENT_VERSION__"
 
 CONFIG_FILE = os.environ.get("LOGBOT_CONFIG", "/opt/logbot-agent/config.json")
 CURSOR_FILE = os.environ.get("LOGBOT_CURSOR", "/opt/logbot-agent/cursor")
 # Hier merkt sich der Agent, welcher Geraeteeintrag auf dem Server ihm gehoert.
-# Beim Deinstallieren wird genau dieser abgeraeumt - und nicht der eines
-# Rechners, der zufaellig genauso heisst.
 AGENT_ID_FILE = os.environ.get("LOGBOT_AGENT_ID", "/opt/logbot-agent/agent_id")
+DOCKER_STATE_FILE = "/opt/logbot-agent/docker_state.json"
+PUBKEY_FILE = "/opt/logbot-agent/update_pubkey.pem"
+UPDATE_DIR = "/opt/logbot-agent/update"
 # Pro Anfrage bis zu 500 Eintraege (der Server nimmt bis 5000). Weniger
 # Anfragen = weit weg vom Limit des Servers (600 Anfragen/Minute).
 BATCH_SIZE = 500
@@ -432,12 +456,17 @@ SOURCE_MAX = 100          # Feldgrenze des Servers
 MAX_LINES = 5000          # Journal-Zeilen pro Durchlauf (begrenzt Speicher + Paketzahl)
 CATCHUP_PAUSE = 2         # Sekunden zwischen Durchlaeufen, solange Rueckstand anliegt
 MAX_BACKOFF = 300         # laengste Pause nach Sendefehlern (Sekunden)
+HEARTBEAT_SECONDS = 60
+DOCKER_POLL = 5
+MAX_LINES_PER_CONTAINER = 2000
+MAX_LOG_BYTES = 4 * 1024 * 1024
 
 # journald PRIORITY (syslog severity 0-7) -> Level-String
 PRIO_TO_LEVEL = {0: "critical", 1: "critical", 2: "critical", 3: "error",
                  4: "warning", 5: "notice", 6: "info", 7: "debug"}
 # Numerische Schwelle je min_level (kleiner = schwerwiegender)
 MIN_PRIO = {"debug": 7, "info": 6, "notice": 5, "warning": 4, "error": 3, "critical": 2}
+LEVEL_PRIO = {"critical": 2, "error": 3, "warning": 4, "notice": 5, "info": 6, "debug": 7}
 
 
 def log(msg):
@@ -459,6 +488,16 @@ MIN_LEVEL = (CFG.get("min_level") or "info").lower()
 HOSTNAME = (CFG.get("hostname") or "").strip() or socket.gethostname()
 POLL = int(CFG.get("poll_interval") or 5)
 MIN_PRIO_NUM = MIN_PRIO.get(MIN_LEVEL, 6)
+# "auto" = Docker erfassen, wenn vorhanden; "off" = nie.
+DOCKER_MODE = (CFG.get("docker") or "auto").lower()
+# Darf der Server diesen Agent aktualisieren? Auf dem Geraet abschaltbar.
+REMOTE_UPDATE = CFG.get("remote_update", True) is not False
+# LogBots eigene Container (Label de.logbot.stack) werden nicht erfasst: ihre
+# Zugriffsprotokolle wuerden jede Lieferung erneut erzeugen - eine Schleife.
+INCLUDE_LOGBOT = bool(CFG.get("docker_include_logbot"))
+
+STARTED_AT = time.time()
+SEND_LOCK = threading.Lock()
 
 
 def build_ctx():
@@ -486,19 +525,18 @@ def target_host():
     return SERVER_FQDN
 
 
-def ingest_url():
+def base_url():
     host = target_host()
     if not host:
         return None
     if SERVER_PORT == 443:
-        return "https://%s/api/agents/ingest" % host
-    return "https://%s:%d/api/agents/ingest" % (host, SERVER_PORT)
+        return "https://%s" % host
+    return "https://%s:%d" % (host, SERVER_PORT)
 
 
 def local_ip():
     # Eigene IP Richtung Server melden: steht ein Reverse Proxy (NPM, Caddy)
-    # dazwischen, sieht der Server sonst nur dessen IP. UDP-connect verschickt
-    # nichts, es waehlt nur die ausgehende Schnittstelle.
+    # dazwischen, sieht der Server sonst nur dessen IP.
     if (CFG.get("ip_address") or "").strip():
         return CFG["ip_address"].strip()
     host = target_host()
@@ -516,19 +554,38 @@ def local_ip():
         return ""
 
 
-def payload(events):
-    body = {"hostname": HOSTNAME, "device_type": "linux_agent", "events": events}
-    ip = local_ip()
-    if ip:
-        body["ip_address"] = ip
-    return json.dumps(body).encode("utf-8")
+def api(method, path, body=None, timeout=20, raw=False):
+    """Ein Aufruf an den Server. Gibt (status, daten) zurueck; status 0 = nicht erreichbar."""
+    base = base_url()
+    if not base:
+        return 0, None
+    data = None
+    headers = {"Authorization": "Bearer " + TOKEN, "User-Agent": "LogBot-Agent/" + AGENT_VERSION}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=build_ctx()) as r:
+            content = r.read()
+            if raw:
+                return r.status, (content, dict(r.headers))
+            try:
+                return r.status, json.loads(content.decode("utf-8", "replace") or "null")
+            except ValueError:
+                return r.status, None
+    except urllib.error.HTTPError as e:
+        return e.code, None
+    except Exception as e:
+        log("Server nicht erreichbar (%s): %s" % (path, e))
+        return 0, None
+
+
 def remember_agent_id(payload):
     """Merkt sich die Geraetenummer, die der Server zurueckmeldet."""
     try:
         agent_id = (payload or {}).get("agent_id")
-        if not agent_id:
-            return
-        if read_agent_id() == str(agent_id):
+        if not agent_id or read_agent_id() == str(agent_id):
             return
         os.makedirs(os.path.dirname(AGENT_ID_FILE), exist_ok=True)
         tmp = AGENT_ID_FILE + ".tmp"
@@ -537,8 +594,6 @@ def remember_agent_id(payload):
         os.replace(tmp, AGENT_ID_FILE)
         log("Geraetenummer auf dem Server: %s" % agent_id)
     except Exception as e:
-        # Kein Grund abzubrechen - ohne die Nummer greift beim Abmelden nur der
-        # ungenauere Weg ueber den Hostnamen.
         log("Geraetenummer nicht gespeichert: %s" % e)
 
 
@@ -569,25 +624,31 @@ def send(events):
     """
     if not events:
         return "ok", 0
-    url = ingest_url()
-    if not url:
+    base = base_url()
+    if not base:
         log("Kein Ziel (FQDN/IP) konfiguriert")
         return "retry", 0
-    body = payload(events)
-    req = urllib.request.Request(url, data=body, method="POST", headers={
-        "Authorization": "Bearer " + TOKEN,
-        "Content-Type": "application/json",
-    })
+    body = {"hostname": HOSTNAME, "device_type": "linux_agent", "agent_version": AGENT_VERSION,
+            "events": events}
+    ip = local_ip()
+    if ip:
+        body["ip_address"] = ip
+    req = urllib.request.Request(base + "/api/agents/ingest", data=json.dumps(body).encode("utf-8"),
+                                 method="POST", headers={
+                                     "Authorization": "Bearer " + TOKEN,
+                                     "Content-Type": "application/json",
+                                     "User-Agent": "LogBot-Agent/" + AGENT_VERSION})
     try:
-        with urllib.request.urlopen(req, timeout=30, context=build_ctx()) as r:
-            if not 200 <= r.status < 300:
-                log("HTTP %s von %s" % (r.status, url))
-                return "retry", 0
-            try:
-                remember_agent_id(json.loads(r.read().decode("utf-8", "replace")))
-            except Exception:
-                pass
-            return "ok", 0
+        with SEND_LOCK:
+            with urllib.request.urlopen(req, timeout=30, context=build_ctx()) as r:
+                if not 200 <= r.status < 300:
+                    log("HTTP %s beim Senden" % r.status)
+                    return "retry", 0
+                try:
+                    remember_agent_id(json.loads(r.read().decode("utf-8", "replace")))
+                except Exception:
+                    pass
+                return "ok", 0
     except urllib.error.HTTPError as e:
         if e.code in (400, 413, 422):
             detail = ""
@@ -597,19 +658,71 @@ def send(events):
                 pass
             log("HTTP %s - Paket mit %d Eintraegen verworfen: %s" % (e.code, len(events), detail))
             return "drop", 0
-        log("HTTP %s von %s" % (e.code, url))
+        log("HTTP %s beim Senden" % e.code)
         return "retry", _retry_after(e)
     except Exception as e:
-        log("Sendefehler (%s): %s" % (url, e))
+        log("Sendefehler: %s" % e)
         return "retry", 0
 
 
+def send_chunks(events):
+    """Mehrere Pakete; True, wenn alle angekommen (oder dauerhaft verworfen) sind."""
+    for i in range(0, len(events), BATCH_SIZE):
+        result, _ = send(events[i:i + BATCH_SIZE])
+        if result == "retry":
+            return False
+    return True
+
+
+# ==============================================================================
+# Schweregrad aus dem Text erkennen (Container-Logs haben keinen)
+# ==============================================================================
+_LEVEL_PATTERNS = [
+    ("critical", re.compile(r"\b(panic|fatal|emerg(ency)?|crit(ical)?|out of memory|oom-?kill)", re.I)),
+    ("error", re.compile(r"(\b(error|err|exception|traceback|failed|failure)\b|\[E\]|\bE\d{4} )", re.I)),
+    ("warning", re.compile(r"\b(warn(ing)?|deprecated)\b|\[W\]", re.I)),
+    ("debug", re.compile(r"\b(debug|trace)\b", re.I)),
+]
+_JSON_LEVEL = re.compile(r'"(?:level|severity|lvl|log\.level)"\s*:\s*"([A-Za-z]+)"')
+_KV_LEVEL = re.compile(r"\blevel=\"?([A-Za-z]+)")
+_NORMALIZE = {"fatal": "critical", "panic": "critical", "crit": "critical", "critical": "critical",
+              "emerg": "critical", "alert": "critical", "err": "error", "error": "error",
+              "warn": "warning", "warning": "warning", "notice": "notice", "info": "info",
+              "information": "info", "debug": "debug", "trace": "debug"}
+
+
+def detect_level(message, stream="stdout"):
+    m = _JSON_LEVEL.search(message) or _KV_LEVEL.search(message)
+    if m and m.group(1).lower() in _NORMALIZE:
+        return _NORMALIZE[m.group(1).lower()]
+    head = message[:160]
+    for level, pattern in _LEVEL_PATTERNS:
+        if pattern.search(head):
+            return level
+    return "info"
+
+
+def decode_message(m):
+    if isinstance(m, list):
+        try:
+            m = bytes(m).decode("utf-8", "replace")
+        except Exception:
+            m = str(m)
+    if m is None:
+        return ""
+    m = " ".join(str(m).split())
+    if len(m) > MSG_MAX:
+        m = m[:MSG_MAX]
+    return m
+
+
+# ==============================================================================
+# journald
+# ==============================================================================
 def read_cursor():
     try:
         with open(CURSOR_FILE, "r", encoding="utf-8") as f:
             return f.read().strip() or None
-    except FileNotFoundError:
-        return None
     except Exception:
         return None
 
@@ -644,20 +757,6 @@ def latest_cursor():
     return None
 
 
-def decode_message(m):
-    if isinstance(m, list):
-        try:
-            m = bytes(m).decode("utf-8", "replace")
-        except Exception:
-            m = str(m)
-    if m is None:
-        return ""
-    m = " ".join(str(m).split())
-    if len(m) > MSG_MAX:
-        m = m[:MSG_MAX]
-    return m
-
-
 def event_time(j):
     # Zeitpunkt des Ereignisses (nicht der Zustellung). Damit erkennt der
     # Server doppelt gelieferte Eintraege und verwirft sie, und nachgeholte
@@ -674,27 +773,38 @@ def to_event(j):
         prio = int(j.get("PRIORITY", 6))
     except Exception:
         prio = 6
-    if prio > MIN_PRIO_NUM:
-        return None
-    level = PRIO_TO_LEVEL.get(prio, "info")
-    ident = j.get("SYSLOG_IDENTIFIER") or j.get("_COMM") or "journal"
-    unit = j.get("_SYSTEMD_UNIT")
-    source = ("%s/%s" % (unit, ident)) if unit else ident
     message = decode_message(j.get("MESSAGE"))
     if not message:
         return None
-    # Der Server nimmt hoechstens 100 Zeichen - ein laengerer Unit-Name liess
-    # frueher das ganze Paket abweisen.
-    ev = {"level": level, "source": str(source)[:SOURCE_MAX], "message": message}
+    container = j.get("CONTAINER_NAME")
+    if container and DOCKER_MODE != "off":
+        # Docker mit journald-Treiber: die Zeile gehoert zum Container.
+        level = detect_level(message)
+        if prio <= 3 and LEVEL_PRIO.get(level, 6) > 3:
+            level = "error"
+        if LEVEL_PRIO.get(level, 6) > MIN_PRIO_NUM:
+            return None
+        ev = {"level": level, "message": message, "container": container[:200],
+              "stream": "stderr" if prio <= 3 else "stdout"}
+    else:
+        if prio > MIN_PRIO_NUM:
+            return None
+        level = PRIO_TO_LEVEL.get(prio, "info")
+        ident = j.get("SYSLOG_IDENTIFIER") or j.get("_COMM") or "journal"
+        unit = j.get("_SYSTEMD_UNIT")
+        source = ("%s/%s" % (unit, ident)) if unit else ident
+        # Der Server nimmt hoechstens 100 Zeichen - ein laengerer Unit-Name liess
+        # frueher das ganze Paket abweisen.
+        ev = {"level": level, "source": str(source)[:SOURCE_MAX], "message": message}
+        try:
+            facility = int(j.get("SYSLOG_FACILITY"))
+            if 0 <= facility <= 23:
+                ev["facility"] = facility
+        except Exception:
+            pass
     ts = event_time(j)
     if ts:
         ev["timestamp"] = ts
-    try:
-        facility = int(j.get("SYSLOG_FACILITY"))
-        if 0 <= facility <= 23:
-            ev["facility"] = facility
-    except Exception:
-        pass
     return ev
 
 
@@ -708,10 +818,6 @@ def collect_since(cursor):
                 dieses eine Paket, nie alles davor.
       ok      - False: journalctl hat den Cursor abgelehnt -> neu aufsetzen
       more    - True: es liegt noch Rueckstand an (MAX_LINES erreicht)
-
-    Frueher las der Agent den GESAMTEN Rueckstand in einem Rutsch und schickte
-    bei einem einzigen Fehler alles noch einmal. Nach einer laengeren Pause
-    wurde daraus eine Endlosschleife, die den Server geflutet hat.
     """
     args = ["journalctl", "-o", "json", "--no-pager", "--after-cursor", cursor]
     try:
@@ -763,13 +869,7 @@ def collect_since(cursor):
     return batches, True, more
 
 
-def main():
-    if not TOKEN:
-        log("FEHLER: agent_token fehlt in config.json")
-        sys.exit(1)
-    log("gestartet - Ziel: %s Port %s Hostname %s MinLevel %s"
-        % (SERVER_FQDN or SERVER_IP, SERVER_PORT, HOSTNAME, MIN_LEVEL))
-
+def journal_loop():
     cursor = read_cursor()
     failures = 0
     while True:
@@ -783,7 +883,7 @@ def main():
 
         batches, ok, more = collect_since(cursor)
         if not ok:
-            # journalctl-Fehler (evtl. ungültiger/rotierter Cursor) -> neu setzen
+            # journalctl-Fehler (evtl. ungueltiger/rotierter Cursor) -> neu setzen
             cursor = None
             time.sleep(POLL)
             continue
@@ -813,9 +913,470 @@ def main():
         time.sleep(max(wait, backoff))
 
 
+# ==============================================================================
+# Docker (und Podman mit Docker-kompatiblem Socket)
+# ==============================================================================
+SOCKETS = ["/var/run/docker.sock", "/run/docker.sock", "/run/podman/podman.sock"]
+
+
+class UnixHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, path, timeout=15):
+        http.client.HTTPConnection.__init__(self, "localhost", timeout=timeout)
+        self.unix_path = path
+
+    def connect(self):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        sock.connect(self.unix_path)
+        self.sock = sock
+
+
+def docker_socket():
+    for path in SOCKETS:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def docker_get(path, timeout=15, limit=None):
+    sock = docker_socket()
+    if not sock:
+        return 0, b""
+    conn = UnixHTTPConnection(sock, timeout=timeout)
+    try:
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        data = resp.read(limit) if limit else resp.read()
+        return resp.status, data
+    except Exception as e:
+        log("Docker-API (%s): %s" % (path.split("?")[0], e))
+        return 0, b""
+    finally:
+        conn.close()
+
+
+def docker_json(path, timeout=15):
+    status, data = docker_get(path, timeout)
+    if status != 200:
+        return None
+    try:
+        return json.loads(data.decode("utf-8", "replace"))
+    except ValueError:
+        return None
+
+
+def cli_version(cmd):
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if out.returncode == 0:
+            return (out.stdout or out.stderr).strip().splitlines()[0][:120]
+    except Exception:
+        pass
+    return ""
+
+
+def docker_info():
+    """Ist Docker da, welche Fassung, gibt es Compose?"""
+    info = {"installed": False}
+    if not docker_socket() and not shutil.which("docker"):
+        return info
+    info["installed"] = True
+    info["socket"] = docker_socket() or ""
+    version = docker_json("/version", timeout=8) or {}
+    info["engine"] = version.get("Version") or ""
+    info["api"] = version.get("ApiVersion") or ""
+    info["podman"] = "podman" in (info["socket"] or "") or "Podman" in json.dumps(version.get("Components") or [])
+    compose = ""
+    if shutil.which("docker"):
+        compose = cli_version(["docker", "compose", "version", "--short"])
+    if not compose and shutil.which("docker-compose"):
+        compose = cli_version(["docker-compose", "--version"])
+    info["compose"] = compose
+    info["reachable"] = bool(version)
+    return info
+
+
+def ts_ns(text):
+    """RFC3339Nano -> Nanosekunden seit 1970 (ohne Zeitzonen-Bibliothek)."""
+    m = re.match(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)?", text or "")
+    if not m:
+        return 0
+    import calendar
+    secs = calendar.timegm((int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                            int(m.group(4)), int(m.group(5)), int(m.group(6))))
+    frac = (m.group(7) or "0")[:9].ljust(9, "0")
+    tz = m.group(8) or "Z"
+    if tz != "Z":
+        sign = 1 if tz[0] == "+" else -1
+        secs -= sign * (int(tz[1:3]) * 3600 + int(tz[4:6]) * 60)
+    return secs * 1000000000 + int(frac)
+
+
+def iso(ns):
+    secs, rest = divmod(ns, 1000000000)
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(secs)) + ".%09dZ" % rest
+
+
+def demux(data, tty):
+    """Docker-Logstrom zerlegen: ohne TTY mit 8-Byte-Kopf je Rahmen."""
+    if tty:
+        for line in data.decode("utf-8", "replace").splitlines():
+            yield "stdout", line
+        return
+    pos = 0
+    buffers = {1: "", 2: ""}
+    while pos + 8 <= len(data):
+        kind = data[pos]
+        size = int.from_bytes(data[pos + 4:pos + 8], "big")
+        chunk = data[pos + 8:pos + 8 + size].decode("utf-8", "replace")
+        pos += 8 + size
+        stream = 2 if kind == 2 else 1
+        buffers[stream] += chunk
+        while "\n" in buffers[stream]:
+            line, buffers[stream] = buffers[stream].split("\n", 1)
+            yield ("stderr" if stream == 2 else "stdout"), line
+    for stream, rest in buffers.items():
+        if rest:
+            yield ("stderr" if stream == 2 else "stdout"), rest
+
+
+def load_docker_state():
+    try:
+        with open(DOCKER_STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"containers": {}, "events_since": int(time.time())}
+
+
+def save_docker_state(state):
+    try:
+        tmp = DOCKER_STATE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+        os.replace(tmp, DOCKER_STATE_FILE)
+    except Exception as e:
+        log("Docker-Zustand nicht gespeichert: %s" % e)
+
+
+INVENTORY = {"docker": None, "containers": []}
+INSPECT_CACHE = {}
+
+
+def excluded(labels, name):
+    labels = labels or {}
+    if str(labels.get("de.logbot.collect", "")).lower() in ("false", "0", "no", "off"):
+        return True
+    if not INCLUDE_LOGBOT and (labels.get("de.logbot.stack") or name.startswith(("logbot-app-", "logbot-ext-"))):
+        return True
+    return False
+
+
+def inventory():
+    """Alle Container mit dem, was man zum Einordnen braucht."""
+    listing = docker_json("/containers/json?all=1") or []
+    result = []
+    for c in listing:
+        cid = c.get("Id") or ""
+        name = ((c.get("Names") or ["/?"])[0] or "/?").lstrip("/")
+        labels = c.get("Labels") or {}
+        state = c.get("State") or ""
+        key = (cid, state, c.get("Status", "").split(" ")[0])
+        cached = INSPECT_CACHE.get(cid)
+        if not cached or cached[0] != key:
+            detail = docker_json("/containers/%s/json" % cid) or {}
+            INSPECT_CACHE[cid] = (key, detail)
+        detail = INSPECT_CACHE[cid][1]
+        dstate = detail.get("State") or {}
+        driver = ((detail.get("HostConfig") or {}).get("LogConfig") or {}).get("Type") or ""
+        ports = []
+        for p in c.get("Ports") or []:
+            if p.get("PublicPort"):
+                ports.append("%s:%s/%s" % (p.get("PublicPort"), p.get("PrivatePort"), p.get("Type", "tcp")))
+        result.append({
+            "id": cid[:64], "name": name, "image": c.get("Image") or "",
+            "state": state, "status": c.get("Status") or "",
+            "health": (dstate.get("Health") or {}).get("Status") or "",
+            "compose_project": labels.get("com.docker.compose.project") or "",
+            "compose_service": labels.get("com.docker.compose.service") or "",
+            "compose_dir": labels.get("com.docker.compose.project.working_dir") or "",
+            "started_at": dstate.get("StartedAt") or "",
+            "restart_count": detail.get("RestartCount") or 0,
+            "log_driver": driver,
+            "logs_readable": driver in ("json-file", "local", "journald", ""),
+            "excluded": excluded(labels, name),
+            "tty": bool((detail.get("Config") or {}).get("Tty")),
+            "ports": sorted(set(ports)),
+        })
+    for cid in list(INSPECT_CACHE):
+        if cid not in {c.get("Id") for c in listing}:
+            INSPECT_CACHE.pop(cid, None)
+    return result
+
+
+EVENT_TEXT = {
+    "start": ("info", "Container gestartet"),
+    "restart": ("warning", "Container neu gestartet"),
+    "stop": ("notice", "Container angehalten"),
+    "kill": ("notice", "Container beendet (Signal)"),
+    "oom": ("critical", "Speicher erschöpft (OOM) - Prozess vom Kernel beendet"),
+    "pause": ("notice", "Container pausiert"),
+    "unpause": ("info", "Container fortgesetzt"),
+    "destroy": ("notice", "Container entfernt"),
+}
+
+
+def docker_events(state):
+    """Zustandswechsel der Container (Start, Absturz, OOM, Healthcheck)."""
+    since = int(state.get("events_since") or time.time())
+    until = int(time.time())
+    if until <= since:
+        return []
+    filters = urllib.parse.quote(json.dumps({"type": ["container"]}))
+    status, data = docker_get("/events?since=%d&until=%d&filters=%s" % (since, until, filters), timeout=15)
+    state["events_since"] = until
+    if status != 200:
+        return []
+    events = []
+    for line in data.decode("utf-8", "replace").splitlines():
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        attrs = (e.get("Actor") or {}).get("Attributes") or {}
+        name = attrs.get("name") or ""
+        action = (e.get("Action") or e.get("status") or "").split(":")[0].strip()
+        if not name or excluded(attrs, name):
+            continue
+        when = int(e.get("timeNano") or 0) or int(e.get("time") or until) * 1000000000
+        if action == "die":
+            code = attrs.get("exitCode", "?")
+            level = "info" if str(code) in ("0", "143") else "error"
+            text = "Container beendet (Exit-Code %s)" % code
+        elif action == "health_status":
+            health = (e.get("Action") or "").split(":", 1)[-1].strip()
+            level = "warning" if health == "unhealthy" else "info"
+            text = "Healthcheck: %s" % health
+        elif action in EVENT_TEXT:
+            level, text = EVENT_TEXT[action]
+        else:
+            continue
+        if LEVEL_PRIO.get(level, 6) > MIN_PRIO_NUM:
+            continue
+        image = attrs.get("image") or ""
+        events.append({"level": level, "message": "%s%s" % (text, (" - " + image) if image else ""),
+                       "container": name[:200], "stream": "event", "timestamp": iso(when),
+                       "source": "docker-events"})
+    return events
+
+
+def container_logs(state, item):
+    """Neue Zeilen eines Containers seit dem letzten Blick."""
+    cid = item["id"]
+    entry = state["containers"].get(item["name"]) or {}
+    if entry.get("id") != cid:
+        # Neuer oder neu erzeugter Container (z.B. nach "compose up").
+        started = ts_ns(item.get("started_at"))
+        if started and started > (STARTED_AT - 10) * 1000000000:
+            last = started - 1
+        elif entry.get("last_ns"):
+            last = entry["last_ns"]
+        else:
+            last = int(time.time() * 1000000000)
+        entry = {"id": cid, "last_ns": last}
+    since = "%d.%09d" % divmod(entry["last_ns"], 1000000000)
+    status, data = docker_get("/containers/%s/logs?stdout=1&stderr=1&timestamps=1&since=%s"
+                              % (cid, since), timeout=20, limit=MAX_LOG_BYTES)
+    if status != 200:
+        state["containers"][item["name"]] = entry
+        return []
+    events = []
+    skipped = 0
+    for stream, line in demux(data, item.get("tty")):
+        stamp, _, text = line.partition(" ")
+        ns = ts_ns(stamp)
+        if not ns or ns <= entry["last_ns"]:
+            continue
+        entry["last_ns"] = ns
+        text = decode_message(text)
+        if not text:
+            continue
+        if len(events) >= MAX_LINES_PER_CONTAINER:
+            skipped += 1
+            continue
+        level = detect_level(text, stream)
+        if LEVEL_PRIO.get(level, 6) > MIN_PRIO_NUM:
+            continue
+        events.append({"level": level, "message": text, "container": item["name"][:200],
+                       "stream": stream, "timestamp": iso(ns)})
+    if skipped:
+        events.append({"level": "warning", "container": item["name"][:200], "stream": "event",
+                       "message": "%d weitere Zeilen übersprungen (Container schreibt zu viel)" % skipped,
+                       "source": "logbot-agent"})
+    state["containers"][item["name"]] = entry
+    return events
+
+
+def docker_loop():
+    state = load_docker_state()
+    state.setdefault("containers", {})
+    last_inventory = 0
+    last_save = 0
+    while True:
+        try:
+            if docker_socket():
+                now = time.time()
+                if now - last_inventory >= 30 or INVENTORY["docker"] is None:
+                    INVENTORY["docker"] = docker_info()
+                    INVENTORY["containers"] = inventory()
+                    last_inventory = now
+                events = docker_events(state)
+                for item in INVENTORY["containers"]:
+                    if item["state"] != "running" or item["excluded"] or not item["logs_readable"]:
+                        continue
+                    if item["log_driver"] == "journald":
+                        continue        # kommt schon ueber journald
+                    events.extend(container_logs(state, item))
+                if events:
+                    pending = state.get("pending") or []
+                    if not send_chunks(pending + events):
+                        # Server weg: die letzten Zeilen aufheben, nicht ins Unendliche.
+                        state["pending"] = (pending + events)[-2000:]
+                    else:
+                        state["pending"] = []
+                if now - last_save >= 10:
+                    save_docker_state(state)
+                    last_save = now
+            else:
+                INVENTORY["docker"] = {"installed": bool(shutil.which("docker")), "reachable": False}
+                INVENTORY["containers"] = []
+        except Exception as e:
+            log("Docker-Erfassung: %s" % e)
+        time.sleep(DOCKER_POLL)
+
+
+# ==============================================================================
+# Heartbeat und Selbst-Aktualisierung
+# ==============================================================================
+def os_name():
+    try:
+        with open("/etc/os-release", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("PRETTY_NAME="):
+                    return line.split("=", 1)[1].strip().strip('"')[:120]
+    except Exception:
+        pass
+    return platform.platform()[:120]
+
+
+def report(state, version="", message=""):
+    api("POST", "/api/agents/update/report", {"hostname": HOSTNAME, "state": state,
+                                               "version": version, "message": message[:1900]})
+
+
+def verify_signature(content, signature_b64):
+    """True, wenn die Unterschrift des Servers stimmt. None, wenn nicht pruefbar."""
+    if not os.path.exists(PUBKEY_FILE) or not shutil.which("openssl"):
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        data = os.path.join(tmp, "p")
+        sig = os.path.join(tmp, "s")
+        with open(data, "wb") as f:
+            f.write(content)
+        with open(sig, "wb") as f:
+            f.write(base64.b64decode(signature_b64))
+        out = subprocess.run(["openssl", "dgst", "-sha256", "-verify", PUBKEY_FILE, "-signature", sig, data],
+                             capture_output=True, text=True, timeout=30)
+        return out.returncode == 0
+
+
+def perform_update(update):
+    version = update.get("version") or ""
+    if not REMOTE_UPDATE:
+        report("failed", version, "Fernaktualisierung ist auf diesem Gerät abgeschaltet.")
+        return
+    log("Update auf %s angefordert - lade Paket" % version)
+    report("downloading", version)
+    status, result = api("GET", update.get("url") or "", timeout=60, raw=True)
+    if status != 200 or not result:
+        report("failed", version, "Paket nicht ladbar (HTTP %s)." % status)
+        return
+    content = result[0]
+    if hashlib.sha256(content).hexdigest() != update.get("sha256"):
+        report("failed", version, "Prüfsumme stimmt nicht - Paket verworfen.")
+        return
+    verified = verify_signature(content, update.get("signature") or "")
+    if verified is False:
+        report("failed", version, "Unterschrift ungültig - Paket verworfen.")
+        log("WARNUNG: Update-Paket mit ungueltiger Unterschrift verworfen")
+        return
+    if verified is None and SKIP_TLS:
+        report("failed", version, "Unterschrift nicht prüfbar (openssl oder Schlüssel fehlt) und "
+                                  "TLS ohne Zertifikatsprüfung - aus Sicherheitsgründen abgelehnt. "
+                                  "Agent einmal neu installieren.")
+        return
+    os.makedirs(UPDATE_DIR, exist_ok=True)
+    os.chmod(UPDATE_DIR, 0o700)
+    path = os.path.join(UPDATE_DIR, "install-linux.sh")
+    with open(path, "wb") as f:
+        f.write(content)
+    os.chmod(path, 0o700)
+    report("installing", version)
+    unit = "logbot-agent-upgrade-%d" % int(time.time())
+    # Eigene Unit: der Installer startet diesen Dienst neu - als Kindprozess
+    # wuerde er dabei selbst mit beendet.
+    cmd = ["systemd-run", "--unit", unit, "--collect", "--quiet", "/bin/bash", path, "upgrade"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if out.returncode != 0:
+            report("failed", version, "Installer nicht startbar: %s" % (out.stderr or out.stdout).strip()[:300])
+    except Exception as e:
+        report("failed", version, "Installer nicht startbar: %s" % e)
+
+
+def heartbeat_loop():
+    time.sleep(3)
+    while True:
+        body = {"hostname": HOSTNAME, "device_type": "linux_agent", "agent_version": AGENT_VERSION,
+                "os": os_name(), "remote_update": REMOTE_UPDATE,
+                "capabilities": ["heartbeat", "self-update", "docker", "signed-update"]}
+        ip = local_ip()
+        if ip:
+            body["ip_address"] = ip
+        if DOCKER_MODE != "off":
+            body["docker"] = INVENTORY.get("docker") or {"installed": False}
+            body["containers"] = [{k: v for k, v in c.items() if k != "tty"}
+                                  for c in INVENTORY.get("containers") or []]
+        status, data = api("POST", "/api/agents/heartbeat", body, timeout=30)
+        if status == 404:
+            # Aelterer Server ohne Heartbeat - dann eben nur Logs liefern.
+            time.sleep(3600)
+            continue
+        if 200 <= status < 300 and isinstance(data, dict):
+            remember_agent_id(data)
+            if data.get("update"):
+                try:
+                    perform_update(data["update"])
+                except Exception as e:
+                    report("failed", data["update"].get("version", ""), "Update-Fehler: %s" % e)
+        time.sleep(HEARTBEAT_SECONDS)
+
+
+def main():
+    if not TOKEN:
+        log("FEHLER: agent_token fehlt in config.json")
+        sys.exit(1)
+    log("gestartet v%s - Ziel: %s Port %s Hostname %s MinLevel %s Docker %s"
+        % (AGENT_VERSION, SERVER_FQDN or SERVER_IP, SERVER_PORT, HOSTNAME, MIN_LEVEL, DOCKER_MODE))
+    threading.Thread(target=heartbeat_loop, name="heartbeat", daemon=True).start()
+    if DOCKER_MODE != "off":
+        threading.Thread(target=docker_loop, name="docker", daemon=True).start()
+    journal_loop()
+
+
 if __name__ == "__main__":
     main()
 PYEOF
+    sed -i "s/__AGENT_VERSION__/${AGENT_VERSION}/" "$AGENT_SCRIPT"
     chmod 700 "$AGENT_SCRIPT"
 }
 
@@ -832,7 +1393,9 @@ write_agent_config() {
   "skip_tls_verify": ${skip},
   "min_level": "${MINLEVEL}",
   "hostname": "$(hostname)",
-  "poll_interval": 5
+  "poll_interval": 5,
+  "docker": "${DOCKER_MODE}",
+  "remote_update": ${REMOTE_UPDATE}
 }
 EOF
     chmod 600 "$AGENT_CONFIG"
@@ -841,8 +1404,8 @@ EOF
 write_systemd_unit() {
     cat > "$SYSTEMD_UNIT" << EOF
 [Unit]
-Description=LogBot Agent v${AGENT_VERSION} (HTTPS Log Forwarder)
-After=network-online.target
+Description=LogBot Agent v${AGENT_VERSION} (HTTPS Log Forwarder, Container, Selbst-Update)
+After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
@@ -928,14 +1491,16 @@ enroll_own_token() {
     log_info "Melde diesen Rechner am Server an (eigener Schlüssel)..."
 
     local result
-    result="$("$PYTHON_BIN" - "$FQDN" "$PORT" "$TOKEN" "$host" "$INSECURE" <<'PYENROLL'
+    mkdir -p "$AGENT_DIR"
+    result="$("$PYTHON_BIN" - "$FQDN" "$PORT" "$TOKEN" "$host" "$INSECURE" "$AGENT_DIR/update_pubkey.pem" <<'PYENROLL'
 import json
+import os
 import ssl
 import sys
 import urllib.error
 import urllib.request
 
-fqdn, port, token, hostname, insecure = sys.argv[1:6]
+fqdn, port, token, hostname, insecure, pubkey_path = sys.argv[1:7]
 
 context = None
 if insecure == "true":
@@ -955,6 +1520,12 @@ try:
     with urllib.request.urlopen(request, timeout=20, context=context) as response:
         data = json.loads(response.read().decode("utf-8", "replace"))
     own = (data.get("token") or "").strip()
+    pem = data.get("update_pubkey_pem") or ""
+    if pem.startswith("-----BEGIN PUBLIC KEY-----"):
+        # Damit prueft der Agent spaeter jedes Update auf die Unterschrift des Servers.
+        with open(pubkey_path, "w", encoding="utf-8") as handle:
+            handle.write(pem)
+        os.chmod(pubkey_path, 0o644)
     print("OK " + own if own else "EMPTY")
 except urllib.error.HTTPError as exc:
     print(f"HTTP {exc.code}")
@@ -1254,6 +1825,84 @@ purge_server_entry() {
 }
 
 # ==============================================================================
+# Upgrade: vom Agent selbst angestossen (Selbst-Aktualisierung)
+# ==============================================================================
+# Laeuft als eigene systemd-Unit (systemd-run), damit der Neustart des Dienstes
+# den Installer nicht mitreisst. Konfiguration, Schluessel und Cursor bleiben;
+# ersetzt werden Agent-Skript und Dienstdatei. Startet die neue Fassung nicht,
+# wird die alte zurueckgelegt und der Fehlschlag an den Server gemeldet.
+report_update() {
+    local state="$1" message="$2"
+    [[ -f "$AGENT_CONFIG" ]] || return 0
+    python3 - "$AGENT_CONFIG" "$state" "$AGENT_VERSION" "$message" <<'PYREPORT' 2>/dev/null || true
+import json, socket, ssl, sys, urllib.request
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+state, version, message = sys.argv[2:5]
+host = (cfg.get("server_fqdn") or "").strip()
+try:
+    socket.getaddrinfo(host, None)
+except Exception:
+    host = (cfg.get("server_ip") or host).strip()
+port = int(cfg.get("server_port") or 443)
+url = ("https://%s" % host if port == 443 else "https://%s:%d" % (host, port)) + "/api/agents/update/report"
+ctx = ssl.create_default_context()
+if cfg.get("skip_tls_verify"):
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+body = json.dumps({"hostname": cfg.get("hostname") or socket.gethostname(), "state": state,
+                   "version": version, "message": message[:1900]}).encode()
+req = urllib.request.Request(url, data=body, method="POST", headers={
+    "Authorization": "Bearer " + (cfg.get("agent_token") or ""), "Content-Type": "application/json"})
+urllib.request.urlopen(req, timeout=15, context=ctx).read()
+PYREPORT
+}
+
+do_upgrade() {
+    require_root
+    ASSUME_YES="true"
+    [[ -f "$AGENT_CONFIG" ]] || fail "Kein HTTPS-Agent installiert (${AGENT_CONFIG} fehlt) - bitte normal installieren."
+    PYTHON_BIN="$(command -v python3 || true)"
+    [[ -z "$PYTHON_BIN" ]] && fail "python3 fehlt."
+    log_info "Aktualisiere LogBot Agent auf v${AGENT_VERSION}..."
+
+    # Neue Schluessel in der Konfiguration ergaenzen, vorhandene nie anfassen.
+    python3 - "$AGENT_CONFIG" <<'PYCFG' || true
+import json, sys
+path = sys.argv[1]
+cfg = json.load(open(path, encoding="utf-8"))
+cfg.setdefault("docker", "auto")
+cfg.setdefault("remote_update", True)
+json.dump(cfg, open(path, "w", encoding="utf-8"), indent=2)
+PYCFG
+    chmod 600 "$AGENT_CONFIG"
+
+    local backup="${AGENT_SCRIPT}.bak" unit_backup="${SYSTEMD_UNIT}.bak"
+    cp -f "$AGENT_SCRIPT" "$backup" 2>/dev/null || true
+    cp -f "$SYSTEMD_UNIT" "$unit_backup" 2>/dev/null || true
+
+    write_agent_script
+    write_systemd_unit
+    systemctl restart "$SERVICE_NAME" || true
+    sleep 15
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        rm -f "$backup" "$unit_backup"
+        log_success "Agent laeuft in Fassung ${AGENT_VERSION}."
+        report_update "done" "Aktualisiert auf ${AGENT_VERSION}."
+        return 0
+    fi
+
+    local why
+    why="$(journalctl -u "$SERVICE_NAME" -n 15 --no-pager 2>/dev/null | tail -n 8 | tr '\n' ' ' | cut -c1-900)"
+    log_error "Die neue Fassung startet nicht - nehme die alte zurueck."
+    [[ -f "$backup" ]] && mv -f "$backup" "$AGENT_SCRIPT"
+    [[ -f "$unit_backup" ]] && mv -f "$unit_backup" "$SYSTEMD_UNIT"
+    systemctl daemon-reload || true
+    systemctl restart "$SERVICE_NAME" || true
+    report_update "rolled_back" "Neue Fassung startete nicht, alte wiederhergestellt: ${why}"
+    exit 1
+}
+
+# ==============================================================================
 # Zusammenfassung
 # ==============================================================================
 
@@ -1267,6 +1916,8 @@ print_summary() {
         local url_host="$FQDN"
         [[ "${PORT:-443}" != "443" ]] && url_host="${FQDN}:${PORT}"
         echo "Modus:         HTTPS (verschlüsselt + Token)"
+        echo "Container:     $([[ "$DOCKER_MODE" == "off" ]] && echo "nicht erfasst (--no-docker)" || echo "werden erfasst, sobald Docker/Podman da ist")"
+        echo "Updates:       $([[ "$REMOTE_UPDATE" == "false" ]] && echo "nur von Hand (--no-remote-update)" || echo "vom Server gesteuert, signiert geprüft")"
         echo "Ziel:          https://${url_host}/api/agents/ingest"
         echo "Installation:  $AGENT_DIR"
         echo "Dienst:        $SERVICE_NAME"
@@ -1301,6 +1952,7 @@ main() {
         uninstall)        require_root; uninstall "" ;;
         uninstall-purge)  require_root; uninstall "purge" ;;
         test)             send_test_message ;;
+        upgrade)          do_upgrade ;;
         *)                do_install ;;
     esac
 }

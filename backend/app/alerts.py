@@ -209,7 +209,21 @@ async def refresh(db: AsyncSession) -> dict:
     global _cache
     config = await load_config(db)
     mail_config = await mail.load_config(db)
-    snapshot = {"config": config, "mail": mail_config}
+    # Rueckfall auf das, was unter Meldungen per Assistent eingerichtet ist:
+    # der verbundene Telegram-Bot und die Administratoren mit bestaetigter
+    # Adresse. Liegt mit in der Datei - der Waechter muss auch ohne
+    # Datenbank melden koennen.
+    wizard = {"telegram": {}, "recipients": []}
+    try:
+        from . import notify
+        notify_config = await notify.load_config(db)
+        tg = notify_config.get("telegram") or {}
+        wizard["telegram"] = {"bot_token": tg.get("bot_token") or "",
+                              "chats": [c.get("id") for c in tg.get("chats") or [] if c.get("id")]}
+        wizard["recipients"] = await notify.mail_recipients(db, notify_config, "admin")
+    except Exception as exc:                                        # defensiv
+        logger.debug("Meldungs-Rueckfall nicht lesbar: %s", exc)
+    snapshot = {"config": config, "mail": mail_config, "wizard": wizard}
     # Nur schreiben, wenn sich etwas geaendert hat - der Wachhund ruft das
     # jede Minute auf.
     if snapshot != _cache:
@@ -313,22 +327,42 @@ def _server_name() -> str:
     return os.getenv("LOGBOT_SERVER_NAME", "") or socket.gethostname()
 
 
+def _wizard() -> dict:
+    if _cache is None:
+        current()
+    return (_cache or {}).get("wizard") or {}
+
+
 async def _send_telegram(cfg: dict, text: str) -> None:
-    url = f"https://api.telegram.org/bot{cfg['bot_token']}/sendMessage"
+    """Eigener Bot (Token + Chat-ID hier) - sonst der unter Meldungen → Telegram verbundene."""
+    from . import secretbox
+    token = cfg.get("bot_token") or ""
+    chats = [cfg["chat_id"]] if cfg.get("chat_id") else []
+    if not token:
+        wizard = _wizard().get("telegram") or {}
+        token = secretbox.open_(wizard.get("bot_token") or "")
+        chats = chats or list(wizard.get("chats") or [])
+    if not token or not chats:
+        raise RuntimeError("Kein Telegram-Bot verbunden (Meldungen → Kanäle → Telegram).")
     async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(url, json={
-            "chat_id": cfg["chat_id"],
-            "text": text[:4000],
-            "disable_web_page_preview": True,
-        })
-    if response.status_code != 200:
-        # Telegram erklaert im Klartext, was nicht passt (falsche Chat-ID, Bot
-        # nicht im Chat ...) - das soll beim Testen auch so ankommen.
-        try:
-            detail = response.json().get("description", "")
-        except Exception:
-            detail = response.text[:200]
-        raise RuntimeError(f"Telegram antwortet {response.status_code}: {detail}")
+        for chat_id in chats:
+            try:
+                response = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
+                    "chat_id": chat_id,
+                    "text": text[:4000],
+                    "disable_web_page_preview": True,
+                })
+            except httpx.HTTPError as exc:
+                # Die Ausnahme nennt die Adresse - und darin den Token. Nicht weiterreichen.
+                raise RuntimeError(f"Telegram nicht erreichbar ({type(exc).__name__}).") from None
+            if response.status_code != 200:
+                # Telegram erklaert im Klartext, was nicht passt (falsche Chat-ID,
+                # Bot nicht im Chat ...) - das soll beim Testen auch so ankommen.
+                try:
+                    detail = response.json().get("description", "")
+                except Exception:
+                    detail = response.text[:200]
+                raise RuntimeError(f"Telegram antwortet {response.status_code}: {detail}")
 
 
 async def _send_webhook(cfg: dict, payload: dict) -> None:
@@ -344,8 +378,9 @@ async def _send_webhook(cfg: dict, payload: dict) -> None:
 async def _send_mail(cfg: dict, subject: str, text: str) -> None:
     mail_config = _current_mail()
     if not mail_config or mail_config.get("mode") == "off":
-        raise RuntimeError("Der Mailversand ist nicht eingerichtet (System → Mail).")
-    recipients = cfg.get("recipients") or mail_config.get("default_recipients") or []
+        raise RuntimeError("Der Mailversand ist nicht eingerichtet (Meldungen → Kanäle → E-Mail).")
+    recipients = (cfg.get("recipients") or mail_config.get("default_recipients")
+                  or _wizard().get("recipients") or [])
     if not recipients:
         raise RuntimeError("Es ist kein Empfänger hinterlegt.")
     await mail.send(mail_config, recipients, subject, text)
@@ -416,10 +451,26 @@ async def dispatch(event: str, title: str, text: str, level: str = "warning",
         results = await _deliver(config, _payload(event, title, text, level, detail))
         if results:
             logger.warning("Meldung '%s' (%s): %s", title, event, results)
+        await _to_inbox(event, title, text, level)
         return results
     except Exception as exc:                                        # defensiv
         logger.error("Meldung '%s' fehlgeschlagen: %s", event, exc)
         return {}
+
+
+async def _to_inbox(event: str, title: str, text: str, level: str) -> None:
+    """Auch in den Eingang (Web und App) und als Push aufs Handy - sofern die
+    Datenbank da ist. Ist sie weg, bleibt es bei Mail/Telegram/Webhook."""
+    try:
+        from . import notify
+        from .database import async_session
+        severity = {"critical": "critical", "error": "error", "warning": "warning"}.get(level, "info")
+        async with async_session() as db:
+            await notify.emit(db, severity=severity, category="system", audience="admin",
+                              title=f"Systemwächter: {title}"[:200], body=text, channels=["app"],
+                              rule_id=f"watch-{event}"[:40], data={"watch_event": event})
+    except Exception as exc:                                        # defensiv
+        logger.debug("Systemwaechter-Meldung nicht im Eingang: %s", exc)
 
 
 def forget(key: str) -> None:
@@ -443,4 +494,4 @@ def describe() -> dict:
 
 def recipients_preview() -> List[str]:
     mail_config = _current_mail() or {}
-    return list(mail_config.get("default_recipients") or [])
+    return list(mail_config.get("default_recipients") or _wizard().get("recipients") or [])

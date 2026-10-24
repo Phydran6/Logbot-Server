@@ -563,6 +563,16 @@ async def _install_script() -> Optional[str]:
     return None
 
 
+_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
+
+
+def valid_ref(ref: str) -> bool:
+    """Ein Git-Bezugspunkt (Zweig, Tag, Commit) - ohne fuehrenden Strich.
+
+    Ein Wert wie "--upload-pack=..." waere fuer git eine Option statt eines
+    Namens; das Wartungsskript laeuft als root.
+    """
+    return bool(_REF_RE.match(ref or "")) and ".." not in ref
 def build_command(action: str, database_backup: bool = True,
                   backup_name: str = "", ref: str = "") -> list:
     """Die Befehlszeile, die auf dem Host laeuft.
@@ -615,6 +625,8 @@ async def start_run(action: str, database_backup: bool = True,
     if action == "apply":
         # Welchen Stand holen? Ohne Angabe der Zweig, sonst das gewaehlte Release.
         ref = (ref or await resolve_target_ref(await load_channel())).strip()
+        if ref and not valid_ref(ref):
+            return {"started": False, "error": f"Ungültiger Bezugspunkt '{ref[:60]}'."}
     command = build_command(action, database_backup=database_backup,
                             backup_name=backup_name, ref=ref)
 
@@ -710,6 +722,8 @@ async def save_channel(channel: str, ref: str = "", auto_offer: bool = True) -> 
     ref = (ref or "").strip()
     if channel == "pinned" and not ref:
         raise ValueError("Für eine festgelegte Version fehlt die Angabe, welche.")
+    if ref and not valid_ref(ref):
+        raise ValueError("Ungültige Versionsangabe (erlaubt: Buchstaben, Ziffern, . _ / -).")
 
     config = {"channel": channel, "ref": ref, "auto_offer": bool(auto_offer)}
     async with async_session() as session:

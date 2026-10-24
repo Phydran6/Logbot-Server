@@ -57,11 +57,17 @@ async def close(session_id: str, admin=Depends(get_current_admin)):
 
 @router.websocket("/ws")
 async def terminal(websocket: WebSocket,
-                   token: str = Query(..., description="Access-Token"),
+                   ticket: str = Query("", description="Kurzzeit-Ticket (POST /api/auth/ticket)"),
+                   token: str = Query("", description="veraltet: Access-Token"),
                    rows: int = Query(24, ge=4, le=300),
                    cols: int = Query(80, ge=20, le=500)):
     """Öffnet eine Root-Shell auf dem Server und verbindet sie mit dem Browser."""
-    user = await admin_from_token(token)
+    user = await admin_from_token(ticket or token)
+    # Nur aus der eigenen Oberflaeche: eine fremde Seite darf keine Shell oeffnen.
+    origin = websocket.headers.get("origin", "")
+    host = websocket.headers.get("host", "")
+    if origin and host and origin.split("://", 1)[-1].rstrip("/") != host:
+        user = None
     if not user:
         # 1008 = "policy violation". Die Verbindung wird angenommen und sofort
         # wieder geschlossen, damit der Browser einen sauberen Grund bekommt.

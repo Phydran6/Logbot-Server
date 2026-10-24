@@ -2,390 +2,601 @@
      Name:        Phydran6
      Kontakt:     Phydran6
      Changelog:   ../../../CHANGELOG/frontend.md
-     Beschreibung: LogBot - System -> Mail: Postfix vollstaendig aus dem Browser.
-     ============================================================================== -->
+     Beschreibung: LogBot - Meldungen → Kanäle → E-Mail: der Mail-Assistent.
 
+     Drei Wege, so einfach es geht:
+       * Google - App-Passwort (zwei Felder) oder "Mit Google anmelden".
+       * Microsoft 365 - der Assistent legt die App-Registrierung selbst an:
+         einmal mit einem Admin-Konto anmelden, dann mit dem Postfach.
+         Outlook.com geht genauso (Anmeldung mit dem privaten Konto).
+       * Jeder andere Anbieter - Vorlagen für GMX, WEB.DE, IONOS, Strato …
+     Kennwörter und Anmeldungen liegen verschlüsselt auf dem Server und kommen
+     nie zurück in den Browser.
+     ============================================================================== -->
 <template>
   <div class="page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">{{ t('mail.title') }}</h1>
-        <p class="page-subtitle">{{ t('mail.intro') }}</p>
+        <h2 class="page-title">E-Mail</h2>
+        <p class="page-subtitle">
+          Über diesen Weg verschickt LogBot Meldungen, Bestätigungscodes, Passwort-Links und
+          Anmelde-Links für die App.
+        </p>
       </div>
     </div>
 
-    <p v-if="error" class="alert alert-danger">{{ error }}</p>
-    <p v-if="message" class="alert alert-success">{{ message }}</p>
+    <p v-if="banner" class="card card-body mb-4 text-sm" :style="{ color: bannerError ? 'var(--color-danger)' : 'var(--color-success)' }">
+      {{ banner }}
+    </p>
 
-    <section class="card">
-      <div class="card-header">
-        <h2 class="card-title">{{ t('mail.mode') }}</h2>
-      </div>
-      <div class="card-body space-y-4">
-        <div class="mode-grid">
-          <label
-            v-for="option in modes"
-            :key="option.id"
-            class="mode"
-            :class="{ 'is-picked': config.mode === option.id }"
-          >
-            <input v-model="config.mode" type="radio" :value="option.id">
-            <span>
-              <strong>{{ locale === 'en' ? option.label_en : option.label }}</strong>
-              <em>{{ option.hint }}</em>
-            </span>
-          </label>
-        </div>
-
-        <template v-if="config.mode !== 'off'">
-          <div class="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label class="label">{{ t('mail.fromAddress') }}</label>
-              <input v-model="config.from_address" type="email" class="input" placeholder="logbot@example.com">
-            </div>
-            <div>
-              <label class="label">{{ t('mail.fromName') }}</label>
-              <input v-model="config.from_name" type="text" class="input">
-            </div>
-          </div>
-
-          <!-- Nur beim eigenen Mailserver: dort gibt es Host, Port und Anmeldung.
-               Beim Container legt das Backend diese Werte selbst fest. -->
-          <template v-if="config.mode === 'relay'">
-            <div class="grid gap-3 sm:grid-cols-3">
-              <div class="sm:col-span-2">
-                <label class="label">{{ t('mail.smtpHost') }}</label>
-                <input v-model="config.smtp_host" type="text" class="input" placeholder="mail.example.com">
-              </div>
-              <div>
-                <label class="label">{{ t('mail.smtpPort') }}</label>
-                <input v-model.number="config.smtp_port" type="number" min="1" max="65535" class="input">
-              </div>
-            </div>
-
-            <div class="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label class="label">{{ t('mail.smtpUser') }}</label>
-                <input v-model="config.smtp_user" type="text" class="input" autocomplete="off">
-              </div>
-              <div>
-                <label class="label">{{ t('mail.smtpPassword') }}</label>
-                <input
-                  v-model="smtpPassword"
-                  type="password"
-                  class="input"
-                  autocomplete="new-password"
-                  :placeholder="config.smtp_password_set ? '•••••••• (unverändert)' : ''"
-                >
-              </div>
-            </div>
-
-            <div class="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label class="label">{{ t('mail.encryption') }}</label>
-                <select v-model="config.encryption" class="select">
-                  <option v-for="option in encryptions" :key="option.id" :value="option.id">
-                    {{ option.label }}
-                  </option>
-                </select>
-              </div>
-              <div class="flex items-end">
-                <label class="toggle">
-                  <input v-model="config.verify_certificate" type="checkbox">
-                  <span>{{ t('mail.verifyCertificate') }}</span>
-                </label>
-              </div>
-            </div>
-          </template>
-
-          <!-- Nur beim Container: Smarthost. Die meisten Anschlüsse dürfen nicht
-               selbst zustellen - dann übergibt Postfix an den Provider. -->
-          <template v-if="config.mode === 'container'">
-            <div class="grid gap-3 sm:grid-cols-3">
-              <div>
-                <label class="label">Eigener Hostname</label>
-                <input v-model="config.myhostname" type="text" class="input" placeholder="logbot.example.com">
-              </div>
-              <div>
-                <label class="label">Smarthost <span class="hint">({{ t('common.optional') }})</span></label>
-                <input v-model="config.relay_host" type="text" class="input" placeholder="smtp.provider.de">
-              </div>
-              <div>
-                <label class="label">Smarthost-Port</label>
-                <input v-model.number="config.relay_port" type="number" min="1" max="65535" class="input">
-              </div>
-            </div>
-            <div v-if="config.relay_host" class="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label class="label">Smarthost-Benutzer</label>
-                <input v-model="config.relay_user" type="text" class="input" autocomplete="off">
-              </div>
-              <div>
-                <label class="label">Smarthost-Passwort</label>
-                <input
-                  v-model="relayPassword"
-                  type="password"
-                  class="input"
-                  autocomplete="new-password"
-                  :placeholder="config.relay_password_set ? '•••••••• (unverändert)' : ''"
-                >
-              </div>
-            </div>
-            <p class="hint">
-              Braucht den Zusatzdienst „Postfix“ unter
-              <router-link class="link" to="/stacks">{{ t('nav.stacks') }}</router-link>.
-            </p>
-          </template>
-
-          <div>
-            <label class="label">{{ t('mail.recipients') }}</label>
-            <input
-              v-model="recipientsText"
-              type="text"
-              class="input"
-              placeholder="admin@example.com, technik@example.com"
-            >
-          </div>
-
-          <!-- Die Haken "Benachrichtigen bei ..." standen frueher hier - und
-               bewirkten nichts (es gab keinen Aufrufer). Was wann gemeldet
-               wird, steht jetzt fuer alle Wege gemeinsam auf einer Seite. -->
-          <p class="hint">
-            Wann LogBot eine Mail (oder Telegram/Webhook) schickt, stellst du unter
-            <router-link class="link" to="/alerts">{{ t('nav.alerts') }}</router-link> ein.
+    <!-- Stand -->
+    <div v-if="config" class="card mb-4">
+      <div class="card-body flex flex-wrap items-center gap-4">
+        <span class="badge" :class="config.ready ? 'badge-success' : 'badge-warning'">
+          {{ config.ready ? 'eingerichtet' : 'noch nicht eingerichtet' }}
+        </span>
+        <div class="flex-1 min-w-0 text-sm">
+          <p><b>{{ modeLabel }}</b><span v-if="config.from_address"> · Absender {{ config.from_address }}</span></p>
+          <p v-if="config.oauth?.refresh_token_readable === false" style="color: var(--color-danger)">
+            Die Anmeldung ist auf diesem Server nicht mehr lesbar (anderer Server / neues JWT_SECRET) – bitte neu anmelden.
           </p>
-        </template>
-
-        <div class="flex flex-wrap gap-2">
-          <button class="btn btn-primary" :disabled="saving" @click="save">
-            {{ saving ? t('common.saving') : t('common.save') }}
-          </button>
-          <button class="btn btn-secondary" :disabled="testing || config.mode === 'off'" @click="test">
-            {{ testing ? t('common.loading') : t('mail.sendTest') }}
-          </button>
-          <button v-if="config.mode === 'container'" class="btn btn-ghost" @click="loadPreview">
-            {{ t('mail.preview') }}
-          </button>
         </div>
-
-        <div v-if="preview" class="preview-box">
-          <p class="hint">{{ preview.path }} — {{ preview.note }}</p>
-          <pre class="preview-text">{{ preview.content }}</pre>
+        <div class="flex gap-2 items-center">
+          <input v-model="testRecipient" class="input" placeholder="Empfänger der Probemail" style="width: 16rem">
+          <button class="btn btn-secondary btn-sm" :disabled="busy || !config.ready" @click="sendTest">Probemail</button>
+          <button v-if="['google', 'microsoft'].includes(config.mode)" class="btn btn-ghost btn-sm" @click="disconnect">Abmelden</button>
         </div>
       </div>
-    </section>
+    </div>
+
+    <!-- Öffentliche Adresse -->
+    <div class="card mb-6">
+      <div class="card-header"><span class="card-title">Adresse dieses Servers in Mails</span></div>
+      <div class="card-body">
+        <div class="flex gap-2 flex-wrap">
+          <input v-model="publicUrl" class="input flex-1" placeholder="https://logbot.firma.de" style="min-width: 16rem">
+          <button class="btn btn-secondary btn-sm" @click="savePublicUrl">Übernehmen</button>
+        </div>
+        <p class="hint">
+          Links in Mails (Passwort zurücksetzen, App-Anmeldung, Meldungen) zeigen hierhin. Bewusst fest
+          eingestellt und nicht aus der Anfrage gelesen – sonst könnte ein Angreifer Links auf seine
+          eigene Seite in echte Mails schmuggeln.
+        </p>
+      </div>
+    </div>
+
+    <!-- Schritt 1: Weg wählen -->
+    <h3 class="section-title">Weg wählen</h3>
+    <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+      <button v-for="option in OPTIONS" :key="option.id" class="card card-hover tile"
+              :class="{ 'is-picked': choice === option.id }" @click="pick(option.id)">
+        <span class="tile-title">{{ option.label }}</span>
+        <span class="tile-hint">{{ option.hint }}</span>
+      </button>
+    </div>
+
+    <!-- ============================== Google ============================== -->
+    <div v-if="choice === 'google'" class="card">
+      <div class="card-body space-y-5">
+        <div class="flex gap-2">
+          <button class="btn btn-sm" :class="googleWay === 'apppass' ? 'btn-primary' : 'btn-secondary'" @click="googleWay = 'apppass'">App-Passwort (einfach)</button>
+          <button class="btn btn-sm" :class="googleWay === 'oauth' ? 'btn-primary' : 'btn-secondary'" @click="googleWay = 'oauth'">Mit Google anmelden</button>
+        </div>
+
+        <div v-if="googleWay === 'apppass'" class="space-y-3 max-w-xl">
+          <ol class="steps">
+            <li>Im Google-Konto die <b>Bestätigung in zwei Schritten</b> einschalten (falls noch nicht).</li>
+            <li><a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" class="link">App-Passwort erstellen</a> – Name z.B. „LogBot“ – und die 16 Zeichen hier einfügen.</li>
+          </ol>
+          <label class="label">Gmail-Adresse<input v-model="form.email" class="input w-full" placeholder="name@gmail.com"></label>
+          <label class="label">App-Passwort<input v-model="form.password" type="password" class="input w-full" autocomplete="new-password"></label>
+          <button class="btn btn-primary" :disabled="busy" @click="saveSmtp('gmail')">Speichern</button>
+        </div>
+
+        <div v-else class="space-y-3 max-w-2xl">
+          <ol class="steps">
+            <li>In der <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener" class="link">Google Cloud Console</a> ein Projekt anlegen.</li>
+            <li><a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noopener" class="link">Gmail-API aktivieren</a>.</li>
+            <li><a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener" class="link">OAuth-Zustimmungsbildschirm</a>: „Extern“, eigene Adresse eintragen, danach <b>„App veröffentlichen“</b> (sonst läuft die Anmeldung nach 7 Tagen ab; der Hinweis „nicht verifiziert“ ist für eigene Apps normal).</li>
+            <li><a href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank" rel="noopener" class="link">OAuth-Client-ID anlegen</a>, Typ <b>„Desktop-App“</b>. Client-ID und Clientschlüssel hier einfügen.</li>
+          </ol>
+          <label class="label">Client-ID<input v-model="form.clientId" class="input w-full" placeholder="….apps.googleusercontent.com"></label>
+          <label class="label">Clientschlüssel<input v-model="form.clientSecret" type="password" class="input w-full"></label>
+          <button class="btn btn-primary" :disabled="busy || !form.clientId" @click="startGoogle">Mit Google anmelden</button>
+          <PasteStep v-if="flow && flow.kind === 'authorize'" :flow="flow" :busy="busy" @submit="completePaste" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================= Microsoft 365 / Outlook ========================= -->
+    <div v-if="choice === 'm365' || choice === 'outlook'" class="card">
+      <div class="card-body space-y-6">
+        <!-- Schritt A: App-Registrierung -->
+        <section>
+          <h4 class="step-title"><span class="step-no">1</span> App-Registrierung</h4>
+          <div v-if="msApp.app_id && !changeApp" class="text-sm space-y-1">
+            <p style="color: var(--color-success)">✓ „{{ msApp.display_name }}“ im Mandanten „{{ msApp.tenant_name }}“</p>
+            <p class="hint">Anwendungs-ID {{ msApp.app_id }} · angelegt von {{ msApp.registered_by }}
+              <span v-if="!msApp.consent_granted"> · Zustimmung erfolgt beim Anmelden des Postfachs</span></p>
+            <button class="btn btn-ghost btn-sm" @click="changeApp = true">Andere App verwenden</button>
+          </div>
+          <div v-else class="space-y-3">
+            <p class="text-sm" style="color: var(--color-text-secondary)">
+              Damit LogBot über Microsoft Mails senden darf, braucht es eine App-Registrierung. Der
+              Assistent legt sie selbst an: einmal mit einem Konto anmelden, das das darf
+              (Globaler Administrator, Anwendungs- oder Cloudanwendungsadministrator).
+              <span v-if="choice === 'outlook'">Für Outlook.com reicht dafür ein beliebiger Microsoft-365-/Entra-Mandant –
+                die App wird für private Konten freigegeben.</span>
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button class="btn btn-primary btn-sm" :disabled="busy" @click="startRegister('device')">Automatisch anlegen (Gerätecode)</button>
+              <button class="btn btn-secondary btn-sm" :disabled="busy" @click="startRegister('browser')">Automatisch anlegen (Browser)</button>
+            </div>
+            <DeviceStep v-if="flow && flow.kind === 'device' && flow.purpose === 'register'" :flow="flow" />
+            <PasteStep v-if="flow && flow.kind === 'register_authorize'" :flow="flow" :busy="busy" @submit="completePaste" />
+            <ul v-if="registerReport" class="steps-report">
+              <li v-for="line in registerReport" :key="line">{{ line }}</li>
+            </ul>
+            <details class="text-sm">
+              <summary class="link">Vorhandene App-Registrierung eintragen</summary>
+              <div class="grid md:grid-cols-2 gap-3 mt-2">
+                <label class="label">Anwendungs-ID (Client-ID)<input v-model="form.msClientId" class="input w-full"></label>
+                <label v-if="choice === 'm365'" class="label">Verzeichnis-ID (Mandant)<input v-model="form.msTenant" class="input w-full" placeholder="GUID oder firma.onmicrosoft.com"></label>
+              </div>
+              <p class="hint">Plattform „Mobile und Desktopanwendungen“ mit Umleitungs-URI <code>{{ msLoopback }}</code>,
+                „Öffentliche Clientflows zulassen“ = Ja, delegierte Berechtigung Microsoft Graph „Mail.Send“.</p>
+            </details>
+          </div>
+        </section>
+
+        <!-- Schritt B: Postfach -->
+        <section>
+          <h4 class="step-title"><span class="step-no">2</span> Mit dem Postfach anmelden</h4>
+          <p class="text-sm mb-3" style="color: var(--color-text-secondary)">
+            Mit dem Konto anmelden, <b>von dem</b> die Mails kommen sollen (z.B. logbot@firma.de –
+            braucht ein Postfach bzw. eine Exchange-Lizenz).
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-primary btn-sm" :disabled="busy || !(msApp.app_id || form.msClientId)" @click="startMailbox('device')">Anmelden (Gerätecode)</button>
+            <button class="btn btn-secondary btn-sm" :disabled="busy || !(msApp.app_id || form.msClientId)" @click="startMailbox('browser')">Anmelden (Browser)</button>
+          </div>
+          <DeviceStep v-if="flow && flow.kind === 'device' && flow.purpose === 'mailbox'" :flow="flow" />
+          <PasteStep v-if="flow && flow.kind === 'authorize'" :flow="flow" :busy="busy" @submit="completePaste" />
+        </section>
+      </div>
+    </div>
+
+    <!-- ============================== SMTP ============================== -->
+    <div v-if="choice === 'smtp'" class="card">
+      <div class="card-body space-y-3 max-w-2xl">
+        <label class="label">Anbieter
+          <select v-model="form.preset" class="select w-full" @change="applyPreset">
+            <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.label }}</option>
+          </select>
+        </label>
+        <p v-if="presetHint" class="hint">{{ presetHint }}</p>
+        <div class="grid md:grid-cols-3 gap-3">
+          <label class="label md:col-span-2">Server<input v-model="form.host" class="input w-full"></label>
+          <label class="label">Port<input v-model.number="form.port" type="number" class="input w-full"></label>
+        </div>
+        <label class="label">Verschlüsselung
+          <select v-model="form.encryption" class="select w-full">
+            <option value="starttls">STARTTLS (Port 587)</option>
+            <option value="tls">TLS (Port 465)</option>
+            <option value="none">keine (nur im eigenen Netz)</option>
+          </select>
+        </label>
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="label">Benutzer<input v-model="form.email" class="input w-full" autocomplete="off"></label>
+          <label class="label">Passwort<input v-model="form.password" type="password" class="input w-full" autocomplete="new-password"
+                 :placeholder="config?.smtp_password_set ? '•••••• (unverändert)' : ''"></label>
+        </div>
+        <label class="label">Absenderadresse<input v-model="form.from" class="input w-full" placeholder="logbot@firma.de"></label>
+        <label class="flex items-center gap-2 text-sm"><input v-model="form.verify" type="checkbox"> Zertifikat prüfen</label>
+        <button class="btn btn-primary" :disabled="busy" @click="saveSmtp(form.preset)">Speichern</button>
+      </div>
+    </div>
+
+    <!-- ============================== Postfix ============================== -->
+    <div v-if="choice === 'container'" class="card">
+      <div class="card-body space-y-3 max-w-2xl">
+        <p class="text-sm" style="color: var(--color-text-secondary)">
+          LogBots eigener Mailserver (Zusatzdienst „postfix“ unter System → Container → Zusatzdienste).
+          Die meisten Anschlüsse dürfen nicht selbst zustellen – dann über einen Smarthost.
+        </p>
+        <label class="label">Absenderadresse<input v-model="form.from" class="input w-full"></label>
+        <label class="label">Hostname des Mailservers<input v-model="form.myhostname" class="input w-full" placeholder="logbot.firma.de"></label>
+        <div class="grid md:grid-cols-3 gap-3">
+          <label class="label md:col-span-2">Smarthost (optional)<input v-model="form.relayHost" class="input w-full"></label>
+          <label class="label">Port<input v-model.number="form.relayPort" type="number" class="input w-full"></label>
+        </div>
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="label">Smarthost-Benutzer<input v-model="form.relayUser" class="input w-full"></label>
+          <label class="label">Smarthost-Passwort<input v-model="form.relayPassword" type="password" class="input w-full"></label>
+        </div>
+        <button class="btn btn-primary" :disabled="busy" @click="saveContainer">Speichern</button>
+      </div>
+    </div>
+
+    <div v-if="choice === 'off'" class="card">
+      <div class="card-body">
+        <p class="text-sm mb-3">Ohne Mailversand gibt es keine Passwort-Links, keine Bestätigungscodes und keine Meldungen per Mail.</p>
+        <button class="btn btn-danger btn-sm" :disabled="busy" @click="turnOff">Mailversand ausschalten</button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { useI18n } from '../i18n'
 
 const auth = useAuthStore()
-const { t, locale } = useI18n()
+const route = useRoute()
 
-const config = ref({ mode: 'off', notify_on: {}, default_recipients: [] })
-const modes = ref([])
-const encryptions = ref([])
-const events = ref([])
-const smtpPassword = ref('')
-const relayPassword = ref('')
-const preview = ref(null)
+const OPTIONS = [
+  { id: 'google', label: 'Google', hint: 'Gmail und Workspace' },
+  { id: 'm365', label: 'Microsoft 365', hint: 'Exchange Online, App wird angelegt' },
+  { id: 'outlook', label: 'Outlook.com', hint: 'private Microsoft-Konten' },
+  { id: 'smtp', label: 'Anderer Anbieter', hint: 'GMX, WEB.DE, IONOS, Strato …' },
+  { id: 'container', label: 'Eigener Postfix', hint: 'Zusatzdienst auf diesem Server' },
+  { id: 'off', label: 'Aus', hint: 'keine Mails' },
+]
 
-const saving = ref(false)
-const testing = ref(false)
-const error = ref('')
-const message = ref('')
+const config = ref(null)
+const presets = ref([])
+const msLoopback = ref('http://localhost')
+const publicUrl = ref('')
+const choice = ref('')
+const googleWay = ref('apppass')
+const changeApp = ref(false)
+const busy = ref(false)
+const banner = ref('')
+const bannerError = ref(false)
+const flow = ref(null)
+const registerReport = ref(null)
+const testRecipient = ref('')
+let pollTimer = null
 
-const recipientsText = computed({
-  get: () => (config.value.default_recipients || []).join(', '),
-  set: (value) => {
-    config.value.default_recipients = value
-      .split(/[,;\s]+/)
-      .map(entry => entry.trim())
-      .filter(Boolean)
+const form = ref({
+  email: '', password: '', clientId: '', clientSecret: '', msClientId: '', msTenant: '',
+  preset: 'gmx', host: '', port: 587, encryption: 'starttls', from: '', verify: true,
+  myhostname: '', relayHost: '', relayPort: 587, relayUser: '', relayPassword: '',
+})
+
+const msApp = computed(() => config.value?.ms_app || {})
+const modeLabel = computed(() => ({
+  off: 'Aus', google: 'Google', microsoft: 'Microsoft', relay: 'SMTP-Server', container: 'Postfix-Container',
+}[config.value?.mode] || '–'))
+const presetHint = computed(() => presets.value.find(p => p.id === form.value.preset)?.hint || '')
+
+function say(text, isError = false) {
+  banner.value = text
+  bannerError.value = isError
+}
+
+// --- kleine Bausteine: Gerätecode anzeigen, Adresse zurückkopieren -------------
+const DeviceStep = defineComponent({
+  props: { flow: Object },
+  setup(props) {
+    return () => h('div', { class: 'device-box' }, [
+      h('p', { class: 'text-sm' }, ['Öffne ', h('a', { href: props.flow.verification_uri, target: '_blank', rel: 'noopener', class: 'link' }, props.flow.verification_uri),
+        ' und gib diesen Code ein:']),
+      h('p', { class: 'device-code' }, props.flow.user_code),
+      h('p', { class: 'hint' }, 'Diese Seite wartet und macht von selbst weiter, sobald die Anmeldung erledigt ist.'),
+    ])
   },
 })
 
+const PasteStep = defineComponent({
+  props: { flow: Object, busy: Boolean },
+  emits: ['submit'],
+  setup(props, { emit }) {
+    const value = ref('')
+    return () => h('div', { class: 'device-box space-y-2' }, props.flow.returns_by_itself
+      ? [h('p', { class: 'text-sm' }, 'Die Anmeldung läuft im neuen Fenster. Danach kommt der Browser von selbst hierher zurück.')]
+      : [
+          h('p', { class: 'text-sm' }, ['Nach der Anmeldung landet der Browser auf ', h('code', props.flow.redirect_uri),
+            ' – die Seite lädt nicht, das ist richtig. Die komplette Adresse aus der Adresszeile kopieren und hier einfügen:']),
+          h('input', { class: 'input w-full', value: value.value, placeholder: `${props.flow.redirect_uri}?code=…`,
+            onInput: (e) => { value.value = e.target.value } }),
+          h('button', { class: 'btn btn-primary btn-sm', disabled: props.busy || !value.value,
+            onClick: () => emit('submit', value.value) }, 'Anmeldung abschließen'),
+        ])
+  },
+})
+
+// --- Laden und Speichern ---------------------------------------------------------
 async function load() {
-  try {
-    const data = await auth.api('/api/mail/config')
-    config.value = data.config
-    config.value.notify_on = config.value.notify_on || {}
-    modes.value = data.modes
-    encryptions.value = data.encryptions
-    events.value = data.events
-  } catch (err) {
-    error.value = err.message
+  const data = await auth.api('/api/mail/config')
+  config.value = data.config
+  presets.value = data.presets
+  msLoopback.value = data.microsoft_loopback
+  publicUrl.value = data.public_url || window.location.origin
+  if (!choice.value) {
+    choice.value = { google: 'google', microsoft: msApp.value.personal_accounts ? 'outlook' : 'm365',
+                     relay: 'smtp', container: 'container' }[config.value.mode] || ''
+  }
+  form.value.from = config.value.from_address || ''
+  if (!testRecipient.value) testRecipient.value = auth.user?.email || ''
+}
+
+function pick(id) {
+  choice.value = id
+  flow.value = null
+  stopPolling()
+  if (id === 'smtp') applyPreset()
+}
+
+function applyPreset() {
+  const p = presets.value.find(x => x.id === form.value.preset)
+  if (p && p.id !== 'custom') {
+    form.value.host = p.host
+    form.value.port = p.port
+    form.value.encryption = p.encryption
   }
 }
 
-async function save() {
-  saving.value = true
-  error.value = ''
-  message.value = ''
+async function savePublicUrl() {
   try {
-    const body = { ...config.value }
-    // Leere Passwortfelder heißen "unverändert" - nur Getipptes mitschicken.
-    if (smtpPassword.value) body.smtp_password = smtpPassword.value
-    if (relayPassword.value) body.relay_password = relayPassword.value
-    delete body.smtp_password_set
-    delete body.relay_password_set
-    delete body.postfix_file_written
+    const data = await auth.api('/api/mail/public-url', { method: 'PUT', body: { public_url: publicUrl.value } })
+    publicUrl.value = data.public_url
+    say('Adresse gespeichert.')
+  } catch (e) { say(e.message, true) }
+}
 
+async function ensurePublicUrl() {
+  // Ohne Adresse gehen keine Links raus - beim ersten Einrichten die Adresse
+  // übernehmen, über die der Administrator gerade arbeitet.
+  if (!config.value?.ready && publicUrl.value) {
+    try { await auth.api('/api/mail/public-url', { method: 'PUT', body: { public_url: publicUrl.value } }) } catch { /* bleibt sichtbar */ }
+  }
+}
+
+async function saveSmtp(preset) {
+  busy.value = true
+  try {
+    const p = presets.value.find(x => x.id === preset)
+    const body = preset === 'gmail'
+      ? { mode: 'relay', preset: 'gmail', smtp_host: 'smtp.gmail.com', smtp_port: 587, encryption: 'starttls',
+          smtp_user: form.value.email, smtp_password: form.value.password, from_address: form.value.email,
+          verify_certificate: true }
+      : { mode: 'relay', preset, smtp_host: form.value.host || p?.host, smtp_port: form.value.port,
+          encryption: form.value.encryption, smtp_user: form.value.email, smtp_password: form.value.password,
+          from_address: form.value.from || form.value.email, verify_certificate: form.value.verify }
+    await ensurePublicUrl()
     const data = await auth.api('/api/mail/config', { method: 'PUT', body })
     config.value = data.config
-    config.value.notify_on = config.value.notify_on || {}
-    smtpPassword.value = ''
-    relayPassword.value = ''
-    message.value = data.config.postfix_file_written?.written
-      ? `${t('common.success')} — ${data.config.postfix_file_written.note}`
-      : t('common.success')
-    if (data.config.postfix_file_written && !data.config.postfix_file_written.written) {
-      error.value = data.config.postfix_file_written.reason
+    form.value.password = ''
+    say('Gespeichert. Jetzt eine Probemail schicken.')
+  } catch (e) { say(e.message, true) } finally { busy.value = false }
+}
+
+async function saveContainer() {
+  busy.value = true
+  try {
+    const data = await auth.api('/api/mail/config', { method: 'PUT', body: {
+      mode: 'container', from_address: form.value.from, myhostname: form.value.myhostname,
+      relay_host: form.value.relayHost, relay_port: form.value.relayPort, relay_user: form.value.relayUser,
+      relay_password: form.value.relayPassword,
+    } })
+    config.value = data.config
+    say('Gespeichert. Der Postfix-Container muss neu gestartet werden (System → Container).')
+  } catch (e) { say(e.message, true) } finally { busy.value = false }
+}
+
+async function turnOff() {
+  busy.value = true
+  try {
+    const data = await auth.api('/api/mail/config', { method: 'PUT', body: { mode: 'off' } })
+    config.value = data.config
+    say('Mailversand ist aus.')
+  } catch (e) { say(e.message, true) } finally { busy.value = false }
+}
+
+async function sendTest() {
+  busy.value = true
+  try {
+    const result = await auth.api('/api/mail/test', { method: 'POST', body: { recipient: testRecipient.value } })
+    say(`Probemail an ${result.recipients.join(', ')} verschickt (${result.via}).`)
+  } catch (e) { say(e.message, true) } finally { busy.value = false }
+}
+
+async function disconnect() {
+  const data = await auth.api('/api/mail/oauth/disconnect', { method: 'POST' })
+  config.value = data.config
+  say('Anmeldung entfernt.')
+}
+
+// --- OAuth ------------------------------------------------------------------
+async function startGoogle() {
+  busy.value = true
+  try {
+    await ensurePublicUrl()
+    const data = await auth.api('/api/mail/oauth/google/start', { method: 'POST', body: {
+      client_id: form.value.clientId, client_secret: form.value.clientSecret, return_mode: 'auto' } })
+    flow.value = { ...data, kind: 'authorize' }
+    window.open(data.auth_url, '_blank', 'noopener')
+  } catch (e) { say(e.message, true) } finally { busy.value = false }
+}
+
+async function startRegister(method) {
+  busy.value = true
+  registerReport.value = null
+  try {
+    const data = await auth.api('/api/mail/oauth/microsoft/register/start', { method: 'POST', body: {
+      method, personal_accounts: choice.value === 'outlook' } })
+    if (method === 'device') {
+      flow.value = { ...data, kind: 'device', purpose: 'register' }
+      poll()
+    } else {
+      flow.value = { ...data, kind: 'register_authorize', returns_by_itself: false }
+      window.open(data.auth_url, '_blank', 'noopener')
     }
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    saving.value = false
-  }
+  } catch (e) { say(e.message, true) } finally { busy.value = false }
 }
 
-async function test() {
-  testing.value = true
-  error.value = ''
-  message.value = ''
+async function startMailbox(method) {
+  busy.value = true
   try {
-    const result = await auth.api('/api/mail/test', { method: 'POST', body: { recipient: '' } })
-    message.value = `${result.recipients.join(', ')} — ${result.via}`
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    testing.value = false
-  }
+    await ensurePublicUrl()
+    const data = await auth.api('/api/mail/oauth/microsoft/start', { method: 'POST', body: {
+      client_id: changeApp.value || !msApp.value.app_id ? form.value.msClientId : '',
+      tenant: form.value.msTenant, account_type: choice.value === 'outlook' ? 'personal' : 'work',
+      method, return_mode: 'paste' } })
+    if (method === 'device') {
+      flow.value = { ...data, kind: 'device', purpose: 'mailbox' }
+      poll()
+    } else {
+      flow.value = { ...data, kind: 'authorize' }
+      window.open(data.auth_url, '_blank', 'noopener')
+    }
+  } catch (e) { say(e.message, true) } finally { busy.value = false }
 }
 
-async function loadPreview() {
+function stopPolling() { clearTimeout(pollTimer) }
+
+async function poll() {
+  stopPolling()
+  if (!flow.value || flow.value.kind !== 'device') return
   try {
-    preview.value = await auth.api('/api/mail/preview')
-  } catch (err) {
-    error.value = err.message
+    const result = await auth.api('/api/mail/oauth/poll', { method: 'POST', body: { flow_id: flow.value.flow_id } })
+    if (result.status === 'pending') {
+      pollTimer = setTimeout(poll, 4000)
+      return
+    }
+    handleResult(result)
+  } catch (e) {
+    flow.value = null
+    say(e.message, true)
   }
 }
 
-onMounted(load)
+async function completePaste(pasted) {
+  busy.value = true
+  try {
+    const result = await auth.api('/api/mail/oauth/complete', { method: 'POST', body: { flow_id: flow.value.flow_id, pasted } })
+    handleResult(result)
+  } catch (e) { say(e.message, true) } finally { busy.value = false }
+}
+
+async function handleResult(result) {
+  flow.value = null
+  if (result.status === 'registered') {
+    registerReport.value = result.steps
+    changeApp.value = false
+    say('App-Registrierung angelegt. Jetzt mit dem Postfach anmelden (Schritt 2).')
+  } else if (result.status === 'connected') {
+    say(`Angemeldet als ${result.account}. Mails gehen ab jetzt über dieses Konto.`)
+  }
+  await load()
+}
+
+onMounted(async () => {
+  try { await load() } catch (e) { say(e.message, true) }
+  const state = route.query.oauth
+  if (state) {
+    const texts = { connected: ['Angemeldet – der Mailversand ist eingerichtet.', false],
+      denied: ['Die Anmeldung wurde abgelehnt.', true], expired: ['Die Anmeldung ist abgelaufen – bitte neu starten.', true],
+      failed: ['Die Anmeldung ist fehlgeschlagen – Details im Systemtagebuch.', true] }
+    const [text, isError] = texts[state] || ['', false]
+    if (text) say(text, isError)
+  }
+})
+onBeforeUnmount(stopPolling)
 </script>
 
 <style scoped>
-.mode-grid {
-  display: grid;
-  gap: 0.5rem;
+.section-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin-bottom: 0.625rem;
+  color: var(--color-text-primary);
 }
 
-@media (min-width: 768px) {
-  .mode-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-.mode {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--color-border);
-  cursor: pointer;
-  font-size: 0.8125rem;
-}
-
-.mode:hover {
-  background-color: var(--hover-surface);
-}
-
-.mode.is-picked {
-  border-color: var(--color-primary);
-  background-color: var(--primary-soft);
-}
-
-.mode input {
-  margin-top: 0.1875rem;
-  flex-shrink: 0;
-}
-
-.mode span {
+.tile {
   display: flex;
   flex-direction: column;
-  gap: 0.1875rem;
-  min-width: 0;
+  gap: 0.25rem;
+  padding: 0.875rem;
+  text-align: left;
 }
 
-.mode strong {
-  color: var(--color-text-primary);
+.tile.is-picked {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.tile-title {
   font-weight: 600;
+  color: var(--color-text-primary);
 }
 
-.mode em {
-  font-style: normal;
-  font-size: 0.6875rem;
+.tile-hint {
+  font-size: 0.75rem;
   color: var(--color-text-muted);
 }
 
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
+.steps {
+  list-style: decimal;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
   color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.event-grid {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.375rem;
 }
 
-@media (min-width: 640px) {
-  .event-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-.preview-box {
-  padding: 0.75rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface-elevated);
-}
-
-.preview-text {
-  margin-top: 0.5rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.6875rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 20rem;
-  overflow: auto;
-  color: var(--color-text-secondary);
-}
-
-.alert {
-  padding: 0.625rem 0.875rem;
-  border-radius: var(--radius);
+.steps-report {
   font-size: 0.8125rem;
-  margin-bottom: 0.75rem;
-  border: 1px solid var(--color-border);
-}
-
-.alert-danger {
-  background-color: var(--danger-soft);
-  color: var(--color-danger);
-  border-color: var(--color-danger);
-}
-
-.alert-success {
-  background-color: var(--primary-soft);
   color: var(--color-success);
+  list-style: '✓ ';
+  padding-left: 1.25rem;
+}
+
+.step-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-primary);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
+.link {
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+:deep(.device-box) {
+  margin-top: 0.75rem;
+  padding: 0.875rem;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius);
+}
+
+:deep(.device-code) {
+  font-family: var(--font-mono);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.25rem;
+  margin: 0.5rem 0;
+  color: var(--color-text-primary);
+}
+
+:deep(.link) {
+  color: var(--color-primary);
 }
 </style>

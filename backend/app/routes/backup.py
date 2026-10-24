@@ -109,7 +109,8 @@ async def create(data: CreateRequest, db: AsyncSession = Depends(get_db),
 # =============================================================================
 @router.get("/{name}/download")
 async def download(name: str,
-                   token: str = Query("", description="Access-Token, falls kein Kopf möglich"),
+                   ticket: str = Query("", description="Kurzzeit-Ticket (POST /api/auth/ticket)"),
+                   token: str = Query("", description="veraltet: Access-Token"),
                    authorization: str = Header("")):
     """Sicherung als Datei herunterladen.
 
@@ -118,7 +119,7 @@ async def download(name: str,
     (für Aufrufe aus Skripten) oder `?token=` (für den Link in der Oberfläche).
     Geprüft wird in beiden Fällen dasselbe.
     """
-    candidate = token.strip()
+    candidate = (ticket or token).strip()
     if not candidate and authorization.startswith("Bearer "):
         candidate = authorization[7:].strip()
     if not candidate or not await admin_from_token(candidate):

@@ -101,6 +101,12 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = await api('/api/auth/me')
   }
 
+  /** Neues Zugangstoken übernehmen (z.B. nach dem Passwortwechsel - das alte gilt dann nicht mehr). */
+  function setToken(value) {
+    token.value = value
+    localStorage.setItem('token', value)
+  }
+
   function logout() {
     token.value = null
     user.value = null
@@ -121,5 +127,5 @@ export const useAuthStore = defineStore('auth', () => {
     return res.json()
   }
 
-  return { token, user, isAuthenticated, isAdmin, login, loginMfa, loginPasskey, logout, fetchUser, api }
+  return { token, user, isAuthenticated, isAdmin, login, loginMfa, loginPasskey, logout, fetchUser, api, setToken }
 })

@@ -2,6 +2,11 @@
 
 Syslog-Empfang & Parsing (`syslog/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.23.12.00.00
+### Security
+- **Grenzen gegen Überflutung** – Port 514 ist ohne Anmeldung offen: Zeilen über 16 KiB werden gekürzt, höchstens 20 000 UDP-Zeilen warten (darüber wird verworfen und gezählt), höchstens 512 TCP-Verbindungen, stille Verbindungen nach 10 Minuten getrennt, überlange TCP-Zeilen verworfen statt den Leser zu blockieren.
+- Ein Hostname mit Schrägstrich wird zu `_` – per Syslog kann sich niemand als Container einer VM (`vm/container`) ausgeben.
+- asyncpg 0.32, Grundsystem beim Bauen aktualisiert.
 ## 2026.10.11.20.00.00
 ### Fixed
 - **UDP-Aufgaben ohne Grenze:** bei langsamer Datenbank stauten sich je Meldung eine Aufgabe im Speicher. Jetzt höchstens `SYSLOG_UDP_MAX_INFLIGHT` (5.000), darüber wird verworfen und einmal pro Minute gezählt gemeldet; Aufgaben werden referenziert (vorher konnte der Garbage Collector sie einsammeln).

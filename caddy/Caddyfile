@@ -1,7 +1,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.07.31.23.00.00
+# Version:     2026.10.23.12.00.00
 # Beschreibung: LogBot - Caddy Reverse Proxy (Startkonfiguration)
 #
 # Das ist nur der Zustand beim ersten Start: reines HTTP auf Port 80.
@@ -14,7 +14,9 @@
 # ==============================================================================
 
 {
-    admin 0.0.0.0:2019
+    # Admin-Schnittstelle NUR als Unix-Socket im Volume caddy_admin - andere
+    # Container im Docker-Netz erreichen sie damit nicht mehr.
+    admin unix//run/caddy-admin/admin.sock
 }
 
 (logbot_routes) {

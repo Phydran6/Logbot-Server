@@ -59,7 +59,7 @@
         <!-- Schritt 1: Benutzername + Passwort -->
         <form v-if="!mfaToken" class="space-y-4" @submit.prevent="handleLogin">
           <div>
-            <label for="login-username" class="label">Benutzername</label>
+            <label for="login-username" class="label">Benutzername oder E-Mail</label>
             <input
               id="login-username"
               v-model="username"
@@ -97,6 +97,21 @@
           <button type="submit" class="btn btn-primary w-full" :disabled="loading">
             {{ loading ? 'Anmelden…' : 'Anmelden' }}
           </button>
+
+          <!-- Passwort vergessen: Link per Mail (nur lokale Konten mit bestätigter Adresse) -->
+          <div class="text-center">
+            <button type="button" class="forgot-link" @click="forgotOpen = !forgotOpen">Passwort vergessen?</button>
+          </div>
+          <div v-if="forgotOpen" class="forgot-box">
+            <p class="text-xs mb-2" style="color: var(--color-text-muted)">
+              Benutzername oder E-Mail eingeben – ist eine bestätigte Adresse hinterlegt, kommt ein Link zum Zurücksetzen.
+            </p>
+            <div class="flex gap-2">
+              <input v-model="forgotLogin" class="input" placeholder="Benutzername oder E-Mail" aria-label="Benutzername oder E-Mail">
+              <button type="button" class="btn btn-secondary" :disabled="forgotBusy || !forgotLogin.trim()" @click="requestReset">Senden</button>
+            </div>
+            <p v-if="forgotMessage" class="text-xs mt-2" style="color: var(--color-success)">{{ forgotMessage }}</p>
+          </div>
 
           <!-- Passkey: Windows Hello, Face ID, Fingerabdruck, Sicherheitsschlüssel -->
           <template v-if="passkeySupported || sso.enabled">
@@ -182,6 +197,27 @@ const brandingStore = useBrandingStore()
 const appVersion = pkg.version
 
 const username = ref('')
+const forgotOpen = ref(false)
+const forgotLogin = ref('')
+const forgotBusy = ref(false)
+const forgotMessage = ref('')
+
+async function requestReset() {
+  forgotBusy.value = true
+  forgotMessage.value = ''
+  try {
+    const res = await fetch('/api/auth/password/forgot', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login: forgotLogin.value.trim() }),
+    })
+    const data = await res.json().catch(() => ({}))
+    forgotMessage.value = res.ok ? data.message : (data.detail || 'Zu viele Versuche – bitte kurz warten.')
+  } catch {
+    forgotMessage.value = 'Der Server ist gerade nicht erreichbar.'
+  } finally {
+    forgotBusy.value = false
+  }
+}
 const password = ref('')
 const showPassword = ref(false)
 const loading = ref(false)
@@ -518,6 +554,17 @@ async function handleMfa() {
 .password-toggle:hover {
   color: var(--color-text-primary);
   background-color: var(--hover-surface);
+}
+
+.forgot-link {
+  font-size: 0.8125rem;
+  color: var(--color-primary);
+}
+
+.forgot-box {
+  padding: 0.75rem;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius);
 }
 
 /* "oder"-Trenner zwischen Passwort- und Passkey-Anmeldung */

@@ -135,7 +135,12 @@ services:
   # EIGEN: Backend (FastAPI). Aus ./backend gebaut.
   # ============================================================================
   backend:
-    build: ./backend
+    # Gebaut aus dem ganzen Repository: das Image traegt die Agent-Installer
+    # mit (agents/), damit der Server Agent-Updates signiert ausliefern kann -
+    # auch im gehaerteten Betrieb ohne Zugriff auf den Host.
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     image: logbot/backend:local
     container_name: logbot-app-backend
     hostname: backend
@@ -173,7 +178,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-}
       DB_SSLMODE: ${DB_SSLMODE:-}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET muss gesetzt sein}
-      CADDY_ADMIN_URL: ${CADDY_ADMIN_URL:-http://caddy:2019}
+      # Caddys Admin-Schnittstelle liegt auf einem Unix-Socket (Volume
+      # caddy_admin) - fuer andere Container im Docker-Netz unerreichbar.
+      CADDY_ADMIN_URL: ${CADDY_ADMIN_URL:-unix:///run/caddy-admin/admin.sock}
       CADDY_CERTS_DIR: ${CADDY_CERTS_DIR:-/caddy-certs}
       # Notausstieg: CADDY_FORCE_HTTP=true in der .env setzen, Backend neu starten
       # -> zurueck auf reines HTTP (Port 80), gespeicherte TLS-Config wird verworfen.
@@ -233,6 +240,8 @@ services:
       - "8000"
     volumes:
       - caddy_certs:/caddy-certs
+      # Nur Caddy und das Backend sehen diesen Socket.
+      - caddy_admin:/run/caddy-admin
       # Sicherungen liegen in einem eigenen Volume: so ueberstehen sie einen
       # Neubau der Container - und genau dafuer sind sie da.
       - backup_data:/backups
@@ -298,6 +307,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - caddy_certs:/etc/caddy/certs
+      - caddy_admin:/run/caddy-admin
     depends_on:
       - frontend
       - backend
@@ -327,6 +337,7 @@ volumes:
   caddy_data:
   caddy_config:
   caddy_certs:
+  caddy_admin:
   backup_data:
   app_data:
 

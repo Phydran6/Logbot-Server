@@ -58,6 +58,22 @@ export default {
   },
 
   nav: {
+    // Neu 2026.10.23
+    notifications: 'Meldungen',
+    inbox: 'Eingang',
+    rules: 'Regeln',
+    channels: 'Kanäle',
+    telegram: 'Telegram',
+    pushApp: 'App & Push',
+    agentAdmin: 'Agents',
+    agentUpdates: 'Agent-Updates',
+    agentLimits: 'Grenzen & Vorgaben',
+    signin: 'Anmeldung',
+    account: 'Mein Konto',
+    profile: 'E-Mail & Passwort',
+    operation: 'Betrieb',
+    proxy: 'Reverse Proxy & TLS',
+    dns: 'DNS',
     // Bereich 1: Was ist im Netz passiert?
     monitoring: 'Überwachung',
     dashboard: 'Dashboard',
@@ -87,8 +103,8 @@ export default {
     backup: 'Sicherung',
     console: 'Konsole',
     connectivity: 'Netzwerk & Mail',
-    mail: 'Mail',
-    alerts: 'Benachrichtigungen',
+    mail: 'E-Mail',
+    alerts: 'Systemwächter',
     // Bereich 5: Was ist das eigentlich?
     help: 'Hilfe',
     about: 'Über LogBot & FAQ',
@@ -97,7 +113,7 @@ export default {
     // Unterpunkte der Einstellungen - im linken Menü aufgeklappt
     general: 'Allgemein',
     retention: 'Aufbewahrung',
-    agentTokens: 'Agent-Token',
+    agentTokens: 'Zugangsschlüssel',
     archiving: 'Archivierung',
     network: 'Netzwerk',
     database: 'Datenbank',

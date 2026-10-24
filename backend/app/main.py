@@ -23,11 +23,13 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select, desc, delete, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from . import agentinv
 from . import archiving
 from . import discovery
 from . import diskguard
 from . import fritzbox
 from . import journal
+from . import notify
 from . import shell
 from . import tokens
 from . import updater
@@ -44,7 +46,8 @@ from .routes import (auth_router, mfa_router, health_router, users_router, agent
                      diagnostics_router, updates_router, backup_router, mobile_router,
                      ai_router, stacks_router, mail_router, shell_router,
                      journal_router, containers_router, sso_router, about_router,
-                     discovery_router,
+                     discovery_router, magiclink_router,
+                     notifications_router, app_notifications_router,
                      alerts_router,
                      caddy as caddy_router, network as network_router)
 from .branding import branding_router
@@ -69,6 +72,39 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return response
+
+
+# =============================================================================
+# Protokolle ohne Geheimnisse
+# =============================================================================
+class _RedactQuery(logging.Filter):
+    """Schwaerzt Tickets, Token und OAuth-Codes in Zugriffsprotokollen.
+
+    Uvicorn schreibt jede Anfrage samt Parametern ins Container-Log. Dort
+    standen bisher u.a. Zugangstoken (Ereignisstrom, Terminal) und
+    Webhook-Token. Seit LogBot Container-Logs selbst einsammelt, waeren sie
+    sonst fuer jedes Lesekonto in der Logansicht zu finden.
+    """
+    _pattern = __import__("re").compile(
+        r"((?<![\w])(?:token|ticket|code|state|t|rid|access_token|refresh_token)=)[^&\s\"']+", __import__("re").I)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if record.args:
+                record.args = tuple(self._pattern.sub(r"\1***", a) if isinstance(a, str) else a
+                                    for a in record.args)
+            if isinstance(record.msg, str):
+                record.msg = self._pattern.sub(r"\1***", record.msg)
+        except Exception:                                           # defensiv
+            pass
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactQuery())
+# httpx protokolliert jede Anfrage samt Adresse - bei Telegram steht der
+# Bot-Token IN der Adresse. Nur Warnungen durchlassen.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 # =============================================================================
@@ -139,6 +175,9 @@ app.include_router(containers_router)
 app.include_router(sso_router)
 app.include_router(about_router)
 app.include_router(discovery_router)
+app.include_router(magiclink_router)
+app.include_router(notifications_router)
+app.include_router(app_notifications_router)
 app.include_router(alerts_router)
 app.include_router(caddy_router.router)
 app.include_router(network_router.router)
@@ -220,7 +259,7 @@ async def ensure_token_schema():
                 logger.warning(
                     "%s Schlüssel aus einer früheren Fassung gefunden. Sie gelten weiter, "
                     "liegen aber noch im Klartext in der Datenbank — unter "
-                    "Sicherheit → Schlüssel lassen sie sich überführen.", len(rows))
+                    "Agents → Zugangsschlüssel lassen sie sich überführen.", len(rows))
 
             _, plain = await tokens.ensure_global(session, created_by="system")
             await session.commit()
@@ -414,6 +453,144 @@ async def _drop_invalid_index(conn, name: str) -> None:
 
 
 @app.on_event("startup")
+async def ensure_magic_link_table():
+    """Anmeldung per E-Mail-Link (routes/magiclink.py) - Tabelle fuer Bestands-DBs."""
+    logger = logging.getLogger("logbot.startup")
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn.exec_driver_sql("""
+                CREATE TABLE IF NOT EXISTS magic_link_requests (
+                    id SERIAL PRIMARY KEY,
+                    request_id VARCHAR(64) UNIQUE NOT NULL,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash VARCHAR(64) UNIQUE NOT NULL,
+                    code_challenge VARCHAR(128) NOT NULL,
+                    match_code VARCHAR(8) NOT NULL,
+                    device_name VARCHAR(80),
+                    source_ip VARCHAR(45),
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    expires_at TIMESTAMP NOT NULL,
+                    approved_at TIMESTAMP,
+                    consumed_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_magic_link_user ON magic_link_requests(user_id)")
+        logger.info("magic_link_requests table ready")
+    except Exception as exc:
+        logger.warning("magic_link_requests migration skipped: %s", exc)
+
+
+@app.on_event("startup")
+async def ensure_schema_2026_10():
+    """Release 2026.10.22: Konten, Geraete-Baum, Agent-Updates, Meldungen.
+
+    Alles idempotent (IF NOT EXISTS) - ein zweiter Start aendert nichts mehr.
+    """
+    logger = logging.getLogger("logbot.startup")
+    statements = (
+        # --- Konten -----------------------------------------------------------
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMP",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE users ALTER COLUMN email TYPE VARCHAR(254)",
+        """CREATE TABLE IF NOT EXISTS user_tokens (
+               id SERIAL PRIMARY KEY,
+               user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+               purpose VARCHAR(20) NOT NULL,
+               token_hash VARCHAR(64) UNIQUE NOT NULL,
+               target VARCHAR(254),
+               attempts INTEGER NOT NULL DEFAULT 0,
+               expires_at TIMESTAMP NOT NULL,
+               used_at TIMESTAMP,
+               requested_ip VARCHAR(45),
+               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+        "CREATE INDEX IF NOT EXISTS idx_user_tokens_user ON user_tokens(user_id)",
+        # --- Geraete: Container als Kinder, Agent-Updates, Begrenzung --------
+        "ALTER TABLE agents ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE",
+        "CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id)",
+        "ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_version VARCHAR(40)",
+        "ALTER TABLE agents ADD COLUMN IF NOT EXISTS update_policy VARCHAR(20)",
+        "ALTER TABLE agents ADD COLUMN IF NOT EXISTS update_requested_at TIMESTAMP",
+        "ALTER TABLE agents ADD COLUMN IF NOT EXISTS update_state JSONB DEFAULT '{}'",
+        "ALTER TABLE agents ADD COLUMN IF NOT EXISTS ingest_limit_per_minute INTEGER",
+        # --- Meldungen ---------------------------------------------------------
+        """CREATE TABLE IF NOT EXISTS notifications (
+               id SERIAL PRIMARY KEY,
+               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+               severity VARCHAR(20) NOT NULL DEFAULT 'info',
+               category VARCHAR(30) NOT NULL DEFAULT 'log',
+               title VARCHAR(200) NOT NULL,
+               body TEXT DEFAULT '',
+               audience VARCHAR(10) NOT NULL DEFAULT 'admin',
+               rule_id VARCHAR(40),
+               hostname VARCHAR(255),
+               agent_id INTEGER,
+               log_id INTEGER,
+               count INTEGER NOT NULL DEFAULT 1,
+               data JSONB DEFAULT '{}',
+               delivery JSONB DEFAULT '{}')""",
+        "CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC)",
+        """CREATE TABLE IF NOT EXISTS notification_read_state (
+               user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+               last_read_id INTEGER NOT NULL DEFAULT 0,
+               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+        """CREATE TABLE IF NOT EXISTS push_endpoints (
+               id SERIAL PRIMARY KEY,
+               user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+               endpoint TEXT NOT NULL,
+               endpoint_hash VARCHAR(64) UNIQUE NOT NULL,
+               p256dh VARCHAR(200),
+               auth VARCHAR(100),
+               device_name VARCHAR(80),
+               min_severity VARCHAR(20) NOT NULL DEFAULT 'warning',
+               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+               last_ok_at TIMESTAMP,
+               last_error TEXT,
+               failures INTEGER NOT NULL DEFAULT 0)""",
+        "CREATE INDEX IF NOT EXISTS idx_push_endpoints_user ON push_endpoints(user_id)",
+    )
+    try:
+        async with engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            for statement in statements:
+                try:
+                    await conn.exec_driver_sql(statement)
+                except Exception as exc:
+                    logger.warning("Migration übersprungen (%s): %s", " ".join(statement.split())[:70], exc)
+            # Eindeutige E-Mail-Adressen (gross/klein egal). Gibt es schon
+            # Doppelte, bleibt der Index weg - die Oberflaeche zeigt sie an.
+            try:
+                await conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users ((lower(email))) "
+                    "WHERE email IS NOT NULL AND email <> ''")
+            except Exception as exc:
+                logger.warning("Eindeutige E-Mail-Adressen nicht erzwingbar (Doppelte vorhanden): %s", exc)
+        logger.info("schema 2026.10 ready")
+    except Exception as exc:
+        logger.warning("schema 2026.10 migration skipped: %s", exc)
+
+    # Das Auslieferungskonto admin/admin muss beim ersten Anmelden ein neues
+    # Passwort bekommen. Bisher hing das an der Disziplin des Betreibers.
+    try:
+        from .auth import verify_password
+        from .models import User as _User
+        async with async_session() as session:
+            for user in (await session.execute(
+                    select(_User).where(_User.auth_source == "local"))).scalars().all():
+                if not user.must_change_password and verify_password("admin", user.password_hash):
+                    user.must_change_password = True
+                    logging.getLogger("logbot.security").warning(
+                        "Konto '%s' hat noch das Standardpasswort - Wechsel wird erzwungen.", user.username)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("Prüfung auf Standardpasswort übersprungen: %s", exc)
+
+
+@app.on_event("startup")
 async def ensure_log_indexes():
     """Index fuer den Facility-Filter der Log-Ansicht (Migration fuer Bestands-DBs).
 
@@ -573,8 +750,13 @@ async def serve_linux_installer(request: Request):
     """
     from . import hostexec
 
-    paths = hostexec.host_paths()
-    content = await hostexec.read_host_file(f"{paths['install_dir']}/agents/install-linux.sh")
+    from pathlib import Path as _Path
+    local = _Path(os.getenv("LOGBOT_AGENTS_DIR", "/app/agents")) / "install-linux.sh"
+    if local.is_file():
+        content = local.read_text(encoding="utf-8")
+    else:
+        paths = hostexec.host_paths()
+        content = await hostexec.read_host_file(f"{paths['install_dir']}/agents/install-linux.sh")
     if not content or "LogBot Linux Agent" not in content:
         raise HTTPException(status_code=404, detail="Installer auf diesem Server nicht verfügbar.")
     return Response(content=content, media_type="text/x-shellscript")
@@ -650,25 +832,6 @@ def _dedup_key(hostname: str, timestamp: datetime, event_id: Optional[int], mess
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _agent_type_fallback(token_type: Optional[str], user_agent: Optional[str]) -> str:
-    """Geraeteart, wenn der Agent selbst keine mitschickt (Agents vor 2026.09.15).
-
-    Reihenfolge: Typ des Tokens, dann der User-Agent (der Linux-Agent sendet per
-    Python-urllib, der Windows-Agent per PowerShell), sonst "unknown". Frueher
-    stand hier stur "windows_agent" - ein Linux-Agent mit dem global-agent-Token
-    tauchte dadurch als Windows-Agent auf.
-    """
-    mapped = {"linux": "linux_agent", "windows": "windows_agent"}.get(token_type or "")
-    if mapped:
-        return mapped
-    ua = (user_agent or "").lower()
-    if "powershell" in ua:
-        return "windows_agent"
-    if "python-urllib" in ua:
-        return "linux_agent"
-    return "unknown"
-
-
 @app.post("/api/agents/ingest", response_model=LogIngestResponse, tags=["Agent Ingest"])
 @limiter.limit("600/minute", key_func=agent_key)
 async def ingest_logs(
@@ -686,6 +849,10 @@ async def ingest_logs(
     Eintraege mit eigenem Zeitstempel bekommen einen dedup_key: wiederholte Lieferungen
     derselben Ereignisse (die FRITZ!Box liefert immer ihren kompletten Puffer) werden
     von der Datenbank verworfen statt doppelt gespeichert.
+
+    Neu 2026.10.22: Eintraege mit ``container`` landen bei der Kind-Instanz
+    ``<host>/<container>`` (app/agentinv.py), und pro System greift die Drossel
+    (Logzeilen pro Minute, VM und Container zusammen).
     """
     # Platte fast voll: nicht annehmen statt die Datenbank zu ersticken. Der
     # Linux-Agent wartet bei 503 und schickt spaeter genau dieses Paket noch
@@ -696,98 +863,43 @@ async def ingest_logs(
             detail="Platte fast voll - Annahme pausiert, bitte später erneut senden.",
             headers={"Retry-After": "300"})
 
-    source_ip = real_client_ip(request)
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Bearer Token erforderlich")
+    # Schluessel pruefen, Geraet finden oder anlegen, Zustaendigkeit pruefen
+    # (routes/agents.py - gemeinsam mit dem Heartbeat).
+    from .routes.agents import resolve_host_agent
 
-    agent_token, deny_reason = await tokens.resolve(db, authorization[7:], source_ip)
-    if not agent_token:
-        # Nach aussen immer dieselbe Antwort - von dort soll nicht erkennbar
-        # sein, ob ein Schluessel unbekannt, abgelaufen oder nur aus dem
-        # falschen Netz vorgelegt wurde. Der Grund steht im Systemtagebuch.
-        suppressed = _rejection_due(("rejected", source_ip, data.hostname, deny_reason))
-        if suppressed is not None:
+    agent_token, agent, source_ip = await resolve_host_agent(
+        db, authorization, data.hostname, data.ip_address, data.device_type, request,
+        event_prefix="ingest", agent_version=data.agent_version)
+    device_ip = agent.ip_address
+
+    # Drossel: hoechstens N Zeilen pro Minute fuer dieses System (VM + Container).
+    defaults = await agentinv.device_defaults(db)
+    limit = agent.ingest_limit_per_minute or defaults.get("ingest_limit_per_minute")
+    events = data.events
+    allowed = agentinv.throttle(agent.id, limit, len(events))
+    throttled = len(events) - allowed
+    if throttled:
+        events = events[:allowed]
+        extra = dict(agent.extra_data or {})
+        extra["throttled_total"] = int(extra.get("throttled_total") or 0) + throttled
+        extra["throttled_at"] = datetime.utcnow().isoformat()
+        agent.extra_data = extra
+        if agentinv.should_report_throttle(agent.id):
             await journal.record(
-                db, category="token", event="ingest.rejected", level="warning",
-                message=(f"Lieferung von '{data.hostname}' abgewiesen: {deny_reason}"
-                         + (f" (dazu {suppressed} weitere seit dem letzten Eintrag)" if suppressed else "")),
-                actor="agent", source_ip=source_ip, target=data.hostname, ok=False)
-        raise HTTPException(status_code=401, detail="Ungültiger Agent-Token")
-
-    device_ip = (data.ip_address or "").strip() or source_ip
-    proxy_ip = request.client.host if request.client else None
-    device_type = data.device_type or _agent_type_fallback(
-        agent_token.device_type, request.headers.get("user-agent"))
-
-    result = await db.execute(
-        select(Agent).where(Agent.hostname == data.hostname, Agent.ip_address == device_ip)
-    )
-    agent = result.scalars().first()
-
-    if agent is None and proxy_ip and proxy_ip != device_ip:
-        # Altbestand: bis 2026.09.15 wurde bei HTTPS-Agents die IP von Caddy
-        # gespeichert statt der Geraete-IP. Solche Eintraege uebernehmen (IP und
-        # Typ korrigieren), statt eine zweite Karte fuer dasselbe Geraet anzulegen.
-        result = await db.execute(
-            select(Agent).where(Agent.hostname == data.hostname, Agent.ip_address == proxy_ip)
-        )
-        agent = result.scalars().first()
-        if agent:
-            agent.ip_address = device_ip
-            if device_type != "unknown":
-                agent.device_type = device_type
-
-    if agent:
-        agent.last_seen = datetime.utcnow()
-        if data.device_type:
-            agent.device_type = data.device_type
-        elif agent.device_type in (None, "unknown"):
-            agent.device_type = device_type
-    else:
-        agent = Agent(
-            hostname=data.hostname, ip_address=device_ip, device_type=device_type,
-            extra_data={"auth": "token", "token_name": agent_token.name})
-        db.add(agent)
-        await db.flush()
-
-    # Darf dieser Schluessel fuer dieses Geraet liefern? Der Generalschluessel
-    # darf fuer alle (das braucht z.B. ein Sammler, der die FRITZ!Box abfragt).
-    # Ein Geraeteschluessel darf nur fuer sein eigenes - sonst koennte ein
-    # uebernommener Arbeitsplatzrechner Logzeilen im Namen des
-    # Domaenencontrollers erfinden.
-    allowed, why = tokens.may_ingest(agent_token, data.hostname, agent.id)
-    if not allowed:
-        # Den Namen VOR dem Rollback merken: rollback() laesst alle geladenen
-        # Objekte verfallen, und das Nachladen von agent_token.name wirft in
-        # der async-Session (MissingGreenlet). Aus dem 403 wurde so ein 500,
-        # und der Tagebucheintrag fehlte.
-        token_name = agent_token.name
-        await db.rollback()
-        suppressed = _rejection_due(("denied", token_name, data.hostname, why))
-        if suppressed is not None:
-            await journal.record(
-                db, category="token", event="ingest.denied", level="warning",
-                message=(f"'{token_name}' wollte für '{data.hostname}' liefern: {why}"
-                         + (f" (dazu {suppressed} weitere seit dem letzten Eintrag)" if suppressed else "")),
-                actor=token_name, source_ip=source_ip, target=data.hostname, ok=False)
-        raise HTTPException(status_code=403, detail=why)
-
-    # Erste Lieferung eines frisch angemeldeten Geraeteschluessels: ab jetzt
-    # gehoert er zu diesem Geraet und zu keinem anderen mehr.
-    tokens.bind_to_agent(agent_token, agent.id)
-    # Sparsam: hoechstens einmal pro Minute. Bei jeder einzelnen Lieferung eine
-    # Zeile in agent_tokens zu schreiben, waere eine Schreiboperation, die
-    # niemandem nuetzt - fuer "wird dieser Schluessel noch benutzt?" reicht
-    # Minutengenauigkeit.
-    tokens.touch(agent_token, source_ip)
+                db, category="agent", event="ingest.throttled", level="warning", commit=False,
+                message=(f"{data.hostname} liefert mehr als {limit} Logzeilen pro Minute - "
+                         f"{throttled} Zeilen verworfen (Drossel)."),
+                actor=agent_token.name, source_ip=source_ip, target=data.hostname)
 
     is_fritzbox = (data.device_type or "").lower() == "fritzbox"
     now = datetime.utcnow()
     unique_rows = {}   # dedup_key -> Zeile, entfernt Doppelte schon innerhalb einer Lieferung
     plain_rows = []    # ohne Zeitstempel: keine Duplikatpruefung moeglich
-    repeats = {}       # (Stufe, Quelle, Text) -> erste Zeile dieser Wiederholung
+    repeats = {}       # (Stufe, Quelle, Text, Container) -> erste Zeile dieser Wiederholung
+    children = None    # Kind-Instanzen (Container) dieser VM, bei Bedarf geladen
+    touched_children = set()
 
-    for event in data.events:
+    for event in events:
         message = _strip_nul(event.message)
         level = _strip_nul(event.level or "").strip().lower() or None
         source = _strip_nul(event.source or "").strip()[:SOURCE_MAX_LENGTH] or None
@@ -805,7 +917,7 @@ async def ingest_logs(
         ts = _to_naive_utc(event.timestamp)
         collapse = REPEAT_WINDOW > 0 and not is_fritzbox
         if collapse:
-            group_key = (level, source, message)
+            group_key = (level, source, message, event.container)
             first = repeats.get(group_key)
             moment = ts or now
             if first is not None and abs((moment - first["timestamp"]).total_seconds()) <= REPEAT_WINDOW:
@@ -820,14 +932,28 @@ async def ingest_logs(
         if event.group:
             extra["group"] = _strip_nul(event.group)
 
+        target_id, target_host = agent.id, data.hostname
+        if event.container:
+            if children is None:
+                children = await agentinv.children_of(db, agent)
+            child = await agentinv.child_for(db, agent, event.container, children)
+            target_id, target_host = child.id, child.hostname
+            touched_children.add(child)
+            extra.update({"container": event.container, "parent_host": data.hostname,
+                          "stream": event.stream or "stdout"})
+            container_meta = (child.extra_data or {}).get("container") or {}
+            if container_meta.get("compose_project"):
+                extra["compose_project"] = container_meta["compose_project"]
+                extra["compose_service"] = container_meta.get("compose_service")
+
         row = {
-            "agent_id": agent.id,
-            "hostname": data.hostname,
+            "agent_id": target_id,
+            "hostname": target_host,
             "ip_address": device_ip,
             "timestamp": ts or now,
             "facility": 1 if event.facility is None else event.facility,
             "level": level or "info",
-            "source": source or "unknown",
+            "source": source or ("container/" + (event.stream or "stdout") if event.container else "unknown"),
             "message": message,
             "raw_message": message,
             "extra_data": extra,
@@ -837,11 +963,14 @@ async def ingest_logs(
         if ts is None:
             plain_rows.append(row)
         else:
-            key = _dedup_key(data.hostname, ts, event.event_id, message)
+            key = _dedup_key(target_host, ts, event.event_id, message)
             row["dedup_key"] = key
             unique_rows[key] = row
         if collapse:
-            repeats[(level, source, message)] = row
+            repeats[(level, source, message, event.container)] = row
+
+    for child in touched_children:
+        child.last_seen = now
 
     rows = plain_rows + list(unique_rows.values())
     inserted = 0
@@ -859,8 +988,8 @@ async def ingest_logs(
     await db.commit()
     # agent_id mitgeben: damit weiss der Agent, welcher Eintrag auf dem Server
     # ihm gehoert, und kann sich beim Deinstallieren gezielt abmelden.
-    return LogIngestResponse(accepted=inserted, duplicates=len(data.events) - inserted,
-                             agent_id=agent.id)
+    return LogIngestResponse(accepted=inserted, duplicates=len(events) - inserted,
+                             agent_id=agent.id, throttled=throttled)
 
 
 @app.get("/api")
@@ -885,17 +1014,33 @@ async def root():
 AGENT_RETENTION_INTERVAL = int(os.getenv("AGENT_RETENTION_INTERVAL", "3600"))
 
 
-async def _enforce_agent_retention(session, agent, logger: logging.Logger) -> int:
-    """Retention-Policy für einen Agent durchsetzen. Gibt Anzahl gelöschter Logs zurück."""
+def effective_retention(agent, parent=None, defaults: Optional[dict] = None) -> tuple:
+    """(Tage, Hoechstzahl) fuer ein Geraet: eigene Werte, sonst die der VM, sonst die Vorgabe."""
+    defaults = defaults or {}
+    days = agent.retention_days or (parent.retention_days if parent else None) \
+        or defaults.get("retention_days")
+    max_logs = agent.retention_max_logs or (parent.retention_max_logs if parent else None) \
+        or defaults.get("retention_max_logs")
+    return days, max_logs
+
+
+async def _enforce_agent_retention(session, agent, logger: logging.Logger,
+                                   parent=None, defaults: Optional[dict] = None) -> int:
+    """Retention-Policy für einen Agent durchsetzen. Gibt Anzahl gelöschter Logs zurück.
+
+    Container erben die Grenzen ihrer VM, solange sie keine eigenen haben -
+    sonst koennte ein geschwaetziger Container die Grenze des Systems umgehen.
+    """
     deleted = 0
+    days, max_logs = effective_retention(agent, parent, defaults)
     # Haeppchenweise, jedes einzeln festgeschrieben - wie im Plattenwaechter.
     # Frueher ein einziges DELETE: bei Millionen Zeilen eine stundenlang
     # offene Transaktion, die das Transaktionslog aufblaeht und die Platte
     # waehrend des Aufraeumens erst einmal VOLLER macht.
     chunk = diskguard.BATCH_SIZE
 
-    if agent.retention_days:
-        cutoff = datetime.utcnow() - timedelta(days=agent.retention_days)
+    if days:
+        cutoff = datetime.utcnow() - timedelta(days=int(days))
         n = 0
         for _ in range(diskguard.MAX_BATCHES):
             oldest = (
@@ -913,13 +1058,13 @@ async def _enforce_agent_retention(session, agent, logger: logging.Logger) -> in
         deleted += n
         if n:
             logger.info("Agent %s (%s): %s Logs älter als %s Tage gelöscht",
-                        agent.id, agent.hostname, n, agent.retention_days)
+                        agent.id, agent.hostname, n, days)
 
-    if agent.retention_max_logs:
+    if max_logs:
         count = (await session.execute(
             select(func.count(Log.id)).where(Log.agent_id == agent.id)
         )).scalar() or 0
-        excess = count - agent.retention_max_logs
+        excess = count - int(max_logs)
         n = 0
         while excess > 0 and n < chunk * diskguard.MAX_BATCHES:
             subq = (
@@ -939,7 +1084,7 @@ async def _enforce_agent_retention(session, agent, logger: logging.Logger) -> in
         deleted += n
         if n:
             logger.info("Agent %s (%s): %s älteste Logs gelöscht (Limit: %s)",
-                        agent.id, agent.hostname, n, agent.retention_max_logs)
+                        agent.id, agent.hostname, n, max_logs)
 
     return deleted
 
@@ -951,18 +1096,18 @@ async def agent_retention_task():
         await asyncio.sleep(AGENT_RETENTION_INTERVAL)
         try:
             async with async_session() as session:
-                result = await session.execute(
-                    select(Agent).where(
-                        (Agent.retention_max_logs != None) |  # noqa: E711
-                        (Agent.retention_days != None)         # noqa: E711
-                    )
-                )
-                agents = result.scalars().all()
-                if not agents:
-                    continue
+                defaults = await agentinv.device_defaults(session)
+                agents = (await session.execute(select(Agent))).scalars().all()
+                by_id = {a.id: a for a in agents}
                 total_deleted = 0
+                touched = 0
                 for agent in agents:
-                    total_deleted += await _enforce_agent_retention(session, agent, logger)
+                    parent = by_id.get(agent.parent_id) if agent.parent_id else None
+                    if not any(effective_retention(agent, parent, defaults)):
+                        continue
+                    touched += 1
+                    total_deleted += await _enforce_agent_retention(session, agent, logger,
+                                                                    parent, defaults)
                 if total_deleted:
                     await session.commit()
                     logger.info("Agent-Retention: insgesamt %s Logs gelöscht", total_deleted)
@@ -970,9 +1115,9 @@ async def agent_retention_task():
                         session, category="retention", event="agent.retention.auto",
                         level="notice",
                         message=(f"Geräte-Aufbewahrung: {total_deleted} Logzeilen von "
-                                 f"{len(agents)} Gerät(en) entfernt."),
+                                 f"{touched} Gerät(en) entfernt."),
                         actor="system",
-                        detail={"deleted": total_deleted, "agents": len(agents)})
+                        detail={"deleted": total_deleted, "agents": touched})
         except Exception as exc:
             logger.error("Agent-Retention-Task Fehler: %s", exc)
 
@@ -1058,6 +1203,8 @@ async def start_background_tasks():
     # Sucht das Netz nach Systemen ab: kurz nach dem ersten Start, danach im
     # eingestellten Takt (app/discovery.py, abschaltbar in der Oberflaeche).
     _spawn(discovery.watch_task())
+    # Meldungen: neue Logzeilen pruefen, Geraete beobachten (app/notify.py).
+    _spawn(notify.watch_task())
 
     await journal.write(
         category="system", event="server.started",

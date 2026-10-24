@@ -57,15 +57,22 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import secretbox
 from .models import Setting, User
 
 logger = logging.getLogger("logbot.sso")
 
 SETTING_KEY = "sso_config"
+
+# Zugelassene Unterschriftsverfahren fuer ID-Token - nur asymmetrische. Ein
+# "HS256" oder "none" im Token-Kopf wird abgewiesen.
+ALLOWED_ALGORITHMS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384")
+_GUID_RE = __import__("re").compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 # Wie lange ein begonnener Anmeldevorgang gueltig bleibt. Kurz: laenger braucht
 # niemand, und jede Minute mehr ist eine Minute, in der ein abgefangener
@@ -135,7 +142,7 @@ async def save_config(db: AsyncSession, incoming: dict) -> dict:
 
     secret = (incoming.get("client_secret") or "").strip()
     if secret:
-        config["client_secret"] = secret
+        config["client_secret"] = secretbox.seal(secret)
     if incoming.get("clear_client_secret"):
         config["client_secret"] = ""
 
@@ -340,7 +347,7 @@ async def exchange(config: dict, code: str, state: str, request_base: str) -> di
 
     data = {
         "client_id": config["client_id"],
-        "client_secret": config["client_secret"],
+        "client_secret": secretbox.open_(config["client_secret"]),
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect,
@@ -372,10 +379,19 @@ async def exchange(config: dict, code: str, state: str, request_base: str) -> di
 
 
 async def verify_id_token(config: dict, id_token: str, nonce: str) -> dict:
-    """Prueft Unterschrift, Aussteller, Empfaenger, Laufzeit und nonce.
+    """Prueft Unterschrift, Aussteller, Empfaenger, Laufzeit, nonce und Mandant.
 
     Ohne diese Pruefung waere das ID-Token ein Zettel, auf den sich jeder
     schreiben koennte, er sei der Administrator.
+
+    Verschaerft 2026.10.22:
+    * Der Algorithmus kommt nicht mehr aus dem Token selbst (das bestimmt der
+      Absender), sondern aus einer festen Liste asymmetrischer Verfahren.
+    * Ein Token ohne nonce wird abgewiesen, wenn eine erwartet wird.
+    * Bei Microsoft-Ausstellern mit Platzhalter '{tenantid}' wurde der
+      Aussteller bisher gar nicht geprueft - ein Konto aus JEDEM fremden
+      Entra-Mandanten kam damit herein. Jetzt muss der Mandant des Tokens der
+      eingetragene sein.
     """
     meta = await metadata(config)
     keys = await jwks(config)
@@ -385,6 +401,10 @@ async def verify_id_token(config: dict, id_token: str, nonce: str) -> dict:
     except JWTError as exc:
         raise RuntimeError(f"Das ID-Token ist unlesbar: {exc}") from exc
 
+    alg = header.get("alg") or ""
+    if alg not in ALLOWED_ALGORITHMS:
+        raise RuntimeError(f"Das ID-Token ist mit einem nicht zugelassenen Verfahren unterschrieben ({alg}).")
+
     kid = header.get("kid")
     key = next((k for k in keys.get("keys", []) if k.get("kid") == kid), None)
     if key is None:
@@ -393,32 +413,36 @@ async def verify_id_token(config: dict, id_token: str, nonce: str) -> dict:
         key = next((k for k in keys.get("keys", []) if k.get("kid") == kid), None)
     if key is None:
         raise RuntimeError("Der Unterschrift-Schlüssel des Anbieters ist unbekannt.")
+    if key.get("alg") and key["alg"] != alg:
+        raise RuntimeError("Verfahren und Schlüssel des ID-Tokens passen nicht zusammen.")
+    try:
+        signing_key = jwt.PyJWK(key, algorithm=alg).key
+    except JWTError as exc:
+        raise RuntimeError(f"Der Schlüssel des Anbieters ist unbrauchbar: {exc}") from exc
 
     issuer = meta["issuer"]
+    templated = "{tenantid}" in issuer
     try:
         claims = jwt.decode(
-            id_token, key,
-            algorithms=[header.get("alg", "RS256")],
-            audience=config["client_id"],
-            issuer=issuer,
-            options={"verify_at_hash": False},
+            id_token, signing_key, algorithms=[alg], audience=config["client_id"],
+            issuer=None if templated else issuer,
+            options={"verify_iss": not templated, "require": ["exp", "iat", "aud", "iss"]},
+            leeway=60,
         )
     except JWTError as exc:
-        # Entra schreibt bei mandantenuebergreifenden Anwendungen ein '{tenantid}'
-        # in den Aussteller - dann passt der Vergleich mit dem Platzhalter nicht.
-        if "{tenantid}" in issuer:
-            try:
-                claims = jwt.decode(
-                    id_token, key, algorithms=[header.get("alg", "RS256")],
-                    audience=config["client_id"],
-                    options={"verify_iss": False, "verify_at_hash": False},
-                )
-            except JWTError as inner:
-                raise RuntimeError(f"Das ID-Token wurde abgelehnt: {inner}") from inner
-        else:
-            raise RuntimeError(f"Das ID-Token wurde abgelehnt: {exc}") from exc
+        raise RuntimeError(f"Das ID-Token wurde abgelehnt: {exc}") from exc
 
-    if nonce and claims.get("nonce") and claims["nonce"] != nonce:
+    if templated:
+        tid = str(claims.get("tid") or "")
+        wanted = (config.get("tenant_id") or "").strip().lower()
+        if not _GUID_RE.match(wanted):
+            raise RuntimeError(
+                "Für Microsoft 365 muss die Verzeichnis-ID (Mandant) als GUID eingetragen sein - "
+                "mit 'common' oder 'organizations' könnte sich jedes fremde Microsoft-Konto anmelden.")
+        if tid.lower() != wanted or claims.get("iss") != issuer.replace("{tenantid}", tid):
+            raise RuntimeError("Das Konto gehört zu einem anderen Microsoft-365-Mandanten.")
+
+    if nonce and claims.get("nonce") != nonce:
         raise RuntimeError("Das ID-Token gehört nicht zu dieser Anmeldung (nonce).")
 
     return claims

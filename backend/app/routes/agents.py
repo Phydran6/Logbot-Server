@@ -1,8 +1,8 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.13.20.58.33
-# Beschreibung: LogBot v2026.04.11.13.38.42 - Agents API Endpoints
+# Version:     2026.10.22.23.00.00
+# Beschreibung: LogBot - Agents API Endpoints (Geraete-Baum, Heartbeat, Agent-Updates)
 # ==============================================================================
 
 from datetime import datetime, timedelta
@@ -17,96 +17,100 @@ from ..schemas import (AgentResponse, AgentListResponse, AgentDecommissionReques
                        AgentRetentionUpdate)
 from ..auth import get_current_user, get_current_admin
 from ..limiter import limiter, client_ip as real_client_ip
-from .. import journal, tokens
+from .. import agentinv, agentupdate, journal, tokens
 
 router = APIRouter(prefix="/api/agents", tags=["Agents"])
 
-@router.get("", response_model=AgentListResponse)
-async def list_agents(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
-    search: Optional[str] = None,
-    device_type: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user)
-):
-    query = select(Agent)
-    count_query = select(func.count(Agent.id))
-    
-    if search:
-        f = f"%{search}%"
-        query = query.where((Agent.hostname.ilike(f)) | (Agent.ip_address.ilike(f)) | (Agent.mac_address.ilike(f)))
-        count_query = count_query.where((Agent.hostname.ilike(f)) | (Agent.ip_address.ilike(f)) | (Agent.mac_address.ilike(f)))
-    if device_type:
-        query = query.where(Agent.device_type == device_type)
-        count_query = count_query.where(Agent.device_type == device_type)
-    
-    total = (await db.execute(count_query)).scalar() or 0
-    offset = (page - 1) * page_size
-    result = await db.execute(query.order_by(Agent.last_seen.desc()).offset(offset).limit(page_size))
-
-    # Offline-Timeout aus Settings (Fallback 300s)
+async def _offline_cutoff(db: AsyncSession) -> datetime:
     offline_timeout = 300
-    setting_row = await db.execute(select(Setting).where(Setting.key == "agent_offline_timeout"))
-    s = setting_row.scalar_one_or_none()
+    s = (await db.execute(select(Setting).where(Setting.key == "agent_offline_timeout"))).scalar_one_or_none()
     if s:
         try:
             offline_timeout = int(s.value)
         except Exception:
             pass
-    cutoff = datetime.utcnow() - timedelta(seconds=offline_timeout)
+    return datetime.utcnow() - timedelta(seconds=offline_timeout)
 
-    items = []
-    for agent in result.scalars().all():
-        is_online = bool(agent.last_seen and agent.last_seen >= cutoff)
-        items.append(AgentResponse(
-            id=agent.id,
-            hostname=agent.hostname,
-            ip_address=agent.ip_address,
-            mac_address=agent.mac_address,
-            device_type=agent.device_type,
-            last_seen=agent.last_seen,
-            first_seen=agent.first_seen,
-            extra_data=getattr(agent, "extra_data", {}) or {},
-            metadata=getattr(agent, "extra_data", {}) or {},
-            is_online=is_online
-        ))
 
+def _agent_response(agent: Agent, cutoff: datetime, **more) -> AgentResponse:
+    extra = getattr(agent, "extra_data", {}) or {}
+    return AgentResponse(
+        id=agent.id, hostname=agent.hostname, ip_address=agent.ip_address,
+        mac_address=agent.mac_address, device_type=agent.device_type or "unknown",
+        last_seen=agent.last_seen, first_seen=agent.first_seen,
+        extra_data=extra, metadata=extra,
+        is_online=bool(agent.last_seen and agent.last_seen >= cutoff),
+        retention_max_logs=agent.retention_max_logs, retention_days=agent.retention_days,
+        parent_id=agent.parent_id, agent_version=agent.agent_version,
+        update_policy=agent.update_policy, update_state=agent.update_state or {},
+        ingest_limit_per_minute=agent.ingest_limit_per_minute, **more)
+
+
+@router.get("", response_model=AgentListResponse)
+async def list_agents(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    search: Optional[str] = None,
+    device_type: Optional[str] = None,
+    include_children: bool = Query(False, description="Container-Instanzen mitliefern"),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user)
+):
+    """Geraete - standardmaessig nur die eigentlichen Systeme (VMs, Rechner, Netzgeraete).
+
+    Container haengen darunter (``children_count``); mit ``include_children``
+    kommen sie als eigene Eintraege mit, ``/api/agents/tree`` liefert den Baum.
+    """
+    query = select(Agent)
+    count_query = select(func.count(Agent.id))
+    if not include_children:
+        query = query.where(Agent.parent_id.is_(None))
+        count_query = count_query.where(Agent.parent_id.is_(None))
+    if search:
+        f = f"%{search}%"
+        cond = (Agent.hostname.ilike(f)) | (Agent.ip_address.ilike(f)) | (Agent.mac_address.ilike(f))
+        query = query.where(cond)
+        count_query = count_query.where(cond)
+    if device_type:
+        query = query.where(Agent.device_type == device_type)
+        count_query = count_query.where(Agent.device_type == device_type)
+
+    total = (await db.execute(count_query)).scalar() or 0
+    offset = (page - 1) * page_size
+    rows = (await db.execute(query.order_by(Agent.last_seen.desc().nullslast())
+                             .offset(offset).limit(page_size))).scalars().all()
+    counts = dict((await db.execute(
+        select(Agent.parent_id, func.count(Agent.id)).where(Agent.parent_id.is_not(None))
+        .group_by(Agent.parent_id))).all())
+    cutoff = await _offline_cutoff(db)
+    items = [_agent_response(agent, cutoff, children_count=counts.get(agent.id, 0)) for agent in rows]
     return AgentListResponse(items=items, total=total, page=page, page_size=page_size)
 
-@router.get("/{agent_id}", response_model=AgentResponse)
+
+@router.get("/tree")
+async def agent_tree(with_counts: bool = Query(False), db: AsyncSession = Depends(get_db),
+                     _=Depends(get_current_user)):
+    """Alle Geraete als Baum: VM → Compose-Projekt → Container."""
+    agents = (await db.execute(select(Agent).order_by(Agent.hostname))).scalars().all()
+    counts = None
+    if with_counts:
+        counts = dict((await db.execute(select(Log.agent_id, func.count(Log.id))
+                                        .group_by(Log.agent_id))).all())
+    return {"items": agentinv.tree(agents, await _offline_cutoff(db), counts)}
+
+
+@router.get("/{agent_id:int}", response_model=AgentResponse)
 async def get_agent(agent_id: int, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent nicht gefunden")
     log_count = (await db.execute(select(func.count(Log.id)).where(Log.agent_id == agent_id))).scalar() or 0
-
-    offline_timeout = 300
-    setting_row = await db.execute(select(Setting).where(Setting.key == "agent_offline_timeout"))
-    s = setting_row.scalar_one_or_none()
-    if s:
-        try:
-            offline_timeout = int(s.value)
-        except Exception:
-            pass
-    cutoff = datetime.utcnow() - timedelta(seconds=offline_timeout)
-    is_online = bool(agent.last_seen and agent.last_seen >= cutoff)
-
-    return AgentResponse(
-        id=agent.id, hostname=agent.hostname, ip_address=agent.ip_address,
-        mac_address=agent.mac_address, device_type=agent.device_type,
-        last_seen=agent.last_seen, first_seen=agent.first_seen,
-        extra_data=getattr(agent, "extra_data", {}) or {},
-        metadata=getattr(agent, "extra_data", {}) or {},
-        is_online=is_online,
-        log_count=log_count,
-        retention_max_logs=agent.retention_max_logs,
-        retention_days=agent.retention_days,
-    )
+    children = (await db.execute(select(func.count(Agent.id)).where(Agent.parent_id == agent_id))).scalar() or 0
+    return _agent_response(agent, await _offline_cutoff(db), log_count=log_count, children_count=children)
 
 
-@router.put("/{agent_id}/retention")
+@router.put("/{agent_id:int}/retention")
 async def set_agent_retention(
     agent_id: int,
     data: AgentRetentionUpdate,
@@ -124,15 +128,17 @@ async def set_agent_retention(
         raise HTTPException(status_code=404, detail="Agent nicht gefunden")
     agent.retention_max_logs = data.retention_max_logs
     agent.retention_days = data.retention_days
+    agent.ingest_limit_per_minute = data.ingest_limit_per_minute
     await db.commit()
     return {
         "agent_id": agent_id,
         "retention_max_logs": agent.retention_max_logs,
         "retention_days": agent.retention_days,
+        "ingest_limit_per_minute": agent.ingest_limit_per_minute,
     }
 
 
-@router.post("/{agent_id}/retention/execute")
+@router.post("/{agent_id:int}/retention/execute")
 async def execute_agent_retention(
     agent_id: int,
     request: Request,
@@ -145,28 +151,17 @@ async def execute_agent_retention(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent nicht gefunden")
 
+    # Die VM und - mit den geerbten Werten - ihre Container.
+    from ..main import _enforce_agent_retention
+    import logging as _logging
+    defaults = await agentinv.device_defaults(db)
+    targets = [agent] + list((await db.execute(
+        select(Agent).where(Agent.parent_id == agent.id))).scalars().all())
     deleted = 0
-    if agent.retention_days:
-        cutoff = datetime.utcnow() - timedelta(days=agent.retention_days)
-        r = await db.execute(delete(Log).where(Log.agent_id == agent_id, Log.timestamp < cutoff))
-        deleted += r.rowcount or 0
-
-    if agent.retention_max_logs:
-        count = (await db.execute(
-            select(func.count(Log.id)).where(Log.agent_id == agent_id)
-        )).scalar() or 0
-        excess = count - agent.retention_max_logs
-        if excess > 0:
-            subq = (
-                select(Log.id)
-                .where(Log.agent_id == agent_id)
-                .order_by(Log.timestamp.asc())
-                .limit(excess)
-                .scalar_subquery()
-            )
-            r = await db.execute(delete(Log).where(Log.id.in_(subq)))
-            deleted += r.rowcount or 0
-
+    for target in targets:
+        deleted += await _enforce_agent_retention(db, target, _logging.getLogger("logbot.agent_retention"),
+                                                  parent=agent if target is not agent else None,
+                                                  defaults=defaults)
     await db.commit()
     if deleted:
         await journal.record(
@@ -290,7 +285,10 @@ async def decommission_agent(
         deleted_logs = 0
         hostnames = [a.hostname for a in agents]
         for agent in agents:
-            result = await db.execute(delete(Log).where(Log.agent_id == agent.id))
+            # Container der VM gehen mit - samt ihren Logs.
+            child_ids = [cid for (cid,) in (await db.execute(
+                select(Agent.id).where(Agent.parent_id == agent.id))).all()]
+            result = await db.execute(delete(Log).where(Log.agent_id.in_([agent.id] + child_ids)))
             deleted_logs += result.rowcount or 0
             await db.delete(agent)
         await db.commit()
@@ -334,7 +332,7 @@ async def decommission_agent(
                         f"erhalten.")}
 
 
-@router.delete("/{agent_id}", status_code=204)
+@router.delete("/{agent_id:int}", status_code=204)
 async def delete_agent(
     agent_id: int,
     request: Request,
@@ -351,7 +349,9 @@ async def delete_agent(
     hostname = agent.hostname
     deleted_logs = 0
     if purge_logs:
-        outcome = await db.execute(delete(Log).where(Log.agent_id == agent_id))
+        child_ids = [cid for (cid,) in (await db.execute(
+            select(Agent.id).where(Agent.parent_id == agent_id))).all()]
+        outcome = await db.execute(delete(Log).where(Log.agent_id.in_([agent_id] + child_ids)))
         deleted_logs = outcome.rowcount or 0
 
     await db.delete(agent)
@@ -658,12 +658,471 @@ async def enroll_agent(data: EnrollRequest, request: Request,
         actor=f"enroll:{presenter.name}", source_ip=source_ip, target=hostname,
         detail={"prefix": row.prefix, "replaced": replaced})
 
+    _, update_key = await agentupdate.signing_keys(db)
     return {
         "token": plain,
         "name": row.name,
         "prefix": row.prefix,
         "agent_id": agent.id if agent else None,
         "replaced_previous": replaced,
+        # Damit prueft der Agent spaeter die Unterschrift jedes Updates.
+        "update_pubkey_pem": update_key["pem"],
+        "update_pubkey_xml": update_key["xml"],
+        "update_pubkey_fingerprint": update_key["fingerprint"],
         "message": ("Dieser Schlüssel gilt nur für dieses Gerät. Er wird nur jetzt "
                     "ausgegeben."),
     }
+
+
+# ==============================================================================
+# Wer liefert? - gemeinsam fuer Ingest und Heartbeat
+# ==============================================================================
+def _agent_type_fallback(token_type: Optional[str], user_agent: Optional[str]) -> str:
+    """Geraeteart, wenn der Agent selbst keine mitschickt (Agents vor 2026.09.15).
+
+    Reihenfolge: Typ des Tokens, dann der User-Agent (der Linux-Agent sendet per
+    Python-urllib, der Windows-Agent per PowerShell), sonst "unknown".
+    """
+    mapped = {"linux": "linux_agent", "windows": "windows_agent"}.get(token_type or "")
+    if mapped:
+        return mapped
+    ua = (user_agent or "").lower()
+    if "powershell" in ua:
+        return "windows_agent"
+    if "python-urllib" in ua:
+        return "linux_agent"
+    return "unknown"
+
+
+async def resolve_host_agent(db: AsyncSession, authorization: str, hostname: str,
+                             reported_ip: Optional[str], device_type: Optional[str],
+                             request: Request, event_prefix: str = "ingest",
+                             agent_version: Optional[str] = None):
+    """Prueft den Schluessel und findet (oder legt an) das liefernde Geraet.
+
+    Gibt (Schluessel, Geraet, Absender-IP) zurueck; wirft 401/403 wie bisher
+    der Ingest. Container sind nie das "liefernde Geraet" - das ist immer die
+    VM, die Container haengen darunter.
+    """
+    source_ip = real_client_ip(request)
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer Token erforderlich")
+
+    from ..main import _rejection_due
+
+    agent_token, deny_reason = await tokens.resolve(db, authorization[7:], source_ip)
+    if not agent_token:
+        # Nach aussen immer dieselbe Antwort; der Grund steht im Systemtagebuch -
+        # hoechstens alle 10 Minuten je Absender und Grund (ein Agent mit
+        # zurueckgezogenem Schluessel versucht es alle paar Sekunden).
+        suppressed = _rejection_due(("rejected", source_ip, hostname, deny_reason))
+        if suppressed is not None:
+            await journal.record(
+                db, category="token", event=f"{event_prefix}.rejected", level="warning",
+                message=(f"Lieferung von '{hostname}' abgewiesen: {deny_reason}"
+                         + (f" (dazu {suppressed} weitere seit dem letzten Eintrag)" if suppressed else "")),
+                actor="agent", source_ip=source_ip, target=hostname, ok=False)
+        raise HTTPException(status_code=401, detail="Ungültiger Agent-Token")
+    if "/" in hostname:
+        raise HTTPException(status_code=400, detail="Ein Hostname darf keinen Schrägstrich enthalten.")
+
+    device_ip = (reported_ip or "").strip() or source_ip
+    proxy_ip = request.client.host if request.client else None
+    resolved_type = device_type or _agent_type_fallback(
+        agent_token.device_type, request.headers.get("user-agent"))
+
+    agent = None
+    if agent_token.kind == "agent" and agent_token.agent_id:
+        # Geraeteschluessel: das Geraet ist bekannt - auch nach einem IP-Wechsel.
+        bound = await db.get(Agent, agent_token.agent_id)
+        if bound is not None and bound.hostname == hostname and bound.parent_id is None:
+            agent = bound
+            if device_ip and bound.ip_address != device_ip:
+                clash = (await db.execute(select(Agent.id).where(
+                    Agent.hostname == hostname, Agent.ip_address == device_ip,
+                    Agent.id != bound.id))).first()
+                if not clash:
+                    bound.ip_address = device_ip
+    if agent is None:
+        agent = (await db.execute(select(Agent).where(
+            Agent.hostname == hostname, Agent.ip_address == device_ip,
+            Agent.parent_id.is_(None)))).scalars().first()
+
+    if agent is None and proxy_ip and proxy_ip != device_ip:
+        # Altbestand: bis 2026.09.15 wurde bei HTTPS-Agents die IP von Caddy
+        # gespeichert statt der Geraete-IP. Solche Eintraege uebernehmen.
+        agent = (await db.execute(select(Agent).where(
+            Agent.hostname == hostname, Agent.ip_address == proxy_ip))).scalars().first()
+        if agent:
+            agent.ip_address = device_ip
+            if resolved_type != "unknown":
+                agent.device_type = resolved_type
+
+    if agent:
+        agent.last_seen = datetime.utcnow()
+        if device_type:
+            agent.device_type = device_type
+        elif agent.device_type in (None, "unknown"):
+            agent.device_type = resolved_type
+    else:
+        agent = Agent(
+            hostname=hostname, ip_address=device_ip, device_type=resolved_type,
+            extra_data={"auth": "token", "token_name": agent_token.name})
+        db.add(agent)
+        await db.flush()
+
+    # Darf dieser Schluessel fuer dieses Geraet liefern? Der Generalschluessel
+    # darf fuer alle; ein Geraeteschluessel nur fuer sein eigenes.
+    allowed, why = tokens.may_ingest(agent_token, hostname, agent.id)
+    if not allowed:
+        token_name = agent_token.name          # nach dem rollback ist das Objekt abgelaufen
+        await db.rollback()
+        suppressed = _rejection_due(("denied", token_name, hostname, why))
+        if suppressed is not None:
+            await journal.record(
+                db, category="token", event=f"{event_prefix}.denied", level="warning",
+                message=(f"'{token_name}' wollte für '{hostname}' liefern: {why}"
+                         + (f" (dazu {suppressed} weitere seit dem letzten Eintrag)" if suppressed else "")),
+                actor=token_name, source_ip=source_ip, target=hostname, ok=False)
+        raise HTTPException(status_code=403, detail=why)
+
+    tokens.bind_to_agent(agent_token, agent.id)
+    tokens.touch(agent_token, source_ip)
+
+    if agent_version:
+        previous = agent.agent_version
+        agent.agent_version = agent_version[:40]
+        state = dict(agent.update_state or {})
+        if state.get("state") in ("offered", "installing") and \
+                agentupdate.parse_version(agent_version) >= agentupdate.parse_version(state.get("version")):
+            # Die neue Fassung meldet sich - das Update hat geklappt.
+            state.update({"state": "done", "finished_at": datetime.utcnow().isoformat(),
+                          "message": f"Aktualisiert von {previous or '?'} auf {agent_version}."})
+            agent.update_state = state
+            agent.update_requested_at = None
+            await journal.record(
+                db, category="agent_update", event="agent.update.done", level="notice", commit=False,
+                message=f"Agent auf {hostname} aktualisiert: {previous or '?'} → {agent_version}.",
+                actor="agent", source_ip=source_ip, target=hostname)
+    return agent_token, agent, source_ip
+
+
+# ==============================================================================
+# Heartbeat: Lebenszeichen, Inventar (Docker), Update-Anweisung
+# ==============================================================================
+class HeartbeatRequest(BaseModel):
+    hostname: str = Field(..., min_length=1, max_length=255)
+    ip_address: Optional[str] = Field(default=None, max_length=45)
+    device_type: Optional[str] = Field(default=None, pattern="^[a-z0-9_-]{1,50}$")
+    agent_version: Optional[str] = Field(default=None, max_length=40, pattern=r"^[0-9A-Za-z.+_-]+$")
+    os: Optional[str] = Field(default=None, max_length=120)
+    capabilities: List[str] = Field(default_factory=list, max_length=30)
+    remote_update: bool = True
+    docker: Optional[dict] = None
+    containers: Optional[List[dict]] = Field(default=None, max_length=agentinv.MAX_CONTAINERS)
+
+
+@router.post("/heartbeat")
+@limiter.limit("120/minute")
+async def heartbeat(data: HeartbeatRequest, request: Request,
+                    authorization: str = Header(None), db: AsyncSession = Depends(get_db)):
+    """Der Agent meldet sich (jede Minute): Fassung, Faehigkeiten, Container.
+
+    Antwort: die Geraetenummer, ggf. eine Update-Anweisung und Einstellungen
+    vom Server. So gilt ein Geraet auch ohne Logzeilen als erreichbar.
+    """
+    agent_token, agent, source_ip = await resolve_host_agent(
+        db, authorization or "", data.hostname, data.ip_address, data.device_type, request,
+        event_prefix="heartbeat", agent_version=data.agent_version)
+
+    extra = dict(agent.extra_data or {})
+    extra["agent"] = {"version": data.agent_version, "os": (data.os or "")[:120],
+                      "capabilities": [c[:40] for c in data.capabilities][:30],
+                      "remote_update": bool(data.remote_update),
+                      "heartbeat_at": datetime.utcnow().isoformat()}
+    agent.extra_data = extra
+
+    inventory = None
+    if data.containers is not None or data.docker is not None:
+        inventory = await agentinv.sync_inventory(db, agent, data.docker, data.containers or [])
+
+    # Update?
+    update = None
+    os_name = agentupdate.os_of(agent)
+    if os_name:
+        config = await agentupdate.load_config(db)
+        target = await agentupdate.package(db, os_name)
+        go, reason = await agentupdate.decide(db, agent, target, config)
+        if go:
+            update = agentupdate.offer(agent, target, "")
+            await journal.record(
+                db, category="agent_update", event="agent.update.offered", level="notice", commit=False,
+                message=(f"Update für {agent.hostname}: {agent.agent_version or '?'} → "
+                         f"{target['version']} ({reason})"),
+                actor="system", source_ip=source_ip, target=agent.hostname)
+        else:
+            state = dict(agent.update_state or {})
+            if state.get("state") != "done" or state.get("reason") != reason:
+                state["reason"] = reason
+                agent.update_state = state
+    await db.commit()
+
+    defaults = await agentinv.device_defaults(db)
+    return {
+        "agent_id": agent.id,
+        "server_time": datetime.utcnow().isoformat() + "Z",
+        "update": update,
+        "inventory": inventory,
+        "config": {
+            "heartbeat_seconds": 60,
+            "ingest_limit_per_minute": agent.ingest_limit_per_minute or defaults.get("ingest_limit_per_minute"),
+        },
+    }
+
+
+# ==============================================================================
+# Agent-Updates
+# ==============================================================================
+class UpdateConfigRequest(BaseModel):
+    mode: Optional[str] = Field(default=None, pattern="^(manual|auto|off)$")
+    window_days: Optional[List[int]] = None
+    window_start: Optional[str] = Field(default=None, max_length=5)
+    window_end: Optional[str] = Field(default=None, max_length=5)
+    timezone: Optional[str] = Field(default=None, max_length=60)
+    max_parallel: Optional[int] = Field(default=None, ge=1, le=100)
+    pause_after_failures: Optional[int] = Field(default=None, ge=0, le=50)
+    paused: Optional[bool] = None
+
+
+class UpdateRequestBody(BaseModel):
+    agent_ids: List[int] = Field(default_factory=list, max_length=5000)
+    all_outdated: bool = False
+
+
+class PolicyRequest(BaseModel):
+    policy: Optional[str] = Field(default=None, pattern="^(manual|auto|never)$")
+
+
+class ReportRequest(BaseModel):
+    hostname: str = Field(..., min_length=1, max_length=255)
+    state: str = Field(..., pattern="^(downloading|installing|done|failed|rolled_back)$")
+    version: Optional[str] = Field(default=None, max_length=40)
+    message: str = Field(default="", max_length=2000)
+
+
+class DeviceDefaults(BaseModel):
+    retention_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    retention_max_logs: Optional[int] = Field(default=None, ge=1000, le=100_000_000)
+    ingest_limit_per_minute: Optional[int] = Field(default=None, ge=10, le=1_000_000)
+
+
+@router.get("/updates")
+async def updates_overview(db: AsyncSession = Depends(get_db), _=Depends(get_current_admin)):
+    """Stand der Agent-Verteilung: Pakete, Regel, Geraete."""
+    overview = await agentupdate.overview(db)
+    config = overview["config"]
+    hosts = (await db.execute(select(Agent).where(
+        Agent.parent_id.is_(None), Agent.device_type.in_(("linux_agent", "windows_agent")))
+        .order_by(Agent.hostname))).scalars().all()
+    cutoff = await _offline_cutoff(db)
+    items = []
+    for agent in hosts:
+        target = overview["packages"].get(agentupdate.os_of(agent) or "") or {}
+        extra = agent.extra_data or {}
+        items.append({
+            "id": agent.id, "hostname": agent.hostname, "device_type": agent.device_type,
+            "ip_address": agent.ip_address,
+            "version": agent.agent_version, "target_version": target.get("version"),
+            "outdated": bool(target.get("version") and agentupdate.parse_version(agent.agent_version)
+                             < agentupdate.parse_version(target.get("version"))),
+            "self_update": agentupdate.supports_update(agent),
+            "remote_update": (extra.get("agent") or {}).get("remote_update", True),
+            "policy": agent.update_policy, "effective_policy": agentupdate.effective_policy(agent, config),
+            "requested": bool(agent.update_requested_at),
+            "state": agent.update_state or {},
+            "is_online": bool(agent.last_seen and agent.last_seen >= cutoff),
+            "decommissioned": bool(extra.get("decommissioned")),
+        })
+    overview["items"] = items
+    return overview
+
+
+@router.put("/updates/config")
+async def updates_config(data: UpdateConfigRequest, request: Request, db: AsyncSession = Depends(get_db),
+                         admin=Depends(get_current_admin)):
+    try:
+        config = await agentupdate.save_config(db, data.model_dump(exclude_none=True))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    mode_label = {"manual": "manuell", "auto": "automatisch im Wartungsfenster", "off": "aus"}[config["mode"]]
+    await journal.record(db, category="agent_update", event="agent.update.config", level="notice",
+                         message=(f"Agent-Updates: {mode_label}, Fenster {config['window_start']}–"
+                                  f"{config['window_end']} ({config['timezone']})."),
+                         actor=admin.username, source_ip=real_client_ip(request), detail=config)
+    return config
+
+
+@router.post("/updates/request")
+async def updates_request(data: UpdateRequestBody, request: Request, db: AsyncSession = Depends(get_db),
+                          admin=Depends(get_current_admin)):
+    """"Jetzt aktualisieren" - fuer ausgewaehlte Geraete oder alle veralteten."""
+    query = select(Agent).where(Agent.parent_id.is_(None),
+                                Agent.device_type.in_(("linux_agent", "windows_agent")))
+    if not data.all_outdated:
+        if not data.agent_ids:
+            raise HTTPException(status_code=400, detail="Keine Geräte ausgewählt.")
+        query = query.where(Agent.id.in_(data.agent_ids))
+    marked = []
+    skipped = []
+    for agent in (await db.execute(query)).scalars().all():
+        target = await agentupdate.package(db, agentupdate.os_of(agent) or "")
+        if not agentupdate.supports_update(agent):
+            skipped.append({"hostname": agent.hostname, "reason": "Agent-Fassung ohne Selbst-Update - "
+                                                                   "einmal neu installieren."})
+            continue
+        if target and agentupdate.parse_version(agent.agent_version) >= agentupdate.parse_version(target["version"]):
+            if data.all_outdated:
+                continue
+            skipped.append({"hostname": agent.hostname, "reason": "Bereits aktuell."})
+            continue
+        agent.update_requested_at = datetime.utcnow()
+        state = dict(agent.update_state or {})
+        if state.get("state") == "failed":
+            state["state"] = "pending"
+        state["requested_by"] = admin.username
+        agent.update_state = state
+        marked.append(agent.hostname)
+    await db.commit()
+    if marked:
+        await journal.record(db, category="agent_update", event="agent.update.requested", level="notice",
+                             message=f"Agent-Update angestoßen für {len(marked)} Gerät(e).",
+                             actor=admin.username, source_ip=real_client_ip(request),
+                             detail={"hosts": marked[:200]})
+    return {"requested": marked, "skipped": skipped,
+            "message": (f"{len(marked)} Gerät(e) aktualisieren sich beim nächsten Lebenszeichen "
+                        f"(spätestens in einer Minute).")}
+
+
+@router.post("/updates/cancel")
+async def updates_cancel(data: UpdateRequestBody, db: AsyncSession = Depends(get_db),
+                         _=Depends(get_current_admin)):
+    rows = (await db.execute(select(Agent).where(Agent.id.in_(data.agent_ids or [0])))).scalars().all()
+    for agent in rows:
+        agent.update_requested_at = None
+    await db.commit()
+    return {"cancelled": len(rows)}
+
+
+@router.put("/{agent_id:int}/update-policy")
+async def update_policy(agent_id: int, data: PolicyRequest, db: AsyncSession = Depends(get_db),
+                        _=Depends(get_current_admin)):
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.parent_id:
+        raise HTTPException(status_code=404, detail="Gerät nicht gefunden")
+    agent.update_policy = data.policy
+    await db.commit()
+    return {"agent_id": agent_id, "policy": agent.update_policy}
+
+
+@router.get("/update/pubkey")
+async def update_pubkey(db: AsyncSession = Depends(get_db)):
+    """Oeffentlicher Schluessel, mit dem Agent-Updates unterschrieben sind (oeffentlich)."""
+    _, key = await agentupdate.signing_keys(db)
+    return key
+
+
+@router.get("/update/package/{os_name}")
+@limiter.limit("30/minute")
+async def update_package(os_name: str, request: Request, authorization: str = Header(None),
+                         db: AsyncSession = Depends(get_db)):
+    """Das Update-Paket - nur mit gueltigem Agent-Schluessel."""
+    from starlette.responses import Response as _Response
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer Token erforderlich")
+    token, _ = await tokens.resolve(db, authorization[7:], real_client_ip(request))
+    if not token or (token.kind or "agent") == "enroll":
+        raise HTTPException(status_code=401, detail="Ungültiger Agent-Token")
+    pkg = await agentupdate.package(db, os_name)
+    if not pkg:
+        raise HTTPException(status_code=404, detail="Kein Paket für dieses Betriebssystem.")
+    return _Response(content=pkg["content"], media_type="application/octet-stream", headers={
+        "X-LogBot-Version": pkg["version"], "X-LogBot-SHA256": pkg["sha256"],
+        "X-LogBot-Signature": pkg["signature"], "Cache-Control": "no-store"})
+
+
+@router.post("/update/report")
+@limiter.limit("30/minute")
+async def update_report(data: ReportRequest, request: Request, authorization: str = Header(None),
+                        db: AsyncSession = Depends(get_db)):
+    """Der Agent berichtet, wie es laeuft."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer Token erforderlich")
+    source_ip = real_client_ip(request)
+    token, _ = await tokens.resolve(db, authorization[7:], source_ip)
+    if not token:
+        raise HTTPException(status_code=401, detail="Ungültiger Agent-Token")
+    agent = None
+    if token.agent_id:
+        agent = await db.get(Agent, token.agent_id)
+    if agent is None and (token.kind or "") == "global":
+        agent = (await db.execute(select(Agent).where(Agent.hostname == data.hostname,
+                                                      Agent.parent_id.is_(None)))).scalars().first()
+    if agent is None or agent.hostname != data.hostname:
+        raise HTTPException(status_code=404, detail="Gerät unbekannt")
+    state = dict(agent.update_state or {})
+    state.update({"state": "done" if data.state == "done" else
+                  ("failed" if data.state in ("failed", "rolled_back") else data.state),
+                  "reported": data.state, "message": data.message[:500],
+                  "reported_at": datetime.utcnow().isoformat()})
+    if data.version:
+        state["version"] = data.version
+    agent.update_state = state
+    if data.state in ("failed", "rolled_back", "done"):
+        agent.update_requested_at = None
+    await db.commit()
+
+    if data.state in ("failed", "rolled_back"):
+        await journal.record(db, category="agent_update", event="agent.update.failed", level="error",
+                             message=f"Agent-Update auf {agent.hostname} gescheitert: {data.message[:300]}",
+                             actor="agent", source_ip=source_ip, target=agent.hostname, ok=False)
+        config = await agentupdate.load_config(db)
+        limit = int(config.get("pause_after_failures") or 0)
+        if limit and config.get("mode") == "auto" and not config.get("paused") and data.version:
+            if await agentupdate.failures_since(db, data.version) >= limit:
+                await agentupdate.save_config(db, {"paused": True})
+                config = await agentupdate.load_config(db)
+                config["paused_reason"] = f"{limit} Fehlschläge mit Fassung {data.version}"
+                from ..models import Setting as _Setting
+                row = (await db.execute(select(_Setting).where(
+                    _Setting.key == agentupdate.CONFIG_KEY))).scalar_one()
+                row.value = config
+                await db.commit()
+                await journal.record(db, category="agent_update", event="agent.update.paused",
+                                     level="critical",
+                                     message=(f"Automatische Agent-Updates angehalten: {limit} Geräte "
+                                              f"sind mit Fassung {data.version} gescheitert."),
+                                     actor="system", ok=False)
+    return {"ok": True}
+
+
+@router.get("/defaults")
+async def get_defaults(db: AsyncSession = Depends(get_db), _=Depends(get_current_admin)):
+    return await agentinv.device_defaults(db)
+
+
+@router.put("/defaults")
+async def put_defaults(data: DeviceDefaults, request: Request, db: AsyncSession = Depends(get_db),
+                       admin=Depends(get_current_admin)):
+    """Vorgaben fuer alle Geraete ohne eigene Werte (auch selbst eingebundene)."""
+    value = data.model_dump()
+    row = (await db.execute(select(Setting).where(Setting.key == agentinv.DEFAULTS_KEY))).scalar_one_or_none()
+    if row:
+        row.value = value
+    else:
+        db.add(Setting(key=agentinv.DEFAULTS_KEY, value=value,
+                       description="Vorgaben für Geräte: Aufbewahrung und Drossel"))
+    await db.commit()
+    await journal.record(db, category="settings", event="device.defaults.changed", level="notice",
+                         message="Vorgaben für Geräte geändert (Aufbewahrung/Drossel).",
+                         actor=admin.username, source_ip=real_client_ip(request), detail=value)
+    return value

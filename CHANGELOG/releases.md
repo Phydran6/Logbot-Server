@@ -11,6 +11,86 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.23.12.00.00 (2026-10-23)
+
+**Melden, was wichtig ist. Container sehen. Agents von selbst aktuell. Und dichter.**
+
+### Meldungen
+- **Eingang** in der Oberfläche (Glocke mit Zahl) und in der App, dazu **E-Mail,
+  Telegram und Push** – je nach Regel. Ab Werk melden sich kritische Logzeilen
+  (auch aus Containern) und Fehler von LogBot selbst; Fluten werden in einer
+  Ruhezeit zusammengefasst.
+- **Assistenten statt Konfigurationsdateien:** Google (App-Passwort oder
+  Anmeldung), **Microsoft 365 – die App-Registrierung legt LogBot nach der
+  Anmeldung mit einem berechtigten Admin-Konto selbst an**, Outlook.com, Vorlagen
+  für GMX, WEB.DE, IONOS, Strato & Co., Telegram-Bot per Link oder QR-Code.
+- **Push aufs Handy** über UnifiedPush (z. B. ntfy), verschlüsselt nach RFC 8291 –
+  ohne Google-Konto.
+
+### Konten
+- **Jedes Konto braucht jetzt eine E-Mail-Adresse** (mit Bestätigungscode) –
+  für „Passwort vergessen?“, die Anmeldung per Mail-Link in der App und
+  Meldungen. Fehlt sie, fragt LogBot beim nächsten Anmelden danach.
+- Anmelden mit Benutzername **oder** E-Mail. Das Auslieferungspasswort `admin`
+  muss beim ersten Anmelden ersetzt werden.
+- Passwortwechsel, Deaktivierung und Rollenwechsel beenden alle Sitzungen sofort;
+  „Überall abmelden“ unter *Mein Konto*.
+
+### Geräte und Container
+- Der Linux-Agent erkennt **Docker/Podman und Docker Compose** und erfasst jeden
+  Container als **eigene, lesbare Log-Instanz unter seiner VM** – im Baum
+  *VM → Compose-Projekt → Container*, in der Logliste als `vm › ▣ container`.
+  Abstürze, OOM-Kills und Healthchecks inklusive.
+- **Grenzen pro System:** Aufbewahrung und eine Drossel (Zeilen pro Minute, VM +
+  Container) – als Vorgabe auch für Systeme, die LogBot selbst eingebunden hat.
+
+### Agent-Updates
+- Neue Agent-Fassungen kommen mit jedem Server-Update und gehen auf die Geräte –
+  **von Hand oder automatisch im Wartungsfenster**, gestaffelt, mit Notbremse
+  nach Fehlschlägen, je Gerät abweichend einstellbar. Jedes Paket ist vom Server
+  **signiert** und wird vor dem Einspielen geprüft; startet die neue Fassung
+  nicht, fällt der Agent zurück.
+- *Einmalig:* Agents von vor diesem Release einmal mit dem Einzeiler neu
+  installieren – danach aktualisieren sie sich selbst.
+
+### Menü
+- Neu geordnet, **nur noch links**, höchstens drei Ebenen; keine Reiterleisten
+  mehr im Inhalt. Neue Bereiche *Meldungen*, *Agents*, *Mein Konto*.
+
+### KI
+- **OpenRouter** mit Anmelde-Assistent und Modellauswahl (mit Preisen, auch
+  kostenlose Modelle). KI-Chat mit Werkzeugen und Anmeldung per Mail-Link für
+  die App sind mit dabei.
+
+### Sicherheit
+Ein vollständiger Durchgang durch den Code und die Abhängigkeiten, mit Blick auf
+die aktuell bekannten Lücken:
+
+- **Einstellungen gaben jedem angemeldeten Konto alle gespeicherten Geheimnisse
+  heraus** (KI-Schlüssel, Mail-, LDAP-, Archiv-Passwörter, SSO-Geheimnis). Behoben;
+  Geheimnisse liegen jetzt außerdem **verschlüsselt** in der Datenbank.
+- **SSO** akzeptierte den Signatur-Algorithmus aus dem Token und – bei
+  mandantenübergreifenden Microsoft-Apps – Konten aus **jedem fremden Mandanten**.
+  Behoben.
+- **Caddys Admin-Schnittstelle** war für jeden Container im Docker-Netz offen –
+  jetzt ein Unix-Socket, den nur Caddy und das Backend sehen.
+- **Portainer und Tugtainer** hatten über den angeblich „nur lesenden“ Socket
+  (`:ro`) volle Docker-Rechte – jetzt sitzt ein lesender Filter dazwischen.
+- **Kein Zugangstoken mehr in Adressen** (Ereignisstrom, Terminal, Downloads);
+  Absender-IPs nur noch von LogBots eigenen Proxys; Kontoliste nur für
+  Administratoren; Zeitverhalten beim Anmelden verrät keine Benutzernamen mehr.
+- Syslog-Empfang gegen Überflutung begrenzt; Content-Security-Policy für die
+  Oberfläche; hochgeladene SVGs in der Sandbox.
+- Abhängigkeiten aktualisiert, u. a. **Starlette 1.9 (CVE-2026-48710 „BadHost“,
+  CVE-2026-54283)**, python-multipart 0.0.32 (fünf CVEs 2026), h11 0.16,
+  PyJWT statt python-jose, **n8n-Vorgabe 1.123.87** (CVE-2026-21858 „Ni8mare“
+  u. a.), Node 24, Vite 7.3. *Die aktuelle PHP-Lücke „PHP2Shell“
+  (CVE-2026-109618/-109619) betrifft LogBot nicht – es enthält kein PHP.*
+
+Einzelheiten: [Backend](backend.md) · [Frontend](frontend.md) · [Agents](agents.md) ·
+[Datenbank & Deployment](database.md) · [Syslog](syslog.md)
+
+---
 ## v2026.10.18.22.00.00 (2026-10-18)
 
 - **Hochgeladenes Zertifikat wurde nicht genutzt.** „Zertifikat speichern“

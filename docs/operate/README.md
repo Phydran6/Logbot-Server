@@ -8,43 +8,61 @@ Der Alltag mit einem laufenden LogBot.
 
 ## Die Oberfläche
 
-Alles hängt am **linken Menü**, in drei Ebenen. Die fünf Bereiche sind nach
-Fragen geschnitten, nicht nach Technik — jeder beantwortet genau eine:
+Alles hängt am **linken Menü** – und nur dort. Seit 2026.10.23 gibt es im
+Inhaltsbereich **keine Auswahlleisten mehr**: was früher als Reiter rechts
+stand (Einstellungen, Netzwerk → Proxy/DNS), ist ein Unterpunkt im Baum.
+Höchstens drei Ebenen: **Bereich → Seite oder Gruppe → Seite.** Die Bereiche
+sind nach Fragen geschnitten, nicht nach Technik:
 
 ```
 Überwachung        Was ist im Netz passiert?
-  Dashboard · Logs · Geräte · Systemzustand
+  Dashboard · Logs · Geräte (Baum: VM → Compose-Projekt → Container)
+  Systeme im Netz · Systemzustand
+
+Meldungen          Wer muss davon erfahren – und wie?
+  Eingang (mit Zahl der ungelesenen)
+  Regeln
+  Kanäle
+      E-Mail · Telegram · App & Push
 
 Auswertung         Was mache ich damit?
-  KI-Auswertung · Webhooks · App verbinden
+  KI-Auswertung (inkl. OpenRouter-Assistent) · Webhooks · App verbinden
+
+Agents             Womit liefern die Geräte, in welcher Fassung, wie viel?
+  Agent-Updates · Zugangsschlüssel · Grenzen & Vorgaben
 
 Verwaltung         Wer darf was, und wie lange bleiben Daten liegen?
   Benutzer
-  Zugang & Sicherheit
-      Passwort · Anmeldesicherheit · Single Sign-on (M365)
-      Verzeichnis (LDAP) · Zugangsschlüssel
+  Anmeldung
+      Single Sign-on (M365) · Verzeichnis (LDAP)
   Daten & Aufbewahrung
       Aufbewahrung · Speicherplatz · Archivierung · Datenbank
 
+Mein Konto         Meine Adresse, mein Passwort, meine Anmeldung.
+  E-Mail & Passwort · Anmeldesicherheit (MFA, Passkeys)
+
 System             Womit läuft das hier, und was tut es gerade?
+  Betrieb
+      Updates · Sicherung · Systemtagebuch · Konsole
   Container
       Übersicht & Image-Updates · Zusatzdienste
-  Updates (LogBot) · Systemtagebuch · Sicherung · Konsole
-  Netzwerk & Mail · Erscheinungsbild · Allgemein · Neustart
+  Netzwerk
+      Reverse Proxy & TLS · DNS
+  Einstellungen
+      Allgemein · Erscheinungsbild · Neustart
 
 Hilfe              Was ist das eigentlich, und wo kommt es her?
   Über LogBot & FAQ
 ```
 
-Die Trennlinie zwischen *Verwaltung* und *System* ist bewusst diese:
-**Verwaltung handelt von Menschen und Daten, System von der Maschine.** Vorher
-lagen Passwort, LDAP, Datenbank, Netzwerk und Erscheinungsbild alle im selben
-Reiterstapel unter „Einstellungen“ — richtig zu raten, wo etwas steckt, war
-Glückssache.
+Nicht-Administratoren sehen nur, was sie benutzen dürfen (Überwachung,
+Eingang, Webhooks, App, Aufbewahrung, Mein Konto, Erscheinungsbild, Hilfe).
 
-Die Einstellungen haben ihre Unterpunkte links im Baum — nicht mehr als
-Reiterleiste rechts im Inhalt. Wer die alten Adressen gespeichert hat:
-`/settings/ldap` und Konsorten funktionieren unverändert weiter.
+Alte Adressen funktionieren weiter: `/mail` → Meldungen → E-Mail,
+`/settings/agents` → Agents → Zugangsschlüssel, `/settings/network` →
+Reverse Proxy, `/settings/password` → Mein Konto.
+
+Oben rechts steht eine **Glocke** mit der Zahl der ungelesenen Meldungen.
 
 **Einklappen:** Der Pfeil unten links ist immer sichtbar und zeigt in die
 Richtung, in die es geht — nach links zum Einklappen, nach rechts zum
@@ -244,6 +262,98 @@ Feineinstellung über die `.env` (`DISK_USAGE_WARN`, `DISK_USAGE_TARGET`,
 
 ---
 
+## Geräte und Container
+
+*Überwachung → Geräte* zeigt die Systeme als **Baum**. Die VM (bzw. der
+Rechner) bleibt die eigentliche Instanz – mit Hostnamen, IP und Schlüssel.
+Findet der Linux-Agent darauf **Docker oder Podman**, meldet er die Container
+mit, und jeder Container wird eine eigene, lesbare Log-Instanz darunter:
+
+```
+docker01                         ← die VM
+├── nextcloud  (Compose-Projekt)
+│   ├── docker01/nextcloud-app-1
+│   └── docker01/nextcloud-db-1
+└── Einzelne Container
+    └── docker01/portainer
+```
+
+- **Lesbar:** In der Logliste steht ein Container als `docker01 › ▣ nextcloud-app-1`.
+  Die Geräteansicht eines Containers nennt seine VM, sein Image und sein
+  Compose-Projekt; die Ansicht einer VM kann die Logs ihrer Container mit
+  einblenden („mit Logs der N Container“).
+- **Was erfasst wird:** stdout/stderr jedes laufenden Containers (Log-Treiber
+  `json-file`, `local` oder `journald`) und die Zustandswechsel – Start,
+  Absturz mit Exit-Code, *OOM-Kill*, Neustart, Healthcheck. Der Schweregrad
+  wird aus dem Text erkannt (`level=error`, `"level":"warn"`, `panic:`,
+  `Traceback` …).
+- **Was nicht erfasst wird:** LogBots eigene Container (Label `de.logbot.stack`
+  – sonst erzeugte jede Lieferung ihr eigenes Zugriffsprotokoll, eine
+  Schleife) und jeder Container mit dem Label `de.logbot.collect=false`.
+- **Identität ist der Name:** `docker compose up` erzeugt neue Container mit
+  neuer ID, aber gleichem Namen – die Logs laufen unter derselben Instanz weiter.
+  Entfernte Container bleiben als „entfernt“ stehen, samt ihrer Logs.
+- **Ausschalten** pro Rechner: Agent mit `--no-docker` installieren.
+
+### Grenzen pro System
+
+*Agents → Grenzen & Vorgaben* legt fest, was für jedes Gerät ohne eigene Werte
+gilt – auch für Systeme, die LogBot über die Netzwerksuche selbst eingebunden
+hat: Aufbewahrung in Tagen, Höchstzahl Logzeilen und eine **Drossel** (Logzeilen
+pro Minute je System, VM und Container zusammen). Container erben die Werte
+ihrer VM. Eigene Werte je Gerät: Geräte → Zahnrad.
+
+### Agent-Updates
+
+Mit jedem Server-Update kommt eine neue Agent-Fassung mit. *Agents →
+Agent-Updates* entscheidet, wann sie auf die Geräte geht:
+
+| Regel | Was passiert |
+|---|---|
+| **Von Hand** (Vorgabe) | Neue Fassungen werden angezeigt; aktualisiert wird mit „Jetzt“ bzw. „Alle veralteten jetzt“. |
+| **Automatisch im Wartungsfenster** | Wochentage und Uhrzeit (auch über Mitternacht), höchstens N gleichzeitig; nach X Fehlschlägen mit derselben Fassung hält die Verteilung an und meldet sich. |
+| **Aus** | Keine Agent-Updates über den Server. |
+
+Jedes Gerät kann abweichen (immer von Hand, automatisch, nie). Auf dem Gerät
+selbst lässt sich die Fernaktualisierung mit `--no-remote-update` sperren.
+
+So läuft es ab: Der Agent meldet sich jede Minute (Heartbeat), bekommt die
+Anweisung, lädt das Paket, prüft **SHA-256 und die RSA-Unterschrift** des
+Servers (Schlüssel aus der Anmeldung), installiert neben dem laufenden Dienst,
+startet neu und meldet das Ergebnis. Startet die neue Fassung nicht, nimmt er
+die alte zurück. Ein manipuliertes Paket wird verworfen – auch bei
+selbstsigniertem Zertifikat (`--insecure`).
+
+> Agents, die **vor** 2026.10.23 installiert wurden, können sich noch nicht
+> selbst aktualisieren. Einmal den Einzeiler erneut ausführen – danach geht es
+> von selbst.
+
+---
+
+## Meldungen
+
+Wenn etwas passiert, das jemand wissen muss, landet es im **Eingang**
+(*Meldungen → Eingang*, dieselbe Liste in der App) – und je nach Regel per
+**E-Mail**, **Telegram** oder **Push** aufs Handy.
+
+Ab Werk:
+
+| Regel | Auslöser | Kanäle |
+|---|---|---|
+| Kritische Logereignisse | jede Logzeile ab „kritisch“ (emergency, alert, critical) – auch aus Containern | Telegram, E-Mail, App |
+| LogBot selbst: Fehler | Systemtagebuch ab „Fehler“ (Update, Sicherung, Platte, Agent-Update …) | E-Mail, Telegram, App |
+| Fehler in Logs (nur App) | ab „Fehler“ | App – ab Werk aus |
+| Gerät meldet sich nicht mehr | kein Lebenszeichen mehr | E-Mail, App – ab Werk aus |
+
+Gegen Fluten: pro Regel und Gerät höchstens eine Meldung je **Ruhezeit**;
+was dazwischen kommt, wird mitgezählt („… und 37 weitere“).
+
+Mails gehen an alle Administratoren **mit bestätigter Adresse** und an die
+zusätzlich eingetragenen Empfänger. Die Kanäle richten Assistenten ein – siehe
+[Integrationen](../integrations/README.md#meldungen-e-mail-telegram-app).
+
+---
+
 ## Systeme im Netz
 
 *Überwachung → Systeme im Netz* — nur für Administratoren.
@@ -383,7 +493,7 @@ Docker-Socket nur lesend und kann deshalb ebenfalls nur melden, nicht tauschen.
 
 ### Single Sign-on (Microsoft 365 und andere)
 
-*Verwaltung → Zugang & Sicherheit → Single Sign-on.*
+*Verwaltung → Anmeldung → Single Sign-on.*
 
 **Warum OpenID Connect und nicht SAML.** Beides erledigt dieselbe Aufgabe. Der
 Unterschied liegt in der Rechnung: SAML-Anmeldung für eine eigene, nicht im
@@ -412,7 +522,7 @@ Discovery-Dokuments ein.
 
 ### Zugangsschlüssel für Agents
 
-*Verwaltung → Zugang & Sicherheit → Zugangsschlüssel* — nur für Administratoren.
+*Agents → Zugangsschlüssel* — nur für Administratoren.
 
 Drei Arten, und die Art entscheidet, was der Schlüssel darf:
 

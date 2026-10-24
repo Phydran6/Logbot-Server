@@ -10,7 +10,7 @@ Reverse Proxy und TLS. Nimmt Port 80 und 443 an und verteilt nach hinten:
 [`Caddyfile`](Caddyfile) ist **nur der Zustand beim ersten Start**: reines HTTP
 auf Port 80, kein Zertifikat, keine Domain.
 
-Alles Weitere wird im Web-UI unter *Einstellungen → Netzwerk → Reverse Proxy*
+Alles Weitere wird im Web-UI unter *System → Netzwerk → Reverse Proxy & TLS*
 eingerichtet. Die dort erzeugte Konfiguration wird gespeichert und beim Start
 erneut geladen (`backend/app/routes/caddy.py`) — die Datei hier wird dabei nicht
 überschrieben.
@@ -46,7 +46,7 @@ fehl, fährt Caddy selbsttätig auf den vorherigen Stand zurück.
 
 ## Zusätzliche Adressen
 
-Unter *Einstellungen → Netzwerk* lassen sich weitere Namen und IPs eintragen,
+Unter *System → Netzwerk → Reverse Proxy & TLS* lassen sich weitere Namen und IPs eintragen,
 die ebenfalls per HTTPS bedient werden — nützlich, wenn ein Server intern anders
 heißt als von außen.
 

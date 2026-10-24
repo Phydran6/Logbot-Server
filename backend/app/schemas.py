@@ -67,26 +67,58 @@ class MFAStatusResponse(BaseModel):
 class TokenData(BaseModel):
     username: Optional[str] = None
 
+def check_password_strength(v: str) -> str:
+    """Mindestens 8 Zeichen, ein Grossbuchstabe, eine Ziffer, hoechstens 72 Byte.
+
+    72 Byte: mehr wertet bcrypt nicht aus - ein laengeres Passwort waere nur
+    scheinbar staerker.
+    """
+    if len(v) < 8:
+        raise ValueError("Passwort muss mindestens 8 Zeichen lang sein")
+    if len(v.encode("utf-8")) > 72:
+        raise ValueError("Passwort darf höchstens 72 Byte lang sein")
+    if not re.search(r"[A-Z]", v):
+        raise ValueError("Passwort muss mindestens einen Großbuchstaben enthalten")
+    if not re.search(r"[0-9]", v):
+        raise ValueError("Passwort muss mindestens eine Ziffer enthalten")
+    return v
+
+
+def check_email(v: Optional[str]) -> Optional[str]:
+    """Eine anschreibbare Adresse (nicht admin@localhost) - oder Fehler."""
+    if v is None:
+        return v
+    v = v.strip()
+    from .mail import valid_address
+    if not valid_address(v):
+        raise ValueError("Bitte eine gültige E-Mail-Adresse angeben (z.B. name@firma.de).")
+    return v
+
+
 class UserBase(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50)
-    email: Optional[str] = None
-    role: str = Field(default="user")
+    username: str = Field(..., min_length=3, max_length=50, pattern=r"^[A-Za-z0-9._@-]+$")
+    email: Optional[str] = Field(default=None, max_length=254)
+    role: str = Field(default="user", pattern="^(admin|user)$")
 
 class UserCreate(UserBase):
+    # Ab 2026.10.22 Pflicht: ohne Adresse kein Passwort-Reset, keine Anmeldung
+    # per Mail-Link in der App, keine Meldungen.
+    email: str = Field(..., max_length=254)
     password: str = Field(..., min_length=8, max_length=128)
 
     @field_validator("password")
     @classmethod
     def password_complexity(cls, v: str) -> str:
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("Passwort muss mindestens einen Großbuchstaben enthalten")
-        if not re.search(r"[0-9]", v):
-            raise ValueError("Passwort muss mindestens eine Ziffer enthalten")
-        return v
+        return check_password_strength(v)
+
+    @field_validator("email")
+    @classmethod
+    def email_valid(cls, v: str) -> str:
+        return check_email(v)
 
 class UserUpdate(BaseModel):
-    email: Optional[str] = None
-    role: Optional[str] = None
+    email: Optional[str] = Field(default=None, max_length=254)
+    role: Optional[str] = Field(default=None, pattern="^(admin|user)$")
     is_active: Optional[bool] = None
     password: Optional[str] = Field(default=None, min_length=8, max_length=128)
     # Pflicht, wenn jemand SEIN EIGENES Passwort aendert. Ohne das genuegte eine
@@ -101,27 +133,41 @@ class UserUpdate(BaseModel):
     def password_complexity(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("Passwort muss mindestens einen Großbuchstaben enthalten")
-        if not re.search(r"[0-9]", v):
-            raise ValueError("Passwort muss mindestens eine Ziffer enthalten")
-        return v
+        return check_password_strength(v)
 
-class UserResponse(UserBase):
+    @field_validator("email")
+    @classmethod
+    def email_valid(cls, v: Optional[str]) -> Optional[str]:
+        return check_email(v)
+
+class UserResponse(BaseModel):
     id: int
+    username: str
+    email: Optional[str] = None
+    role: str = "user"
     is_active: bool
     created_at: datetime
+    auth_source: Optional[str] = "local"
+    email_verified_at: Optional[datetime] = None
+    must_change_password: bool = False
+    mfa_enabled: bool = False
     class Config:
         from_attributes = True
 
 class AgentResponse(BaseModel):
     id: int
     hostname: str
+    parent_id: Optional[int] = None
+    agent_version: Optional[str] = None
+    update_policy: Optional[str] = None
+    update_state: Dict[str, Any] = {}
+    ingest_limit_per_minute: Optional[int] = None
+    children_count: Optional[int] = None
     ip_address: Optional[str]
     mac_address: Optional[str]
     device_type: str
-    last_seen: datetime
-    first_seen: datetime
+    last_seen: Optional[datetime] = None
+    first_seen: Optional[datetime] = None
     extra_data: Dict[str, Any] = {}
     metadata: Dict[str, Any] = {}
     is_online: Optional[bool] = None
@@ -134,6 +180,8 @@ class AgentResponse(BaseModel):
 class AgentRetentionUpdate(BaseModel):
     retention_max_logs: Optional[int] = Field(default=None, ge=1000, le=10_000_000)
     retention_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    # Drossel: hoechstens so viele Logzeilen pro Minute (inkl. Container).
+    ingest_limit_per_minute: Optional[int] = Field(default=None, ge=10, le=1_000_000)
 
 class AgentListResponse(BaseModel):
     items: List[AgentResponse]
@@ -159,6 +207,7 @@ class LogParsed(BaseModel):
 
 class LogResponse(BaseModel):
     id: int
+    agent_id: Optional[int] = None
     hostname: Optional[str]
     ip_address: Optional[str]
     timestamp: datetime
@@ -260,6 +309,10 @@ class LogIngestEntry(BaseModel):
     event_id: Optional[int] = None
     group: Optional[str] = Field(default=None, max_length=32)
     facility: Optional[int] = Field(default=None, ge=0, le=23)
+    # Container-Logs: Name des Containers auf diesem Host. Die Zeile landet
+    # dann bei der Kind-Instanz "<host>/<container>" statt beim Host selbst.
+    container: Optional[str] = Field(default=None, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    stream: Optional[str] = Field(default=None, pattern="^(stdout|stderr|event)$")
 
 class LogIngestRequest(BaseModel):
     hostname: str = Field(..., min_length=1, max_length=255)
@@ -270,6 +323,8 @@ class LogIngestRequest(BaseModel):
     # Grosszuegig: die FRITZ!Box liefert ihren kompletten Puffer (schon ueber 800
     # Eintraege gesehen). Sammler sollten trotzdem stueckeln - siehe n8n-Workflow.
     events: List[LogIngestEntry] = Field(..., max_length=5000)
+    # Fassung des Agenten (fuer Agent-Updates). Aeltere Agents schicken nichts.
+    agent_version: Optional[str] = Field(default=None, max_length=40, pattern=r"^[0-9A-Za-z.+_-]+$")
 
 class LogIngestResponse(BaseModel):
     accepted: int
@@ -279,6 +334,8 @@ class LogIngestResponse(BaseModel):
     # sich die Nummer und nennt sie beim Deinstallieren - dann trifft das
     # Aufraeumen genau seinen eigenen Eintrag und nicht den eines Namensvetters.
     agent_id: Optional[int] = None
+    # Wie viele Zeilen die Drossel dieses Systems verworfen hat.
+    throttled: int = 0
 
 class AgentDecommissionRequest(BaseModel):
     """Der Agent meldet sich ab.

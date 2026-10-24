@@ -496,7 +496,7 @@ async def _prepare(session: AsyncSession, device_id: int, actor: str):
     if not server["fqdn"]:
         raise OnboardError(
             "Es ließ sich keine Serveradresse bestimmen, unter der der Agent LogBot erreicht. "
-            "Bitte unter Einstellungen → Netzwerk eine Adresse (SITE_URL) hinterlegen.")
+            "Bitte unter Meldungen → Kanäle → E-Mail die öffentliche Adresse eintragen (oder SITE_URL in der .env).")
 
     row, plain = await tokens.create(
         session, name=f"onboard:{device['ip_address']}"[:100], kind="enroll",

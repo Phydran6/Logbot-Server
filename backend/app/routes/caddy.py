@@ -27,6 +27,7 @@ from ..auth import get_current_admin
 from ..config import settings
 from ..database import get_db, async_session
 from ..models import Setting
+from .. import caddyadmin
 from ..schemas import (
     CaddyApplyRequest,
     CaddyConfigResponse,
@@ -47,7 +48,9 @@ ROUTES_SNIPPET = """(logbot_routes) {
 }
 """
 
-ADMIN_BLOCK = "{\n    admin 0.0.0.0:2019\n}\n\n"
+# Die Admin-Zeile setzt LogBot beim Anwenden selbst (app/caddyadmin.py) - in
+# gespeicherten Caddyfiles steht sie nicht mehr.
+ADMIN_BLOCK = ""
 
 # HTTP-Block: faengt alles auf Port 80, was kein spezifischerer Block bedient.
 # Bewusst OHNE redir - sonst ist die Oberflaeche bei kaputtem TLS/DNS nicht mehr
@@ -157,7 +160,7 @@ def _dns_warning(domain: str) -> Optional[str]:
         return (
             f"'{domain}' ist aus dem Backend-Container heraus nicht auflösbar. "
             "Für Let's Encrypt muss der Name öffentlich auf diesen Server zeigen. "
-            "DNS lässt sich unter Einstellungen → Netzwerk → DNS anpassen."
+            "DNS lässt sich unter System → Netzwerk → DNS anpassen."
         )
 
 
@@ -166,16 +169,17 @@ def _dns_warning(domain: str) -> Optional[str]:
 # ==============================================================================
 
 def _admin_url(path: str) -> str:
-    return settings.caddy_admin_url.rstrip("/") + path
+    # Relativ: die Basis (Unix-Socket oder TCP) kennt caddyadmin.client().
+    return path
 
 
 async def _adapt_caddyfile(caddyfile: str) -> dict:
     """Wandelt die Caddyfile in JSON um - dient als Syntaxprüfung OHNE Anwenden."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with caddyadmin.client(timeout=10.0) as client:
             resp = await client.post(
                 _admin_url("/adapt"),
-                content=caddyfile.encode("utf-8"),
+                content=caddyadmin.with_admin(caddyfile).encode("utf-8"),
                 headers={"Content-Type": "text/caddyfile"},
             )
     except httpx.RequestError as exc:
@@ -189,7 +193,7 @@ async def _adapt_caddyfile(caddyfile: str) -> dict:
 async def _get_running_config() -> Optional[dict]:
     """Aktuell laufende Config (fuer Rollback). None, wenn nicht lesbar."""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with caddyadmin.client(timeout=5.0) as client:
             resp = await client.get(_admin_url("/config/"))
             if resp.status_code < 400:
                 return resp.json()
@@ -199,7 +203,7 @@ async def _get_running_config() -> Optional[dict]:
 
 
 async def _load_json_config(config: dict) -> None:
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with caddyadmin.client(timeout=10.0) as client:
         await client.post(
             _admin_url("/load"),
             json=config,
@@ -214,8 +218,9 @@ async def _apply_caddyfile(caddyfile: str) -> None:
     # (gleicher Dateiname custom.crt) weiter im Speicher.
     headers = {"Content-Type": "text/caddyfile", "Cache-Control": "must-revalidate"}
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(url, content=caddyfile.encode("utf-8"), headers=headers)
+        async with caddyadmin.client(timeout=20.0) as client:
+            resp = await client.post(url, content=caddyadmin.with_admin(caddyfile).encode("utf-8"),
+                                     headers=headers)
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"Caddy Admin API nicht erreichbar: {exc}") from exc
 
@@ -225,7 +230,7 @@ async def _apply_caddyfile(caddyfile: str) -> None:
 
 async def _caddy_alive() -> bool:
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with caddyadmin.client(timeout=5.0) as client:
             resp = await client.get(_admin_url("/config/"))
             return resp.status_code < 500
     except Exception:
@@ -263,7 +268,7 @@ async def get_caddy_config(db: AsyncSession = Depends(get_db), _=Depends(get_cur
     running_config = {}
     last_error = None
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with caddyadmin.client(timeout=5.0) as client:
             resp = await client.get(_admin_url("/config/"))
             if resp.status_code < 400:
                 running_config = resp.json() or {}
@@ -277,7 +282,7 @@ async def get_caddy_config(db: AsyncSession = Depends(get_db), _=Depends(get_cur
 
     return CaddyConfigResponse(
         running_config=running_config,
-        saved_caddyfile=saved or DEFAULT_CADDYFILE,
+        saved_caddyfile=caddyadmin.strip_admin(saved or DEFAULT_CADDYFILE),
         cert_present=cert_present,
         last_error=last_error,
     )
@@ -338,12 +343,12 @@ async def apply_caddy_config(
         )
 
     if data.save:
-        await _save_setting(db, "caddy_caddyfile", effective)
+        await _save_setting(db, "caddy_caddyfile", caddyadmin.strip_admin(effective))
 
     return {
         "message": "Caddy-Konfiguration geladen",
         "saved": data.save,
-        "caddyfile": effective,
+        "caddyfile": caddyadmin.strip_admin(effective),
         "warnings": warnings,
     }
 

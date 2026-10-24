@@ -2,7 +2,7 @@
  * ==============================================================================
  * Name:           Phydran6
  * Kontakt:        Phydran6
- * Version:        2026.08.14.12.00.00
+ * Version:        2026.10.23.12.00.00
  * Changelog:      ../../../CHANGELOG/frontend.md
  * ==============================================================================
  *
@@ -47,6 +47,13 @@ const routes = [
     component: () => import('../views/Login.vue'),
     meta: { public: true }
   },
+  // Link aus der Mail "Passwort zurücksetzen" - ohne Anmeldung erreichbar.
+  {
+    path: '/reset-password',
+    name: 'ResetPassword',
+    component: () => import('../views/ResetPassword.vue'),
+    meta: { public: true }
+  },
 
   // ---------------------------------------------------------------------------
   // Geschützte Routen: Hauptlayout mit Sidebar
@@ -72,10 +79,71 @@ const routes = [
         component: () => import('../views/Agents.vue')
       },
       {
-        path: 'devices/:hostname',
+        path: 'devices/:hostname(.*)',
         name: 'DeviceLogs',
         component: () => import('../views/DeviceLogs.vue')
       },
+      // --- Agents -------------------------------------------------------------
+      {
+        path: 'agents/updates',
+        name: 'AgentUpdates',
+        component: () => import('../views/AgentUpdates.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'agents/tokens',
+        name: 'AgentTokens',
+        component: () => import('../views/AgentTokens.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'agents/limits',
+        name: 'AgentDefaults',
+        component: () => import('../views/AgentDefaults.vue'),
+        meta: { admin: true }
+      },
+      { path: 'settings/agents', redirect: '/agents/tokens' },
+
+      // --- Meldungen ----------------------------------------------------------
+      {
+        path: 'notifications',
+        name: 'Notifications',
+        component: () => import('../views/Notifications.vue')
+      },
+      {
+        path: 'notifications/rules',
+        name: 'NotificationRules',
+        component: () => import('../views/NotificationRules.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'notifications/mail',
+        name: 'NotifyMail',
+        component: () => import('../views/MailSettings.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'notifications/telegram',
+        name: 'NotifyTelegram',
+        component: () => import('../views/TelegramSettings.vue'),
+        meta: { admin: true }
+      },
+      {
+        path: 'notifications/app',
+        name: 'NotifyApp',
+        component: () => import('../views/PushSettings.vue'),
+        meta: { admin: true }
+      },
+      { path: 'mail', redirect: '/notifications/mail' },
+
+      // --- Mein Konto ----------------------------------------------------------
+      {
+        path: 'account',
+        name: 'Account',
+        component: () => import('../views/Account.vue')
+      },
+      { path: 'settings/password', redirect: '/account' },
+      { path: 'settings/network', redirect: '/settings/proxy' },
       // Was im Netz haengt und ob es schon liefert. Nur fuer Administratoren:
       // die Liste ist eine Landkarte des Netzes.
       {
@@ -151,16 +219,17 @@ const routes = [
         component: () => import('../views/AiSettings.vue'),
         meta: { admin: true }
       },
+      // Rückweg von der OpenRouter-Anmeldung (?code=…&state=…)
+      {
+        path: 'ai/openrouter',
+        name: 'OpenRouterCallback',
+        component: () => import('../views/AiSettings.vue'),
+        meta: { admin: true }
+      },
       {
         path: 'stacks',
         name: 'Stacks',
         component: () => import('../views/Stacks.vue'),
-        meta: { admin: true }
-      },
-      {
-        path: 'mail',
-        name: 'Mail',
-        component: () => import('../views/MailSettings.vue'),
         meta: { admin: true }
       },
       {

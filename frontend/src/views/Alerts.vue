@@ -2,18 +2,22 @@
      Name:        Phydran6
      Kontakt:     Phydran6
      Changelog:   ../../../CHANGELOG/frontend.md
-     Beschreibung: LogBot - System -> Benachrichtigungen: Mail, Telegram oder
+     Beschreibung: LogBot - Meldungen -> Systemwaechter: Mail, Telegram oder
                    Webhook (n8n), wenn LogBot selbst nicht mehr sammelt.
+                   Ohne eigenen Bot/Empfaenger gelten die unter Meldungen ->
+                   Kanaele eingerichteten; jeder Alarm steht auch im Eingang.
      ============================================================================== -->
 
 <template>
   <div class="page">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Benachrichtigungen</h1>
+        <h1 class="page-title">Systemwächter</h1>
         <p class="page-subtitle">
           LogBot meldet sich selbst, wenn etwas nicht stimmt – Datenbank weg, Platte voll,
-          keine Logs mehr, ein Gerät flutet. Per Mail, Telegram oder Webhook (z.&nbsp;B. an n8n).
+          keine Logs mehr, ein Gerät flutet. Per Mail, Telegram oder Webhook (z.&nbsp;B. an n8n) –
+          auch dann, wenn die Datenbank gerade nicht erreichbar ist. Jeder Alarm steht außerdem im
+          <router-link to="/notifications" class="link">Eingang</router-link> und kommt als Push in die App.
         </p>
       </div>
       <button class="btn btn-secondary btn-sm" :disabled="checking" @click="checkNow">
@@ -112,8 +116,9 @@
         </div>
         <div class="card-body space-y-3">
           <p class="hint">
-            Direkt aus LogBot, ohne Zusatzdienst. Bot bei <code>@BotFather</code> anlegen,
-            Bot in den Chat holen, Chat-ID eintragen.
+            Leer lassen = der Bot und die Chats aus
+            <router-link to="/notifications/telegram" class="link">Meldungen → Telegram</router-link>
+            (dort per Assistent verbunden). Nur ausfüllen, wenn Alarme an einen anderen Bot oder Chat sollen.
           </p>
           <div>
             <label class="label">Bot-Token</label>

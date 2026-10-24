@@ -62,7 +62,8 @@ async def event_summary(hours: int = Query(24, ge=1, le=24 * 30),
 
 
 @router.get("/stream")
-async def stream_events(token: str = Query(..., description="Access-Token eines Admins")):
+async def stream_events(ticket: str = Query("", description="Kurzzeit-Ticket (POST /api/auth/ticket)"),
+                 token: str = Query("", description="veraltet: Access-Token")):
     """Neue Einträge in dem Moment, in dem sie entstehen (Server-Sent Events).
 
     Damit läuft das Tagebuch während eines Updates oder eines Aufräumlaufs live
@@ -71,7 +72,7 @@ async def stream_events(token: str = Query(..., description="Access-Token eines 
     Der Token kommt als Abfrageparameter, weil `EventSource` im Browser keine
     eigenen Kopfzeilen mitschicken kann. Geprüft wird er genauso streng.
     """
-    if not await admin_from_token(token):
+    if not await admin_from_token(ticket or token):
         raise HTTPException(status_code=401,
                             detail="Nicht angemeldet oder keine Administratorrechte.")
 

@@ -121,6 +121,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { getTicket } from '../utils/stream'
 import { useI18n } from '../i18n'
 import AppIcon from '../components/AppIcon.vue'
 
@@ -397,13 +398,21 @@ async function loadStatus() {
   }
 }
 
-function connect() {
+async function connect() {
   error.value = ''
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const rows = 32
   const cols = estimateColumns()
+  // Ticket statt Zugangstoken: gilt 60 Sekunden, einmal, nur für die Konsole.
+  let ticket
+  try {
+    ticket = await getTicket('shell')
+  } catch (e) {
+    error.value = e.message
+    return
+  }
   const url = `${protocol}://${window.location.host}/api/shell/ws`
-    + `?token=${encodeURIComponent(auth.token)}&rows=${rows}&cols=${cols}`
+    + `?ticket=${encodeURIComponent(ticket)}&rows=${rows}&cols=${cols}`
 
   socket = new WebSocket(url)
 

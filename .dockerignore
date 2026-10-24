@@ -1,0 +1,21 @@
+# Nur fuer den Backend-Build (Kontext = Repository-Wurzel). Frontend und Syslog
+# bauen aus ihren eigenen Verzeichnissen.
+.git
+.github
+.claude
+**/__pycache__
+**/*.pyc
+frontend
+syslog
+docs
+db
+deploy
+n8n
+data
+CHANGELOG
+*.md
+!agents/README.md
+.env
+.env.*
+**/node_modules
+**/*.dump

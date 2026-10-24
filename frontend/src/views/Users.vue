@@ -34,7 +34,11 @@
         <tbody class="divide-y" :style="{ borderColor: 'var(--color-border)' }">
           <tr v-for="user in users" :key="user.id" class="hover-row">
             <td class="px-6 py-4 font-medium" :style="{ color: 'var(--color-text-primary)' }">{{ user.username }}</td>
-            <td class="px-6 py-4" :style="{ color: 'var(--color-text-muted)' }">{{ user.email || '-' }}</td>
+            <td class="px-6 py-4" :style="{ color: 'var(--color-text-muted)' }">
+              {{ user.email || '-' }}
+              <span v-if="user.email && user.email_verified_at" class="badge badge-success ml-1">bestätigt</span>
+              <span v-else class="badge badge-warning ml-1" title="Ohne bestätigte Adresse: kein Passwort-Reset per Mail, keine Meldungen">{{ user.email ? 'unbestätigt' : 'fehlt' }}</span>
+            </td>
             <td class="px-6 py-4">
               <span 
                 class="px-2 py-1 text-xs rounded-full text-white"
@@ -109,10 +113,11 @@
             >
           </div>
           <div>
-            <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">E-Mail</label>
+            <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">E-Mail (Pflicht)</label>
             <input
               v-model="form.email"
               type="email"
+              required
               class="w-full rounded px-3 py-2"
               :style="inputStyle"
             >
@@ -353,10 +358,12 @@ async function saveUser() {
   try {
     if (editingUser.value) {
       const data = {
-        email: form.value.email,
         role: form.value.role,
         is_active: form.value.is_active
       }
+      // Nur mitschicken, wenn geändert - eine Altadresse wie admin@localhost
+      // würde sonst beim Speichern als ungültig abgewiesen.
+      if ((form.value.email || '') !== (editingUser.value.email || '')) data.email = form.value.email
       if (form.value.password) {
         data.password = form.value.password
       }

@@ -3,6 +3,17 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.23.12.00.00
+
+### Security
+- **Caddy-Admin per Unix-Socket**: neues Volume `caddy_admin` (nur Caddy und Backend), `CADDY_ADMIN_URL=unix:///run/caddy-admin/admin.sock`, Caddyfile `admin unix//run/caddy-admin/admin.sock`. Eine `.env` mit dem alten `http://caddy:2019` funktioniert weiter (das Backend nimmt dann den Socket).
+- **Portainer/Tugtainer hinter einem lesenden Filter** (`socket-proxy`, eigenes internes Netz `dockerapi`). Das bisherige `:ro` am Docker-Socket war **kein** Schreibschutz – es schützt nur die Datei, nicht die Befehle darüber.
+- **n8n-Vorgabe auf 1.123.87** (vorher 1.68.0 mit u.a. CVE-2026-21858 „Ni8mare“, CVSS 10, CVE-2026-21877, CVE-2026-25049), **Portainer auf 2.45.3**.
+- Images bauen mit `apt-get upgrade` / `apk upgrade`; Frontend-Build mit Node 24.
+
+### Changed
+- **Backend wird aus dem Repository-Wurzelverzeichnis gebaut** (`context: .`, `dockerfile: backend/Dockerfile`, neue `.dockerignore`) – das Image enthält die Agent-Installer (`/app/agents`) für signierte Agent-Updates, auch im gehärteten Betrieb.
+- Neue Spalten/Tabellen legt das Backend beim Start an (`ensure_schema_2026_10`): `users.tokens_valid_after`, `email_verified_at`, `must_change_password`; `agents.parent_id`, `agent_version`, `update_policy`, `update_requested_at`, `update_state`, `ingest_limit_per_minute`; Tabellen `user_tokens`, `notifications`, `notification_read_state`, `push_endpoints`; eindeutiger Index auf `lower(users.email)` (nur, wenn es keine Doppelten gibt). Sicherungen nehmen `push_endpoints` im Bereich „Benutzer“ mit.
 ## 2026.10.11.20.00.00
 
 ### Added

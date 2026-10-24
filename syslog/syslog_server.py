@@ -2,7 +2,7 @@
 # ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.13.20.58.33
+# Version:     2026.10.23.12.00.00
 # Changelog:   ../CHANGELOG/syslog.md
 # Beschreibung: LogBot - Syslog Server mit erweitertem Parsing
 #               Unterstützt: RFC 5424, RFC 3164 (BSD), UniFi Netconsole,
@@ -486,6 +486,10 @@ class DatabaseManager:
             return
 
         data = sanitize(data)
+        # Ein Schraegstrich im Hostnamen ist Container-Instanzen vorbehalten
+        # ("vm/container", vom HTTPS-Agent mit Schluessel). Per Syslog - ohne
+        # jede Anmeldung - darf sich niemand als Container einer VM ausgeben.
+        data['hostname'] = (data.get('hostname') or '').replace('/', '_')[:255] or data['ip_address']
         agent_id = await self.get_or_create_agent(
             data['hostname'], data['ip_address'], data.get('mac_address'),
             data['device_type'], data.get('extra_data', {}))
@@ -563,6 +567,12 @@ class DatabaseManager:
 # Aufgaben ohne Grenze im Speicher, bis der Container am Speicher erstickte.
 UDP_MAX_INFLIGHT = int(os.getenv('SYSLOG_UDP_MAX_INFLIGHT', '5000'))
 
+# Weitere Grenzen - Port 514 ist ohne Anmeldung offen.
+MAX_MESSAGE_BYTES = 16 * 1024          # laengere Zeilen werden gekuerzt
+MAX_TCP_CLIENTS = 512                  # gleichzeitige TCP-Verbindungen
+TCP_IDLE_SECONDS = 600                 # stille Verbindungen werden getrennt
+_tcp_clients = 0
+
 
 class SyslogUDPProtocol(asyncio.DatagramProtocol):
     def __init__(self, parser: SyslogParser, db: DatabaseManager):
@@ -585,7 +595,7 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
             return
         # NUL-Zeichen entfernen: PostgreSQL nimmt sie weder in Text noch in
         # JSONB an, und eine solche Meldung riss den ganzen Stapel mit.
-        msg = data.decode('utf-8', errors='replace').replace('\x00', '').strip()
+        msg = data[:MAX_MESSAGE_BYTES].decode('utf-8', errors='replace').replace('\x00', '').strip()
         if msg:
             task = asyncio.create_task(self._process(msg, addr[0]))
             self._tasks.add(task)
@@ -600,14 +610,24 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
 
 
 async def handle_tcp(reader, writer, parser: SyslogParser, db: DatabaseManager):
+    global _tcp_clients
     addr = writer.get_extra_info('peername')
     ip   = addr[0] if addr else 'unknown'
+    if _tcp_clients >= MAX_TCP_CLIENTS:
+        writer.close()
+        return
+    _tcp_clients += 1
     try:
         while True:
-            data = await reader.readline()
+            try:
+                data = await asyncio.wait_for(reader.readline(), timeout=TCP_IDLE_SECONDS)
+            except asyncio.LimitOverrunError:
+                # Zeile laenger als der Puffer: verwerfen bis zum naechsten Umbruch.
+                await reader.readuntil(b"\n")
+                continue
             if not data:
                 break
-            msg = data.decode('utf-8', errors='replace').replace('\x00', '').strip()
+            msg = data[:MAX_MESSAGE_BYTES].decode('utf-8', errors='replace').replace('\x00', '').strip()
             if msg:
                 # Fehler pro Zeile abfangen: frueher beendete eine einzige
                 # unlesbare Zeile kommentarlos die ganze Verbindung.
@@ -622,6 +642,7 @@ async def handle_tcp(reader, writer, parser: SyslogParser, db: DatabaseManager):
         # z.B. eine Zeile ueber 64 KiB (readline-Grenze)
         logger.warning("TCP-Verbindung von %s beendet: %s", ip, e)
     finally:
+        _tcp_clients -= 1
         writer.close()
 
 

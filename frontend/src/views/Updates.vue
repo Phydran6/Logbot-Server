@@ -429,6 +429,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { openTicketStream } from '../utils/stream'
 import AppIcon from '../components/AppIcon.vue'
 import BackupPrompt from '../components/BackupPrompt.vue'
 
@@ -893,44 +894,30 @@ async function loadBackupScopes() {
  */
 function startOutputStream() {
   if (outputStream || typeof EventSource === 'undefined') return
-  outputStream = new EventSource(
-    `/api/updates/log/stream?token=${encodeURIComponent(auth.token)}`)
-
-  outputStream.addEventListener('update.output', (event) => {
-    liveConnected.value = true
-    try {
-      const data = JSON.parse(event.data)
+  // Ticket statt Zugangstoken in der Adresse. Bricht die Verbindung ab (der
+  // Container wird gerade neu gebaut - genau das ist ja der Vorgang), baut
+  // openTicketStream sie mit frischem Ticket selbst wieder auf.
+  outputStream = openTicketStream('/api/updates/log/stream', {
+    'update.output': (data) => {
+      liveConnected.value = true
+      if (!data || typeof data !== 'object') return
       if (data.initial) liveLines.value = []
       liveLines.value = [...liveLines.value, ...(data.lines || [])].slice(-MAX_LIVE_LINES)
       scrollToEnd()
-    } catch {
-      // Eine unlesbare Zeile ist kein Grund, den Strom aufzugeben.
-    }
-  })
-
-  outputStream.addEventListener('update.state', (event) => {
-    try {
-      const state = JSON.parse(event.data)
-      if (status.value) status.value.run = state
-    } catch {
-      // Zustand kommt beim naechsten Takt ohnehin wieder.
-    }
-  })
-
-  outputStream.addEventListener('update.done', () => {
-    liveConnected.value = false
-    stopOutputStream()
-    load()
-  })
-
-  outputStream.onopen = () => { liveConnected.value = true }
-  // Bricht die Verbindung ab (der Container wird gerade neu gebaut - genau
-  // das ist ja der Vorgang), versucht der Browser es von selbst erneut.
-  outputStream.onerror = () => { liveConnected.value = false }
+    },
+    'update.state': (state) => {
+      if (status.value && state && typeof state === 'object') status.value.run = state
+    },
+    'update.done': () => {
+      liveConnected.value = false
+      stopOutputStream()
+      load()
+    },
+  }, { onOpen: () => { liveConnected.value = true }, onError: () => { liveConnected.value = false } })
 }
 
 function stopOutputStream() {
-  outputStream?.close()
+  outputStream?.()
   outputStream = null
 }
 

@@ -49,7 +49,7 @@ router = APIRouter(prefix="/api/app", tags=["Mobile App"])
 
 # Was die App an Funktionen erwarten darf. Aeltere App-Versionen koennen daran
 # ablesen, was dieser Server kann, statt es auszuprobieren.
-API_LEVEL = 2
+API_LEVEL = 3
 CAPABILITIES = [
     "cursor-paging",     # before_id / since_id statt Seitenzahlen
     "parsed-logs",       # Zusammenfassung und Abzeichen pro Zeile
@@ -58,6 +58,13 @@ CAPABILITIES = [
     "severity-filter",
     "search",
     "ai-analysis",       # /api/ai/analyze, falls eingerichtet
+    "notifications",     # /api/app/notifications (Eingang, gelesen markieren)
+    "push-webpush",      # /api/app/push (UnifiedPush/WebPush, RFC 8291 + VAPID)
+    "magic-link",        # /api/auth/magic-link (Anmeldung per E-Mail-Link)
+    "ai-chat",           # /api/ai/chat
+    "device-tree",       # Container als Kinder ihrer VM (parent_id, /devices?tree=true)
+    "password-reset",    # /api/auth/password/forgot
+    "login-email",       # /api/auth/login nimmt Benutzername oder E-Mail
 ]
 
 # Nur diese Spalten holen. `raw_message` bleibt draussen, bis jemand eine
@@ -160,6 +167,11 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user=Depends(get_current
 # =============================================================================
 # Logs
 # =============================================================================
+def _like(value: str) -> str:
+    """LIKE-Sonderzeichen entschaerfen: ein '%' im Suchfeld ist kein Joker."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _filtered(query, hostname, level, min_severity, source, search,
               device_type, since_hours):
     if hostname:
@@ -173,9 +185,9 @@ def _filtered(query, hostname, level, min_severity, source, search,
                                 detail=f"Unbekannter Schweregrad '{min_severity}'.")
         query = query.where(func.lower(Log.level).in_(_levels_up_to(rank)))
     if source:
-        query = query.where(Log.source.ilike(f"%{source.strip()}%"))
+        query = query.where(Log.source.ilike(f"%{_like(source.strip())}%", escape="\\"))
     if search:
-        query = query.where(Log.message.ilike(f"%{search.strip()}%"))
+        query = query.where(Log.message.ilike(f"%{_like(search.strip())}%", escape="\\"))
     if device_type:
         query = query.where(Log.agent_id.in_(
             select(Agent.id).where(Agent.device_type == device_type.strip())))
@@ -345,6 +357,7 @@ async def summary(db: AsyncSession = Depends(get_db), _=Depends(get_current_user
 async def devices(
     limit: int = Query(100, ge=1, le=500),
     only_offline: bool = Query(False),
+    tree: bool = Query(False, description="Container (Kinder einer VM) mitliefern"),
     db: AsyncSession = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -361,6 +374,8 @@ async def devices(
     cutoff = datetime.utcnow() - timedelta(seconds=offline_timeout)
 
     query = select(Agent).order_by(desc(Agent.last_seen)).limit(limit)
+    if not tree:
+        query = query.where(Agent.parent_id.is_(None))
     if only_offline:
         query = query.where((Agent.last_seen < cutoff) | (Agent.last_seen.is_(None)))
 
@@ -373,5 +388,9 @@ async def devices(
             "type": agent.device_type,
             "last_seen": agent.last_seen.isoformat() if agent.last_seen else None,
             "online": bool(agent.last_seen and agent.last_seen >= cutoff),
+            "parent_id": agent.parent_id,
+            "container": ((agent.extra_data or {}).get("container") or {}).get("name"),
+            "compose_project": ((agent.extra_data or {}).get("container") or {}).get("compose_project"),
+            "agent_version": agent.agent_version,
         })
     return {"items": items, "offline_after_seconds": offline_timeout}

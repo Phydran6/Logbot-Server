@@ -2,6 +2,43 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.23.12.00.00
+
+### Security
+- **`GET /api/settings` gab jedem angemeldeten Konto alle gespeicherten Geheimnisse heraus** – KI-API-Schlüssel, SMTP-, LDAP- und Archiv-Passwörter, SSO-Client-Geheimnis. Geheimnisse werden jetzt geschwärzt (nur „gesetzt ja/nein“); Einstellungen, die ein eigenes Modul pflegt, lassen sich über `PUT /api/settings/{key}` nicht mehr überschreiben (409). *(Beitrag aus der App-Sitzung.)*
+- **SSO: zwei Lücken in der ID-Token-Prüfung.** Der Signatur-Algorithmus wurde aus dem Kopf des Tokens übernommen – also vom Absender bestimmt (Algorithmus-Verwechslung). Und bei Microsoft-Ausstellern mit Platzhalter `{tenantid}` wurde der Aussteller gar nicht geprüft: ein Konto aus **jedem fremden Entra-Mandanten** kam herein. Jetzt: feste Liste asymmetrischer Verfahren, Mandant muss der eingetragene sein (GUID), `nonce` ist Pflicht. Das Client-Geheimnis liegt verschlüsselt in der Datenbank.
+- **python-jose → PyJWT.** python-jose wird kaum gepflegt und hatte CVE-2024-33663 (Algorithmus-Verwechslung) und CVE-2024-33664 (JWE-Bombe).
+- **Abhängigkeiten auf Stand ohne bekannte Lücken:** Starlette 1.9.0 (u.a. **CVE-2026-48710 „BadHost“** – Host-Kopf-Umgehung, auf CISAs KEV-Liste – und CVE-2026-54283, DoS über den Formular-Parser), FastAPI 0.161.0, python-multipart 0.0.32 (CVE-2026-53537/53539/42561/40347/24486), uvicorn 0.54 mit h11 0.16 (CVE-2025-43859, Request Smuggling), Pillow 13, cryptography 50, paramiko 3.5.1, webauthn 2.8, asyncpg 0.32, pydantic 2.14, SQLAlchemy 2.0.55. Beim Bauen werden die Pakete des Grundsystems aktualisiert. *PHP („PHP2Shell“, CVE-2026-109618/-109619): LogBot enthält kein PHP und ist nicht betroffen.*
+- **Sitzungen lassen sich entwerten.** Token tragen ihren Ausstellungszeitpunkt; Passwortwechsel, Deaktivierung, Rollenwechsel, MFA-Reset und „überall abmelden“ (`POST /api/auth/logout-all`) setzen `users.tokens_valid_after` – ältere Token gelten sofort nicht mehr. Vorher lief ein gestohlenes Token nach dem Passwortwechsel bis zu 24 Stunden weiter.
+- **Kein Zugangstoken mehr in Adressen.** Ereignisströme, Terminal und Sicherungs-Downloads nehmen ein Kurzzeit-Ticket (`POST /api/auth/ticket`, 60 s, einmal, zweckgebunden). Vorher stand das volle 24-Stunden-Token in der Adresse und damit im Zugriffsprotokoll. Uvicorn-Zugriffsprotokolle schwärzen außerdem `token`, `ticket`, `code`, `state`; httpx protokolliert keine Adressen mehr (dort stünde der Telegram-Bot-Token).
+- **`X-Forwarded-For` wird nur noch von LogBots eigenen Proxys angenommen** (Caddy, Frontend; erweiterbar per `LOGBOT_TRUSTED_PROXIES`). Vorher konnte jeder Container im Docker-Netz das Backend direkt ansprechen und sich eine beliebige Absender-IP geben – an Netzbeschränkungen von Schlüsseln und an Bremsen vorbei.
+- **Caddys Admin-Schnittstelle lag offen im Docker-Netz** (`0.0.0.0:2019`, ohne Anmeldung) – erreichbar für n8n, Open WebUI, Portainer, Postfix. Wer einen davon übernahm, konnte den Verkehr zu LogBot umleiten. Jetzt Unix-Socket in einem Volume, das nur Caddy und das Backend sehen (`app/caddyadmin.py`); die Admin-Zeile einer Caddyfile setzt ausschließlich LogBot.
+- **Die Kontoliste sah jedes angemeldete Konto** (Namen, Rollen, Adressen). Jetzt nur Administratoren. Rollen sind nur noch `admin`/`user`; der letzte aktive Administrator lässt sich weder löschen, deaktivieren noch herabstufen; Anlegen, Löschen und MFA-Reset stehen im Tagebuch.
+- **Anmelden verriet über die Antwortzeit, welche Benutzernamen existieren** – für Unbekannte wurde kein Hash geprüft. Jetzt gleich teuer.
+- **Webhook-Token** sind für Nicht-Administratoren geschwärzt. *(Beitrag aus der App-Sitzung.)*
+- **Update-Bezugspunkt geprüft:** ein `ref` wie `--upload-pack=…` wäre für git eine Option gewesen (das Wartungsskript läuft als root).
+- **Gespeicherte Geheimnisse verschlüsselt** (`app/secretbox.py`, Fernet, Schlüssel per HKDF aus `JWT_SECRET`): KI-API-Schlüssel, SMTP-/Relay-Passwörter, OAuth-Refresh-Token, Telegram-Bot-Token, SSO-Client-Geheimnis, Schlüssel für Agent-Updates und Push. Altbestand im Klartext wird beim nächsten Speichern verschlüsselt.
+- **Branding: hochgeladene SVGs** werden mit `Content-Security-Policy: sandbox` ausgeliefert – direkt aufgerufen kann ein darin verstecktes Skript nichts mehr tun.
+- **Postfix-Datei:** Zeilenumbrüche in Feldern konnten zusätzliche Variablen für den Container einschleusen; alle Werte werden bereinigt.
+- **Terminal:** WebSocket nur noch von der eigenen Oberfläche (Origin-Prüfung).
+- Das Auslieferungspasswort `admin` erzwingt beim Anmelden ein eigenes Passwort; vom Administrator vergebene Passwörter ebenso.
+- Mobile API: `%` und `_` in Suchfeldern sind keine Joker mehr.
+
+### Added
+- **Meldungen** (`app/notify.py`, `/api/notifications/*`): Regeln für Logzeilen (ab Schweregrad, Geräte inkl. Container, Stichwörter, Ausschlüsse), für LogBot selbst (Systemtagebuch ab Stufe, Bereiche) und für verstummte Geräte; Ruhezeit mit Zusammenfassung („… und 37 weitere“); Eingang mit Gelesen-Zeiger pro Konto; Kanäle E-Mail, Telegram, App/Push. Ab Werk: kritische Logzeilen → Telegram, Mail, App; Fehler von LogBot selbst → Mail, Telegram, App.
+- **Mail per OAuth** (`app/mailoauth.py`): Google (Gmail-API) und Microsoft (Graph, Microsoft 365 und Outlook.com) – per Gerätecode oder Browser (Rückweg automatisch bei öffentlicher HTTPS-Adresse, sonst Adresse zurückkopieren). **Microsoft 365: die App-Registrierung legt der Assistent selbst an** (Anmeldung als Admin über die Microsoft Graph Command Line Tools, Anlegen von App und Dienstprinzipal, Administratorzustimmung für `Mail.Send`). Tägliche Erneuerung der Anmeldung. SMTP-Vorlagen für Gmail (App-Passwort), GMX, WEB.DE, IONOS, Strato, T-Online, Posteo, mailbox.org, iCloud, Yahoo.
+- **Telegram-Bot** (`app/telegram.py`): Token prüfen, Chat per Start-Link/QR-Code verbinden (erkennt `/start <code>` selbst), HTML-Nachrichten.
+- **Push an die App** (`app/webpush.py`): UnifiedPush/WebPush mit Verschlüsselung nach RFC 8291 und VAPID (RFC 8292); Endpunkte nur `https`, keine internen Ziele, keine Weiterleitungen. App-Schnittstelle `/api/app/notifications`, `/api/app/push`; `/api/app/bootstrap` meldet `api_level` 3 und die Fähigkeiten `notifications`, `push-webpush`, `magic-link`, `ai-chat`, `device-tree`, `password-reset`, `login-email`.
+- **E-Mail-Pflicht für Konten**: Anlegen nur mit gültiger Adresse, Bestätigung per sechsstelligem Code, eindeutige Adressen, Anmeldung mit Benutzername **oder** E-Mail. **Passwort vergessen** per Mail-Link (nur lokale Konten mit bestätigter Adresse; Antwort immer gleich, damit nichts über Konten verraten wird). `/api/auth/account` sagt, was einem Konto noch fehlt.
+- **Öffentliche Adresse** (`app/publicurl.py`): Links in Mails kommen aus der Einstellung bzw. `SITE_URL`, nie aus dem `Host`-Kopf.
+- **Container als Kinder ihrer VM** (`app/agentinv.py`): Heartbeat mit Docker-Inventar (`POST /api/agents/heartbeat`), Kind-Instanzen `<vm>/<container>` mit Compose-Projekt und -Dienst, Ingest mit `container`-Feld, Baum unter `GET /api/agents/tree`. Container erben Aufbewahrung und Drossel ihrer VM; beim Abmelden/Löschen einer VM gehen die Container-Logs mit.
+- **Drossel pro System** (Logzeilen pro Minute, VM + Container) und **Vorgaben für Geräte** (`/api/agents/defaults`) – greifen auch für automatisch eingebundene Systeme.
+- **Agent-Updates** (`app/agentupdate.py`): Pakete aus dem Backend-Image, RSA-3072-signiert; Regel von Hand / automatisch im Wartungsfenster (Wochentage, Uhrzeit, auch über Mitternacht, höchstens N gleichzeitig, Anhalten nach X Fehlschlägen) / aus; Abweichung je Gerät; Bericht der Agents; Zustand je Gerät.
+- **OpenRouter** als KI-Anbieter mit Anmelde-Assistent (OAuth PKCE), Modellliste mit Preisen. *KI-Chat mit Werkzeugen (`/api/ai/chat`, `app/aichat.py`) und Anmeldung per Mail-Link für die App (`/api/auth/magic-link/*`) kommen aus der App-Sitzung.*
+
+### Fixed
+- Eine abgewiesene Lieferung (fremder Geräteschlüssel) endete in einem Serverfehler statt 403 – nach dem Rollback war das Schlüsselobjekt abgelaufen.
+- Die Netzwerksuche ordnet Container nicht mehr fälschlich als das Gerät mit der IP ihrer VM zu.
 ## 2026.10.18.22.00.00
 
 ### Fixed

@@ -27,15 +27,17 @@ jemand mit geratenen Tokens anrichten kann.
 
 ## KI-Auswertung
 
-*System → KI-Auswertung* — einrichten dürfen nur Administratoren.
+*Auswertung → KI-Auswertung* — einrichten dürfen nur Administratoren.
 
-Vier Wege, keiner davon voreingestellt:
+Mehrere Wege, keiner davon voreingestellt:
 
 | Weg | Was passiert | Wann sinnvoll |
 |-----|--------------|---------------|
 | **Aus** | nichts verlässt den Server | Voreinstellung |
 | **Claude (Anthropic)** | direkt an die API | „Erklär mir diese 200 Zeilen“ |
 | **ChatGPT (OpenAI)** | direkt an die API | dasselbe, anderer Anbieter |
+| **OpenRouter** | ein Konto, viele Modelle (Claude, GPT, Gemini, Llama, kostenlose) | Modell frei wählen, per Assistent eingerichtet |
+| **Open WebUI** | eigene KI, auch lokal (Ollama) | nichts soll das Haus verlassen |
 | **n8n extern** | an einen Webhook außerhalb | wenn n8n schon läuft |
 | **n8n als Container** | an das n8n daneben | alles auf einer Maschine |
 
@@ -48,7 +50,20 @@ Erklärung zu ein paar Logzeilen will, braucht das nicht.
 > in der Oberfläche. Der Knopf *Vorschau* zeigt vorher genau, was gesendet
 > würde — Zeichenzahl, geschätzte Token und die ersten Zeilen im Klartext.
 
-### Einrichten
+### OpenRouter-Assistent
+
+1. Weg **OpenRouter** wählen, *Mit OpenRouter anmelden* klicken.
+2. Bei OpenRouter anmelden und zustimmen. OpenRouter legt dabei einen Schlüssel
+   **nur für LogBot** an (jederzeit unter openrouter.ai widerrufbar) und schickt
+   den Browser zurück. Das Geheimnis des Ablaufs (PKCE) verlässt den Server nie.
+3. Modell wählen – die Liste kommt live von OpenRouter, mit Preisen und
+   Kontextlänge; „nur kostenlose“ filtert die Gratis-Modelle.
+
+Alternativ *Schlüssel selbst einfügen* (sk-or-…). Kostenlose Modelle haben enge
+Tageslimits und dürfen Anfragen u. U. für Training nutzen – für Logdaten
+besser ein bezahltes Modell.
+
+### Einrichten (andere Wege)
 
 1. Weg wählen.
 2. API-Schlüssel bzw. Webhook-Adresse eintragen. Der Schlüssel wird **nie**
@@ -76,37 +91,61 @@ Webhook holt, von Claude auswerten lässt und die Antwort in den Chat schickt.
 
 ---
 
-## Mail (Postfix)
+## Meldungen: E-Mail, Telegram, App
 
-*System → Mail* — nur für Administratoren.
+*Meldungen → Kanäle* — nur für Administratoren. Welche Ereignisse wohin gehen,
+steht unter *Meldungen → Regeln* (siehe [Betrieb](../operate/README.md#meldungen)).
 
-**Die gesamte Konfiguration entsteht im Browser.** Keine `main.cf`, keine
-Handarbeit auf dem Server. Was eingetragen wird, schreibt das Backend nach
-`data/postfix/settings.env`; der Container liest das beim Start. Der Knopf
-*Erzeugte Postfix-Konfiguration* zeigt vorher, was in der Datei landen würde.
+### E-Mail
 
-Zwei Betriebsarten:
+Der Assistent kennt fünf Wege:
 
-| Modus | Wie | Wann |
-|-------|-----|------|
-| **Postfix-Container** | LogBot bringt seinen Mailserver mit | kein Mailserver vorhanden |
-| **Vorhandener Mailserver** | direkt per SMTP | Provider oder Firmen-Relay da |
+| Weg | Wie |
+|---|---|
+| **Google** | *App-Passwort* (zwei Felder: Adresse + 16-stelliges App-Passwort, braucht die Bestätigung in zwei Schritten) **oder** *Mit Google anmelden* (OAuth, Gmail-API; eigener OAuth-Client vom Typ „Desktop-App“ in der Google Cloud Console – der Assistent verlinkt jeden Schritt). |
+| **Microsoft 365** | Der Assistent **legt die App-Registrierung selbst an**: einmal mit einem Konto anmelden, das Anwendungen registrieren darf (Globaler Administrator, Anwendungs- oder Cloudanwendungsadministrator) – per Gerätecode oder im Browser. LogBot erzeugt „LogBot Mail (…)“ im Mandanten, nur mit der delegierten Berechtigung `Mail.Send`, und erteilt die Administratorzustimmung. Danach mit dem Postfach anmelden, von dem die Mails kommen. Gesendet wird über Microsoft Graph. |
+| **Outlook.com** | Wie Microsoft 365, die App wird dabei für private Konten freigegeben (dafür braucht es einmalig irgendeinen Entra-Mandanten mit Admin-Recht) – oder eine vorhandene App-Registrierung eintragen. |
+| **Anderer Anbieter** | SMTP mit Vorlagen für GMX, WEB.DE, IONOS, Strato, T-Online, Posteo, mailbox.org, iCloud, Yahoo – oder ein eigener Mailserver. |
+| **Eigener Postfix** | LogBots Mailserver (Zusatzdienst `postfix`), optional mit Smarthost. Die Konfiguration entsteht im Browser und landet in `data/postfix/settings.env`. |
 
-Beim Container lässt sich zusätzlich ein **Smarthost** eintragen. Meist nötig:
-Die wenigsten Anschlüsse dürfen selbst zustellen (Port 25 gesperrt, kein
-PTR-Eintrag). Dann übergibt Postfix an den Provider.
+Für die Microsoft-App-Registrierung meldet sich LogBot über Microsofts eigenes
+Werkzeug *Microsoft Graph Command Line Tools* an – dieselbe Anwendung, die
+`Connect-MgGraph` in PowerShell benutzt. Der Admin-Zugang wird nur für diesen
+einen Schritt gebraucht und nirgends gespeichert.
 
-Der Container nimmt nur aus dem Docker-Netz an. Ein offenes Relay im Internet
-ist binnen Stunden als Spamschleuder in Benutzung.
+Kommt der Browser nach der Anmeldung nicht von selbst zurück (LogBot ohne
+öffentliche HTTPS-Adresse), landet er auf `http://localhost/…` bzw.
+`http://127.0.0.1:53682/…` – die Seite lädt nicht, das ist richtig: die Adresse
+aus der Adresszeile kopieren und im Assistenten einfügen.
 
-**Benachrichtigungen** — auswählbar je Ereignis:
+Alle Zugangsdaten (SMTP-Passwörter, Refresh-Token, Client-Geheimnisse) liegen
+**verschlüsselt** in der Datenbank (Schlüssel aus `JWT_SECRET`) und kommen nie
+zurück in den Browser. Microsoft-Anmeldungen werden täglich erneuert, damit sie
+nicht aus Untätigkeit verfallen; scheitert das, steht es als Meldung im Eingang.
 
-- Ein Update steht bereit
-- Eine Sicherung ist fehlgeschlagen
-- Ein Gerät meldet sich nicht mehr
-- Der Plattenplatz wird knapp
+**Öffentliche Adresse:** Links in Mails (Passwort-Reset, App-Anmeldung,
+Meldungen) zeigen auf die Adresse, die oben im Assistenten steht – bewusst fest
+eingestellt und nie aus der Anfrage gelesen (sonst ließen sich Links auf fremde
+Seiten in echte Mails schmuggeln).
 
-Braucht das Profil `postfix` unter *System → Zusatzdienste*.
+### Telegram
+
+1. In Telegram [@BotFather](https://t.me/BotFather) öffnen, `/newbot`, Namen
+   vergeben, den Token einfügen. LogBot prüft ihn sofort.
+2. *Verbindungslink erzeugen* – Link öffnen oder den QR-Code am Handy scannen
+   und auf **Starten** tippen. LogBot erkennt den Chat von selbst und schickt
+   eine Bestätigung. Gruppen: Bot aufnehmen und `/start@<bot> <code>` senden.
+3. Testnachricht.
+
+Der Token liegt verschlüsselt in der Datenbank. Ab Werk gehen nach Telegram
+nur die wirklich kritischen Logzeilen und Fehler von LogBot selbst.
+
+### App & Push
+
+Jede Meldung steht im Eingang der App (`/api/app/notifications`). Für Push
+meldet sich die App mit ihrem UnifiedPush-Verteiler an (z. B. ntfy) – ohne
+Google-Konto. Der Inhalt ist nach RFC 8291 verschlüsselt und nach RFC 8292
+(VAPID) unterschrieben; er enthält nur Schweregrad und Überschrift.
 
 ---
 
@@ -121,11 +160,13 @@ einrichten.
 Zugangsdaten: *System → Zusatzdienste → Zugangsdaten anzeigen*. Dort lässt sich
 auch ein neues Passwort setzen.
 
-> Portainer bekommt den Docker-Socket **nur lesend**. Die Oberfläche zeigt damit
-> alles an, kann aber nichts starten, stoppen oder löschen. Wer auch verwalten
-> will, nimmt das `:ro` in [`deploy/optional.yml`](../../deploy/optional.yml)
-> heraus — und weiß, worauf er sich einlässt: Schreibzugriff auf den Socket ist
-> faktisch root auf dem Server.
+> Portainer spricht Docker **nur über einen Filter** (`socket-proxy`), der
+> ausschließlich lesende Abfragen durchlässt. Die Oberfläche zeigt damit alles
+> an, kann aber nichts starten, stoppen oder löschen.
+>
+> **Korrektur:** Bis 2026.10.08 stand hier, ein mit `:ro` eingehängter Socket
+> sei „nur lesend“. Das stimmte nicht – `:ro` schützt nur die Datei, nicht die
+> Befehle, die man darüber schickt. Der Filter ist die echte Sperre.
 
 ---
 
@@ -139,8 +180,9 @@ eigenmächtig ausgetauscht. Nachts, ohne Ansage, und hinterher war schwer
 zuzuordnen, warum ein Dienst plötzlich anders lief. Auf einem Log-Server, der
 Nachvollziehbarkeit verspricht, ist das der falsche Mechanismus.
 
-Tugtainer bekommt den Docker-Socket deshalb nur **lesend**: es *kann* gar
-nichts austauschen, selbst wenn jemand die Automatik einschaltet. Eingespielt
+Tugtainer spricht Docker deshalb nur über den **lesenden Filter**
+(`socket-proxy`): es *kann* gar nichts austauschen, selbst wenn jemand die
+Automatik einschaltet. Eingespielt
 wird bewusst — in LogBots Oberfläche unter *System → Container*, in Tugtainers
 eigener Oberfläche oder auf der Kommandozeile.
 
@@ -150,11 +192,12 @@ Image in einer Registry. Tugtainer kann dort also nichts finden; zuständig ist
 *System → Updates*. Tugtainer kümmert sich um die fertigen Images:
 PostgreSQL, Caddy, n8n, Portainer, Open WebUI, Postfix.
 
-Oberfläche unter `127.0.0.1:9412`. In die `.env`, falls man den Socket doch
-schreibbar machen will:
+Oberfläche unter `127.0.0.1:9412`. Wer Tugtainer doch selbst austauschen
+lassen will, hängt in einer eigenen `docker-compose.override.yml` den echten
+Socket ein und setzt in der `.env`:
 
 ```
-TUGTAINER_SOCKET_MODE=rw
+TUGTAINER_DOCKER_HOST=unix:///var/run/docker.sock
 ```
 
 > LogBot prüft Image-Updates auch **ohne** Tugtainer: *System → Container →

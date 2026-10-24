@@ -33,6 +33,24 @@ Syslog auf UDP/TCP 514. Agents für Linux und Windows, die über HTTPS mit Token
 senden — auch aus fremden Netzen übers Internet. Sammler wie n8n dürfen im
 Namen anderer Geräte liefern (z. B. für die FRITZ!Box).
 
+**Container sehen**
+Läuft auf einem Linux-Rechner Docker oder Podman, erfasst der Agent jeden
+Container mit – als eigene, lesbare Log-Instanz *unter* der VM, gruppiert nach
+Compose-Projekt: `docker01 › nextcloud › nextcloud-app-1`. Abstürze, OOM-Kills
+und Healthchecks inklusive.
+
+**Melden, was wichtig ist**
+Kritische Logzeilen und Fehler von LogBot selbst landen im Eingang – im Browser
+und in der App – und auf Wunsch per **E-Mail**, **Telegram** oder **Push**.
+Assistenten richten die Kanäle ein: Google, Microsoft 365 (die
+App-Registrierung legt LogBot selbst an), Outlook.com, GMX & Co., Telegram-Bot
+per QR-Code. Zusammengefasst statt geflutet.
+
+**Agents aktuell halten**
+Neue Agent-Fassungen kommen mit jedem Server-Update und gehen auf die Geräte –
+von Hand oder automatisch im Wartungsfenster, gestaffelt, signiert geprüft, mit
+Rückfall auf die alte Fassung.
+
 **Das Netz absuchen**
 LogBot findet selbst, was im Netz hängt — eigene Subnetze, eingetragene
 Bereiche und über Router hinweg (SNMP) — und sagt für jedes Gerät, ob es schon
@@ -56,7 +74,8 @@ Ziel, Benutzer und Ergebnis als Abzeichen hervor. Die Rohzeile bleibt daneben
 stehen — liegt die Erkennung daneben, sieht man es sofort.
 
 **Auswerten lassen**
-Optional an eine KI geben: direkt an Claude oder ChatGPT, über n8n, oder an
+Optional an eine KI geben: direkt an Claude oder ChatGPT, über **OpenRouter**
+(ein Konto, viele Modelle – per Assistent angemeldet), über n8n, oder an
 **Open WebUI** mit einem lokalen Modell dahinter — dann verlässt keine Logzeile
 den Server. Nichts davon ist voreingestellt.
 
@@ -115,11 +134,12 @@ nächsten Rechner merken. Löschen muss man ausdrücklich mit `LÖSCHEN` bestät
 
 Nach der Server-Installation:
 
-- **Oberfläche:** `http://SERVER-IP` — Anmeldung `admin` / `admin`
-  *(bitte sofort ändern; HTTPS danach unter Einstellungen → Netzwerk einschalten)*
+- **Oberfläche:** `http://SERVER-IP` — erste Anmeldung `admin` / `admin`; LogBot
+  verlangt danach sofort ein eigenes Passwort und eine E-Mail-Adresse
+  *(bitte sofort ändern; HTTPS danach unter System → Netzwerk → Reverse Proxy & TLS einschalten)*
 - **API-Doku:** `http://SERVER-IP/api/docs`
 - **Syslog:** Port 514 (UDP/TCP)
-- **Zugangsschlüssel** für die Agents: Verwaltung → Zugang & Sicherheit → Zugangsschlüssel
+- **Zugangsschlüssel** für die Agents: Agents → Zugangsschlüssel
 
 ### Wenn du schon weißt, was drauf soll
 
@@ -169,7 +189,8 @@ curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/i
 ```
 
 Optionen: `--fqdn` · `--token` · `--port` · `--mode https|syslog` · `--proto udp|tcp` ·
-`--ip` · `--min-level info|warning|error` · `--insecure` · `--yes` · `--help`
+`--ip` · `--min-level info|warning|error` · `--insecure` · `--no-docker` ·
+`--no-remote-update` · `--yes` · `--help`
 
 **Windows-Agent**
 

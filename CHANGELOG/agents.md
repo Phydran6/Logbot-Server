@@ -2,6 +2,16 @@
 
 Installer & Log-Forwarder für Linux/Windows (`agents/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.23.12.00.00
+
+### Added
+- **Docker und Docker Compose (Linux).** Der Agent erkennt Docker oder Podman samt Engine- und Compose-Fassung und erfasst die Container: stdout/stderr über die Docker-API am lokalen Socket (eigene Unix-HTTP-Verbindung, nur Standardbibliothek), Zustandswechsel (Start, Absturz mit Exit-Code, OOM-Kill, Neustart, Healthcheck) über `/events`, Inventar jede Minute. Container mit journald-Treiber werden über journald zugeordnet. Schweregrad aus dem Text (JSON-`level`, `level=`, `panic`, `Traceback` …). LogBots eigene Container und Container mit `de.logbot.collect=false` bleiben außen vor; `--no-docker` schaltet es ab. Pro Container und Durchgang höchstens 2000 Zeilen, der Rest wird als übersprungen gemeldet.
+- **Heartbeat** jede Minute – ein Gerät gilt damit auch ohne Logzeilen als erreichbar.
+- **Selbst-Aktualisierung (Linux und Windows).** Paket vom Server, Prüfung von SHA-256 und RSA-Unterschrift (Linux mit `openssl`, Windows mit .NET), Einspielen als eigene systemd-Unit bzw. geplante Aufgabe, Rückfall auf die alte Fassung, Bericht an den Server. Ohne prüfbare Unterschrift und mit `--insecure` wird jedes Update abgelehnt. Neue Aktion `upgrade`; `--no-remote-update` bzw. `-NoRemoteUpdate` sperrt die Fernaktualisierung.
+- Bei der Anmeldung legt der Installer den öffentlichen Schlüssel des Servers ab (`update_pubkey.pem` / `update_pubkey.xml`).
+
+### Changed
+- Jede Lieferung trägt die Agent-Fassung (`agent_version`).
 ## 2026.10.11.20.00.00
 
 ### Fixed

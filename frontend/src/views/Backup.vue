@@ -137,7 +137,7 @@
               </td>
               <td>
                 <div class="flex gap-1">
-                  <a class="btn btn-ghost btn-sm" :href="downloadUrl(item.name)" :title="t('common.download')">
+                  <a class="btn btn-ghost btn-sm" href="#" :title="t('common.download')" @click.prevent="download(item.name)">
                     <AppIcon name="download" :size="15" />
                   </a>
                   <button class="btn btn-ghost btn-sm" :disabled="!!item.error" :title="t('backup.restore')" @click="openRestore(item)">
@@ -241,6 +241,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { withTicket } from '../utils/stream'
 import { useI18n } from '../i18n'
 import AppIcon from '../components/AppIcon.vue'
 import BackupPrompt from '../components/BackupPrompt.vue'
@@ -320,10 +321,12 @@ function compatLabel(level) {
   return { ok: '=', info: 'älter', warn: '?', blocking: 'neuer!' }[level] || level
 }
 
-function downloadUrl(name) {
-  // Der Download läuft über einen normalen Link - der Browser schickt dabei
-  // keinen Authorization-Kopf mit, deshalb der Token in der Adresse.
-  return `/api/backup/${encodeURIComponent(name)}/download?token=${encodeURIComponent(auth.token)}`
+async function download(name) {
+  // Ein Download ist ein normaler Link - der Browser schickt dabei keinen
+  // Authorization-Kopf mit. Statt des Zugangstokens kommt ein Ticket in die
+  // Adresse: 60 Sekunden gültig, nur einmal benutzbar.
+  const url = await withTicket(`/api/backup/${encodeURIComponent(name)}/download`, 'download')
+  window.location.href = url
 }
 
 const canRestore = computed(() => {

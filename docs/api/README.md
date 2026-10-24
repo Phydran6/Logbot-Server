@@ -16,6 +16,8 @@ curl -X POST https://logbot.example.com/api/auth/login \
   -F "username=admin" -F "password=geheim"
 ```
 
+`username` nimmt den Benutzernamen **oder die E-Mail-Adresse**.
+
 Antwort: `{"access_token": "…", "token_type": "bearer"}` — oder bei aktivem MFA
 `{"mfa_required": true, "mfa_token": "…"}`, dann Schritt zwei über
 `POST /api/auth/login/mfa`.
@@ -26,9 +28,36 @@ Danach überall:
 Authorization: Bearer <access_token>
 ```
 
-**Zwei Ausnahmen von der Kopfzeile:** Der Ereignisstrom (`EventSource`) und das
-Terminal (`WebSocket`) können keine eigenen Kopfzeilen mitschicken — dort geht
-der Token als `?token=`. Geprüft wird er genauso streng.
+**Ausnahmen von der Kopfzeile:** Ereignisstrom (`EventSource`), Terminal
+(`WebSocket`) und Download-Links können keine Kopfzeilen mitschicken. Dafür
+holt man vorher ein **Ticket** – 60 Sekunden gültig, nur einmal benutzbar, nur
+für den genannten Zweck – und hängt es als `?ticket=` an:
+
+```bash
+curl -X POST https://logbot.example.com/api/auth/ticket \
+  -H "Authorization: Bearer <access_token>" -H "Content-Type: application/json" \
+  -d '{"purpose": "stream"}'
+```
+
+Zwecke: `stream`, `shell`, `download`. Der frühere Weg `?token=<access_token>`
+wird übergangsweise noch angenommen, landet aber im Zugriffsprotokoll – nicht
+mehr benutzen.
+
+**Sitzungen:** Passwortwechsel, Deaktivierung und Rollenwechsel beenden alle
+Sitzungen eines Kontos sofort; `POST /api/auth/logout-all` tut das von Hand.
+
+### Konto
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/auth/account` | Was fehlt noch? (`needs_email`, `email_verified`, `must_change_password`, `mail_ready`) |
+| POST | `/api/auth/email` | Adresse setzen, Bestätigungscode anfordern (`{email, current_password?}`) |
+| POST | `/api/auth/email/verify` | `{code}` – sechsstellig aus der Mail |
+| POST | `/api/auth/email/resend` | Code erneut senden |
+| POST | `/api/auth/password/change` | `{current_password, new_password}` → neues Token |
+| POST | `/api/auth/password/forgot` | `{login}` – Benutzername oder Adresse; antwortet **immer** 202 |
+| POST | `/api/auth/password/reset` | `{token, new_password}` – Token aus dem Mail-Link |
+| POST | `/api/auth/magic-link/request` | Anmelde-Link für die App per Mail (PKCE) |
 
 ---
 
@@ -78,6 +107,65 @@ Antwort:
 **Was fehlt:** eine Bremse speziell für den Ingest. Der globale Rate-Limiter
 greift, ein eigenes Kontingent pro Token gibt es nicht. Bei vielen Agents
 gehört vor den Server ohnehin ein Reverse Proxy — Caddy ist dabei.
+
+---
+
+## Heartbeat, Container und Agent-Updates
+
+```
+POST /api/agents/heartbeat
+Authorization: Bearer <AGENT-TOKEN>
+```
+
+```json
+{
+  "hostname": "docker01", "device_type": "linux_agent",
+  "agent_version": "2026.10.23.12.00.00",
+  "capabilities": ["heartbeat", "self-update", "docker", "signed-update"],
+  "docker": {"installed": true, "engine": "27.3.1", "compose": "2.29.7"},
+  "containers": [{"name": "nextcloud-app-1", "image": "nextcloud:29", "state": "running",
+                  "compose_project": "nextcloud", "compose_service": "app"}]
+}
+```
+
+Antwort: `{"agent_id": 12, "update": null | {"action": "update", "version", "sha256",
+"signature", "url"}, "config": {...}}`. Die Container werden Kind-Instanzen der
+VM (`docker01/nextcloud-app-1`).
+
+Container-Logs gehen über den normalen Ingest, je Eintrag mit `"container":
+"<name>"` und `"stream": "stdout|stderr|event"`.
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/agents/tree` | Geräte als Baum (VM → Compose-Projekt → Container) |
+| GET | `/api/agents/update/pubkey` | öffentlicher Schlüssel für die Paket-Unterschrift (PEM, XML, Fingerabdruck) |
+| GET | `/api/agents/update/package/{linux\|windows}` | Paket (Agent-Schlüssel nötig), Kopfzeilen `X-LogBot-Version/SHA256/Signature` |
+| POST | `/api/agents/update/report` | Agent meldet `downloading/installing/done/failed/rolled_back` |
+| GET/PUT | `/api/agents/updates`, `/api/agents/updates/config` | Stand und Regel (Admin) |
+| POST | `/api/agents/updates/request` | `{agent_ids}` oder `{all_outdated: true}` (Admin) |
+| GET/PUT | `/api/agents/defaults` | Vorgaben: Aufbewahrung, Drossel (Admin) |
+
+Unterschrift: RSA-3072, PKCS#1 v1.5, SHA-256 über die Bytes des Pakets.
+
+---
+
+## Meldungen
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/notifications` | Eingang (`before_id`, `since_id`, `severity`, `only_unread`) |
+| GET | `/api/notifications/unread` | Zahl der ungelesenen |
+| POST | `/api/notifications/read` | `{up_to_id}` |
+| GET | `/api/notifications/config` | Regeln und Stand der Kanäle (Admin) |
+| PUT | `/api/notifications/rules` | Regeln speichern (Admin) |
+| POST | `/api/notifications/test` | Testmeldung über `{channels}` (Admin) |
+
+**App:** `GET /api/app/notifications` (Cursor wie bei den Logs, `unread_count`,
+`has_more`, `next_before_id`, `newest_id`), `POST /api/app/notifications/read`,
+`GET /api/app/push/vapid`, `GET|POST|DELETE /api/app/push`
+(`{endpoint, p256dh, auth, device_name, min_severity}` – nur `https`, keine
+internen Ziele), `POST /api/app/push/test`. Push-Inhalt:
+`{"type":"notification","id","severity","title"}`, verschlüsselt nach RFC 8291.
 
 ---
 

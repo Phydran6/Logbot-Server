@@ -94,8 +94,8 @@ SCOPES: Dict[str, dict] = {
     "users": {
         "label": "Benutzer & Anmeldung",
         "label_en": "Users & sign-in",
-        "hint": "Konten, Rollen, MFA-Geheimnisse, Passkeys, Backup-Codes.",
-        "tables": ["users", "mfa_backup_codes", "webauthn_credentials"],
+        "hint": "Konten, Rollen, MFA-Geheimnisse, Passkeys, Backup-Codes, Push-Geräte.",
+        "tables": ["users", "mfa_backup_codes", "webauthn_credentials", "push_endpoints"],
         "order": 30,
         "sensitive": True,
     },

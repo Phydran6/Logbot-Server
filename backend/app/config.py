@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.08.14.12.00.00
+# Version:     2026.10.23.12.00.00
 # Beschreibung: LogBot - Backend Konfiguration
 # ==============================================================================
 
@@ -29,8 +29,10 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
-    app_version: str = "2026.10.18.22.00.00"
-    caddy_admin_url: str = "http://caddy:2019"
+    app_version: str = "2026.10.23.12.00.00"
+    # Caddys Admin-Schnittstelle: Unix-Socket in einem Volume, das nur Caddy
+    # und das Backend sehen (siehe app/caddyadmin.py).
+    caddy_admin_url: str = "unix:///run/caddy-admin/admin.sock"
     caddy_certs_dir: str = "/caddy-certs"
     # Notausstieg ohne Web-UI: CADDY_FORCE_HTTP=true startet mit reinem HTTP auf
     # Port 80 und verwirft die gespeicherte Reverse-Proxy-Konfiguration.

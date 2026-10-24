@@ -1027,7 +1027,14 @@ async def list_devices(session: AsyncSession, nets: Optional[HostNetworks] = Non
     """
     devices = (await session.execute(
         select(DiscoveredDevice).order_by(DiscoveredDevice.ip_address))).scalars().all()
-    agents = (await session.execute(select(Agent))).scalars().all()
+    all_agents = (await session.execute(select(Agent))).scalars().all()
+    # Container (Kinder einer VM) tragen die IP ihrer VM - fuer den Abgleich
+    # zaehlt nur die VM selbst, die Container werden an ihr mitgezaehlt.
+    agents = [a for a in all_agents if not a.parent_id]
+    containers_of: Dict[int, int] = {}
+    for a in all_agents:
+        if a.parent_id:
+            containers_of[a.parent_id] = containers_of.get(a.parent_id, 0) + 1
 
     # Gibt es mehrere Eintraege fuer dieselbe MAC oder IP (Geraet neu
     # angelegt, alte Karte nie geloescht), zaehlt der zuletzt aktive.
@@ -1094,6 +1101,9 @@ async def list_devices(session: AsyncSession, nets: Optional[HostNetworks] = Non
                 "id": agent.id, "hostname": agent.hostname, "device_type": agent.device_type,
                 "last_seen": agent.last_seen.isoformat() if agent.last_seen else None,
                 "matched_by": matched_by,
+                "agent_version": agent.agent_version,
+                "containers": containers_of.get(agent.id, 0),
+                "docker": ((agent.extra_data or {}).get("docker") or {}).get("installed", False),
             } if agent else None),
         })
     return result

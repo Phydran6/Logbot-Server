@@ -1,19 +1,21 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.05.30.17.22.26
+# Version:     2026.10.22.23.00.00
 # Beschreibung: LogBot - Auth API Endpoints + App-Login (QR-Code) + MFA-Login
 # ==============================================================================
 
 import io
 import json
 import base64
+import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Union
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 import qrcode
@@ -29,10 +31,14 @@ from ..schemas import (
     AppQRResponse,
     LoginMFARequired,
     MFALoginRequest,
+    check_email,
+    check_password_strength,
 )
 from .. import journal, ldap_auth
 from ..limiter import client_ip as real_client_ip
 from ..auth import (
+    burn_password_check,
+    find_user_by_login,
     verify_password,
     get_password_hash,
     create_access_token,
@@ -107,8 +113,12 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> Union[Token, LoginMFARequired]:
-    result = await db.execute(select(User).where(User.username == form_data.username))
-    user = result.scalar_one_or_none()
+    # Benutzername ODER E-Mail-Adresse. Gibt es das Konto nicht, wird trotzdem
+    # ein Passwort-Hash geprueft - sonst verriete die kuerzere Antwortzeit,
+    # welche Namen es gibt.
+    user = await find_user_by_login(db, form_data.username)
+    if user is None:
+        burn_password_check()
 
     if not user or not verify_password(form_data.password, user.password_hash):
         # Zweiter Versuch über das Verzeichnis, falls eingerichtet.
@@ -338,3 +348,348 @@ async def get_app_qr(
         expires_in_seconds=_APP_TOKEN_TTL_MINUTES * 60,
         api_url=api_url,
     )
+
+
+# =============================================================================
+# Kurzzeit-Tickets fuer Ereignisstroeme, Terminal und Downloads
+# =============================================================================
+class TicketRequest(BaseModel):
+    purpose: str = Field(..., pattern="^(stream|shell|download)$")
+
+
+@router.post("/ticket")
+async def create_stream_ticket(data: TicketRequest, current_user: User = Depends(get_current_user)):
+    """Ein Ticket, das 60 Sekunden gilt und genau einmal benutzt werden kann.
+
+    Statt des Zugangstokens steht dieses Ticket in der Adresse eines
+    Ereignisstroms, des Terminals oder eines Download-Links - landet die
+    Adresse in einem Protokoll, ist sie dort nichts mehr wert.
+    """
+    from ..auth import TICKET_SECONDS, create_ticket
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin erforderlich")
+    return {"ticket": create_ticket(current_user, data.purpose), "expires_in": TICKET_SECONDS}
+
+
+@router.post("/logout-all", status_code=204)
+async def logout_everywhere(request: Request, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    """Meldet das Konto auf allen Geräten ab (auch diesem)."""
+    from ..auth import revoke_sessions
+    revoke_sessions(current_user)
+    await db.commit()
+    await journal.record(db, category="auth", event="sessions.revoked", level="notice",
+                         message=f"'{current_user.username}' hat sich überall abgemeldet.",
+                         actor=current_user.username, source_ip=real_client_ip(request))
+
+
+# =============================================================================
+# Konto-Zustand: E-Mail-Pflicht, Passwortwechsel
+# =============================================================================
+@router.get("/account")
+async def account_status(db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """Was muss dieses Konto noch erledigen, bevor es weitergeht?
+
+    Ab 2026.10.22 braucht jedes Konto eine E-Mail-Adresse: fuer den
+    Passwort-Reset, die Anmeldung per Mail-Link in der App und Meldungen.
+    """
+    from .. import mail as mail_module
+    config = await mail_module.load_config(db)
+    has_email = mail_module.valid_address(current_user.email or "")
+    return {
+        "username": current_user.username,
+        "email": current_user.email if has_email else "",
+        "email_verified": bool(has_email and current_user.email_verified_at),
+        "needs_email": not has_email,
+        "must_change_password": bool(current_user.must_change_password),
+        "mail_ready": mail_module.is_ready(config),
+        "auth_source": current_user.auth_source or "local",
+        "can_reset_password": (current_user.auth_source or "local") == "local",
+    }
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def strong(cls, v: str) -> str:
+        return check_password_strength(v)
+
+
+@router.post("/password/change")
+@limiter.limit("10/minute")
+async def change_password(request: Request, data: PasswordChange, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """Eigenes Passwort ändern. Alle anderen Sitzungen werden beendet."""
+    from ..auth import revoke_sessions
+    if (current_user.auth_source or "local") != "local":
+        raise HTTPException(status_code=400, detail="Dieses Konto hat hier kein Passwort.")
+    if not verify_password(data.current_password, current_user.password_hash):
+        await journal.record(db, category="auth", event="password.change.failed", level="warning",
+                             message=f"Passwortänderung für '{current_user.username}' abgelehnt: "
+                                     f"altes Passwort falsch.",
+                             actor=current_user.username, source_ip=real_client_ip(request), ok=False)
+        raise HTTPException(status_code=403, detail="Das aktuelle Passwort stimmt nicht.")
+    if verify_password(data.new_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Das neue Passwort muss sich vom alten unterscheiden.")
+    current_user.password_hash = get_password_hash(data.new_password)
+    current_user.must_change_password = False
+    revoke_sessions(current_user)
+    await db.commit()
+    await journal.record(db, category="auth", event="password.changed", level="notice",
+                         message=f"'{current_user.username}' hat das Passwort geändert; "
+                                 f"andere Sitzungen wurden beendet.",
+                         actor=current_user.username, source_ip=real_client_ip(request))
+    # Neues Token fuer dieses Fenster - das alte gilt ab jetzt nicht mehr.
+    return Token(access_token=create_access_token(data={"sub": current_user.username}))
+
+
+# =============================================================================
+# E-Mail-Adresse setzen und bestätigen
+# =============================================================================
+VERIFY_MINUTES = 30
+RESET_MINUTES = 30
+MAX_CODE_ATTEMPTS = 5
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.strip().encode("utf-8")).hexdigest()
+
+
+class EmailSet(BaseModel):
+    email: str = Field(..., max_length=254)
+    current_password: str = Field(default="", max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def valid(cls, v: str) -> str:
+        return check_email(v)
+
+
+class EmailVerify(BaseModel):
+    code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+async def _send_verification(db: AsyncSession, user: User, source_ip: str) -> dict:
+    """Schickt einen sechsstelligen Code an die neue Adresse."""
+    from .. import mail as mail_module
+    from ..models import UserToken
+
+    config = await mail_module.load_config(db)
+    if not mail_module.is_ready(config):
+        return {"sent": False, "reason": "mail_not_configured",
+                "message": "Die Adresse ist gespeichert. Bestätigt wird sie, sobald ein "
+                           "Administrator den Mailversand eingerichtet hat."}
+    await db.execute(delete(UserToken).where(UserToken.user_id == user.id,
+                                             UserToken.purpose == "verify_email"))
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    db.add(UserToken(user_id=user.id, purpose="verify_email", token_hash=_digest(f"{user.id}:{code}"),
+                     target=user.email, expires_at=datetime.utcnow() + timedelta(minutes=VERIFY_MINUTES),
+                     requested_ip=source_ip))
+    await db.commit()
+    body = (f"Hallo {user.username},\n\n"
+            f"dein Bestätigungscode für LogBot lautet:\n\n    {code}\n\n"
+            f"Er gilt {VERIFY_MINUTES} Minuten. Gib ihn in LogBot ein, um diese Adresse zu bestätigen.\n\n"
+            "Warst du das nicht? Dann ignoriere diese Mail - ohne den Code passiert nichts.\n")
+    try:
+        await mail_module.send(config, [user.email], "LogBot — Bestätigungscode", body)
+    except Exception as exc:
+        logging.getLogger("logbot.auth").warning("Bestätigungsmail nicht verschickt: %s", exc)
+        return {"sent": False, "reason": "send_failed",
+                "message": f"Die Mail ließ sich nicht verschicken: {exc}"}
+    return {"sent": True, "message": f"Ein Code ist unterwegs an {user.email}."}
+
+
+@router.post("/email")
+@limiter.limit("5/minute")
+async def set_email(request: Request, data: EmailSet, db: AsyncSession = Depends(get_db),
+                    current_user: User = Depends(get_current_user)):
+    """Eigene E-Mail-Adresse setzen und einen Bestätigungscode anfordern.
+
+    Wer ein lokales Konto hat und schon eine bestätigte Adresse, muss das
+    Passwort nennen: sonst koennte ein entwendetes Sitzungstoken die Adresse
+    umbiegen - und damit den naechsten Passwort-Reset.
+    """
+    from sqlalchemy import func as _func
+    email = data.email.strip()
+    local = (current_user.auth_source or "local") == "local"
+    if local and current_user.email_verified_at:
+        if not data.current_password or not verify_password(data.current_password,
+                                                             current_user.password_hash):
+            raise HTTPException(status_code=403,
+                                detail="Zum Ändern einer bestätigten Adresse das Passwort angeben.")
+    taken = (await db.execute(select(User).where(_func.lower(User.email) == email.lower(),
+                                                 User.id != current_user.id))).scalars().first()
+    if taken:
+        raise HTTPException(status_code=409, detail="Diese Adresse gehört bereits zu einem anderen Konto.")
+    changed = (current_user.email or "").lower() != email.lower()
+    current_user.email = email
+    if changed:
+        current_user.email_verified_at = None
+    await db.commit()
+    await journal.record(db, category="auth", event="email.set",
+                         message=f"'{current_user.username}' hat die E-Mail-Adresse hinterlegt.",
+                         actor=current_user.username, source_ip=real_client_ip(request))
+    if current_user.email_verified_at:
+        return {"sent": False, "verified": True, "message": "Adresse ist bereits bestätigt."}
+    result = await _send_verification(db, current_user, real_client_ip(request))
+    result["verified"] = False
+    return result
+
+
+@router.post("/email/resend")
+@limiter.limit("3/minute")
+async def resend_verification(request: Request, db: AsyncSession = Depends(get_db),
+                              current_user: User = Depends(get_current_user)):
+    from .. import mail as mail_module
+    if not mail_module.valid_address(current_user.email or ""):
+        raise HTTPException(status_code=400, detail="Zuerst eine E-Mail-Adresse hinterlegen.")
+    if current_user.email_verified_at:
+        return {"sent": False, "verified": True}
+    return await _send_verification(db, current_user, real_client_ip(request))
+
+
+@router.post("/email/verify")
+@limiter.limit("10/minute")
+async def verify_email(request: Request, data: EmailVerify, db: AsyncSession = Depends(get_db),
+                       current_user: User = Depends(get_current_user)):
+    from ..models import UserToken
+    row = (await db.execute(select(UserToken).where(
+        UserToken.user_id == current_user.id, UserToken.purpose == "verify_email",
+        UserToken.used_at.is_(None)).order_by(UserToken.id.desc()))).scalars().first()
+    if row is None or row.expires_at < datetime.utcnow() or row.attempts >= MAX_CODE_ATTEMPTS \
+            or (row.target or "").lower() != (current_user.email or "").lower():
+        raise HTTPException(status_code=410, detail="Der Code ist abgelaufen - bitte neu anfordern.")
+    if not secrets.compare_digest(row.token_hash, _digest(f"{current_user.id}:{data.code}")):
+        row.attempts += 1
+        await db.commit()
+        raise HTTPException(status_code=400, detail="Der Code stimmt nicht.")
+    row.used_at = datetime.utcnow()
+    current_user.email_verified_at = datetime.utcnow()
+    await db.commit()
+    await journal.record(db, category="auth", event="email.verified",
+                         message=f"'{current_user.username}' hat die E-Mail-Adresse bestätigt.",
+                         actor=current_user.username, source_ip=real_client_ip(request))
+    return {"verified": True}
+
+
+# =============================================================================
+# Passwort vergessen
+# =============================================================================
+class ForgotRequest(BaseModel):
+    login: str = Field(..., min_length=1, max_length=254)
+
+
+class ResetRequest(BaseModel):
+    token: str = Field(..., min_length=20, max_length=200)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def strong(cls, v: str) -> str:
+        return check_password_strength(v)
+
+
+_reset_tasks: set = set()
+
+
+@router.post("/password/forgot", status_code=202)
+@limiter.limit("5/minute")
+async def forgot_password(request: Request, data: ForgotRequest, db: AsyncSession = Depends(get_db)):
+    """Schickt einen Link zum Zurücksetzen - sofern Konto und Adresse passen.
+
+    Die Antwort ist IMMER dieselbe, egal ob es das Konto gibt: so laesst sich
+    nicht abfragen, welche Namen oder Adressen existieren. Die Mail geht im
+    Hintergrund raus, damit auch die Antwortzeit nichts verraet.
+    Zurueckgesetzt werden nur lokale Konten mit bestaetigter Adresse.
+    """
+    import asyncio
+    from .. import mail as mail_module, publicurl
+    from ..models import UserToken
+
+    generic = {"accepted": True,
+               "message": "Wenn es zu dieser Angabe ein Konto mit bestätigter E-Mail-Adresse gibt, "
+                          "ist ein Link zum Zurücksetzen unterwegs."}
+    source_ip = real_client_ip(request)
+    user = await find_user_by_login(db, data.login)
+    if (user is None or not user.is_active or (user.auth_source or "local") != "local"
+            or not user.email_verified_at or not mail_module.valid_address(user.email or "")):
+        return generic
+    recent = (await db.execute(select(UserToken).where(
+        UserToken.user_id == user.id, UserToken.purpose == "password_reset",
+        UserToken.created_at > datetime.utcnow() - timedelta(hours=1)))).scalars().all()
+    if len(recent) >= 3:
+        return generic
+    base = await publicurl.get(db)
+    config = await mail_module.load_config(db)
+    if not base or not mail_module.is_ready(config):
+        await journal.record(db, category="auth", event="password.reset.unavailable", level="warning",
+                             message=("Passwort-Reset angefordert, aber "
+                                      + ("keine öffentliche Adresse" if not base else "kein Mailversand")
+                                      + " eingerichtet."),
+                             actor=user.username, source_ip=source_ip, ok=False)
+        return generic
+
+    token = secrets.token_urlsafe(32)
+    db.add(UserToken(user_id=user.id, purpose="password_reset", token_hash=_digest(token),
+                     target=user.email, expires_at=datetime.utcnow() + timedelta(minutes=RESET_MINUTES),
+                     requested_ip=source_ip))
+    await db.commit()
+    link = f"{base}/reset-password?token={token}"
+    body = (f"Hallo {user.username},\n\n"
+            f"für dein LogBot-Konto wurde ein neues Passwort angefordert (von IP {source_ip}).\n\n"
+            f"Zum Festlegen eines neuen Passworts:\n\n{link}\n\n"
+            f"Der Link gilt {RESET_MINUTES} Minuten und nur einmal. Danach sind alle bisherigen "
+            f"Anmeldungen beendet.\n\n"
+            "Warst du das nicht? Dann ignoriere diese Mail - dein Passwort bleibt, wie es ist.\n")
+    username, address = user.username, user.email
+
+    async def runner():
+        try:
+            await mail_module.send(config, [address], "LogBot — Passwort zurücksetzen", body)
+        except Exception as exc:                                    # defensiv
+            await journal.write(category="auth", event="password.reset.mail_failed", level="warning",
+                                message=f"Reset-Mail für '{username}' nicht verschickt: {exc}",
+                                actor="system", ok=False)
+    task = asyncio.get_running_loop().create_task(runner())
+    _reset_tasks.add(task)
+    task.add_done_callback(_reset_tasks.discard)
+    await journal.record(db, category="auth", event="password.reset.requested", level="notice",
+                         message=f"Passwort-Reset für '{username}' angefordert.",
+                         actor=username, source_ip=source_ip)
+    return generic
+
+
+@router.post("/password/reset")
+@limiter.limit("10/minute")
+async def reset_password(request: Request, data: ResetRequest, db: AsyncSession = Depends(get_db)):
+    """Neues Passwort mit dem Link aus der Mail setzen."""
+    from ..auth import revoke_sessions
+    from ..models import UserToken
+    row = (await db.execute(select(UserToken).where(
+        UserToken.token_hash == _digest(data.token), UserToken.purpose == "password_reset")
+    )).scalar_one_or_none()
+    if row is None or row.used_at or row.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=410, detail="Der Link ist abgelaufen oder wurde schon benutzt.")
+    user = await db.get(User, row.user_id)
+    if user is None or not user.is_active or (user.auth_source or "local") != "local" \
+            or (row.target or "").lower() != (user.email or "").lower():
+        raise HTTPException(status_code=410, detail="Der Link ist abgelaufen oder wurde schon benutzt.")
+    row.used_at = datetime.utcnow()
+    await db.execute(delete(UserToken).where(UserToken.user_id == user.id,
+                                             UserToken.purpose == "password_reset",
+                                             UserToken.id != row.id))
+    user.password_hash = get_password_hash(data.new_password)
+    user.must_change_password = False
+    clear_mfa_failures(user)
+    revoke_sessions(user)
+    await db.commit()
+    await journal.record(db, category="auth", event="password.reset.done", level="warning",
+                         message=f"Passwort von '{user.username}' per Mail-Link neu gesetzt; "
+                                 f"alle Sitzungen beendet.",
+                         actor=user.username, source_ip=real_client_ip(request))
+    return {"reset": True, "username": user.username,
+            "message": "Das Passwort ist geändert. Bitte neu anmelden."}

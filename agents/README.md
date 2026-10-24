@@ -17,6 +17,8 @@ Für **Linux** und **Windows**, jeweils als Einzeiler installierbar.
 | Über das Internet   | **ja** — dafür ist er gedacht                | nein, nur im eigenen Netz         |
 | Adressierung        | FQDN (DNS), IP als Rückfallebene             | FQDN oder IP                      |
 | Braucht auf Linux   | python3 + systemd + journald                 | rsyslog                           |
+| Docker-Container    | **ja** — automatisch erkannt, je Container eine eigene Instanz unter der VM | nein |
+| Aktualisiert sich   | **ja** — vom Server gesteuert, signiert geprüft | nein                             |
 
 **Kurz:** Rechner im eigenen Netz können Syslog sprechen. Alles, was **nicht im
 gleichen Netz** hängt, geht agent-basiert — nur dort sind die Daten unterwegs
@@ -55,8 +57,9 @@ curl -sSL https://raw.githubusercontent.com/Phydran6/Logbot-Server/main/agents/i
 | Deinstallieren | → [Einzeiler zum Deinstallieren](#deinstallieren--einzeiler) |
 
 **Optionen:** `--fqdn` · `--token` · `--ip` · `--port` · `--mode https\|syslog` ·
-`--proto udp\|tcp` *(Syslog)* · `--min-level info\|warning\|error` · `--insecure` · `--yes` · `--timeout <s>`
-(alle auch als `LOGBOT_*`-Umgebungsvariable).
+`--proto udp\|tcp` *(Syslog)* · `--min-level info\|warning\|error` · `--insecure` ·
+`--no-docker` · `--no-remote-update` · `--yes` · `--timeout <s>`
+(alle auch als `LOGBOT_*`-Umgebungsvariable, z. B. `LOGBOT_DOCKER=off`).
 
 Alles liegt unter `/opt/logbot-agent/`, der Dienst heißt `logbot-agent`:
 
@@ -71,6 +74,50 @@ Protokoll live mitlesen:
 ```bash
 journalctl -u logbot-agent -f
 ```
+
+### Docker und Docker Compose
+
+Läuft auf dem Rechner **Docker oder Podman**, erkennt der Agent das selbst –
+samt Fassung von Engine und Compose – und erfasst die Container mit:
+
+- **Logs** (stdout/stderr) jedes laufenden Containers, über die Docker-API am
+  lokalen Socket (`/var/run/docker.sock`, `/run/podman/podman.sock`). Container
+  mit dem journald-Log-Treiber kommen über journald und werden ebenso
+  zugeordnet.
+- **Zustandswechsel**: Start, Absturz mit Exit-Code, OOM-Kill, Neustart,
+  Healthcheck.
+- **Inventar** jede Minute: Name, Image, Zustand, Compose-Projekt und -Dienst,
+  Ports.
+
+Auf dem Server wird jeder Container eine eigene Log-Instanz **unter** der VM
+(`docker01/nginx`), gruppiert nach Compose-Projekt. Die VM bleibt die Instanz
+mit Hostname, IP und Schlüssel. Nicht erfasst werden LogBots eigene Container
+und alles mit dem Label `de.logbot.collect=false`:
+
+```yaml
+services:
+  sehr-gespraechig:
+    labels:
+      de.logbot.collect: "false"
+```
+
+Abschalten pro Rechner: `--no-docker`.
+
+### Selbst-Aktualisierung
+
+Der Agent meldet sich jede Minute beim Server (Heartbeat). Gibt es eine neue
+Fassung und erlaubt die Regel unter *Agents → Agent-Updates* das Einspielen
+(von Hand angestoßen oder automatisch im Wartungsfenster), lädt der Agent das
+Paket, prüft SHA-256 und die **RSA-Unterschrift** des Servers
+(`/opt/logbot-agent/update_pubkey.pem`, bei der Anmeldung abgelegt, geprüft mit
+`openssl`) und führt `install-linux.sh upgrade` als eigene systemd-Unit aus.
+Startet die neue Fassung nicht, wird die alte zurückgelegt und das gemeldet.
+
+Ohne prüfbare Unterschrift **und** mit `--insecure` lehnt der Agent jedes Update
+ab. `--no-remote-update` sperrt die Fernaktualisierung ganz.
+
+Agents vor 2026.10.23 können das noch nicht – einmal den Einzeiler erneut
+ausführen.
 
 ---
 
@@ -109,6 +156,14 @@ Installation unter `%ProgramData%\LogBot-Agent`, Ausführung als geplante Aufgab
 Get-ScheduledTask -TaskName LogBotAgent
 ```
 
+### Selbst-Aktualisierung (Windows)
+
+Wie unter Linux: Heartbeat jede Minute, Paket vom Server, Prüfung von SHA-256
+und RSA-Unterschrift (`%ProgramData%\LogBot-Agent\update_pubkey.xml`), dann
+eine einmalige geplante Aufgabe `LogBotAgentUpgrade` (als SYSTEM), die das
+Agent-Skript ersetzt und die Aufgabe `LogBotAgent` neu startet – mit Rückfall,
+falls sie nicht anläuft. Sperren: `-NoRemoteUpdate` beim Installieren.
+
 ### MSI-Paket?
 
 Noch nicht dabei. Der PowerShell-Einzeiler deckt dasselbe ab und lässt sich per
@@ -123,7 +178,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Cr
 
 ## Zugangsschlüssel
 
-Im Web-UI unter **Verwaltung → Zugang & Sicherheit → Zugangsschlüssel** (nur
+Im Web-UI unter **Agents → Zugangsschlüssel** (nur
 für Administratoren).
 
 **Jeder Rechner bekommt seinen eigenen Schlüssel.** Der Agent holt ihn sich beim

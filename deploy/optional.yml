@@ -46,17 +46,23 @@
 #
 # ------------------------------------------------------------------------------
 # SICHERHEITSHINWEIS, bewusst hier und nicht im Kleingedruckten
-#   Portainer und Tugtainer brauchen den Docker-Socket (/var/run/docker.sock).
-#   Wer darauf SCHREIBEN kann, ist faktisch root auf diesem Server - egal, was
-#   in der Container-Konfiguration sonst steht. Deshalb bekommen beide den
-#   Socket hier nur LESEND (`:ro`):
+#   Portainer und Tugtainer brauchen Zugriff auf Docker. Wer die Docker-API
+#   BEDIENEN kann, ist faktisch root auf diesem Server.
 #
-#     Portainer  zeigt dann alles an, kann aber nichts starten oder loeschen.
-#     Tugtainer  sieht nach, ob Updates bereitliegen, und meldet sie - mehr
-#                nicht. Genau so ist es gewollt.
+#   KORREKTUR 2026.10.23: Bisher stand hier, der Socket sei mit `:ro` "nur
+#   lesend". Das war falsch. `:ro` schuetzt nur die Socket-DATEI vor dem
+#   Ueberschreiben - ueber den Socket laesst sich trotzdem jeder Befehl
+#   schicken (Container starten, Host-Verzeichnisse einhaengen ...).
+#
+#   Jetzt sitzt ein Filter dazwischen (docker-socket-proxy, Dienst
+#   "socket-proxy"). Er laesst nur lesende Abfragen durch (POST=0):
+#
+#     Portainer  zeigt alles an, kann aber nichts starten oder loeschen.
+#     Tugtainer  sieht nach, ob Updates bereitliegen, und meldet sie.
 #
 #   Wer Tugtainer auch selbst austauschen lassen will, setzt in der .env
-#   TUGTAINER_SOCKET_MODE=rw und weiss, worauf er sich einlaesst.
+#   TUGTAINER_DOCKER_HOST=unix:///var/run/docker.sock und haengt den echten
+#   Socket ein - und weiss, worauf er sich einlaesst.
 # ==============================================================================
 
 # Container-Protokolle begrenzen (wie im Kern-Stack, docker-compose.yml):
@@ -71,10 +77,60 @@ x-logging: &optional-logging
 services:
 
   # ----------------------------------------------------------------------------
+  # Filter vor dem Docker-Socket: nur lesende Abfragen (fuer Portainer und
+  # Tugtainer). Startet mit, sobald eines der beiden Profile laeuft.
+  # ----------------------------------------------------------------------------
+  socket-proxy:
+    image: lscr.io/linuxserver/socket-proxy:${SOCKET_PROXY_VERSION:-latest}
+    container_name: logbot-ext-socket-proxy
+    hostname: socket-proxy
+    restart: unless-stopped
+    profiles: ["portainer", "tugtainer"]
+    labels:
+      de.logbot.stack: "optional"
+      de.logbot.origin: "upstream"
+      de.logbot.update: "image"
+      de.logbot.component: "socket-proxy"
+      de.logbot.role: "Docker-API nur lesend fuer Portainer und Tugtainer"
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      INFO: 1
+      NETWORKS: 1
+      VOLUMES: 1
+      SERVICES: 1
+      TASKS: 1
+      NODES: 1
+      EVENTS: 1
+      PING: 1
+      VERSION: 1
+      SYSTEM: 1
+      DISTRIBUTION: 1
+      POST: 0
+      ALLOW_START: 0
+      ALLOW_STOP: 0
+      ALLOW_RESTARTS: 0
+      EXEC: 0
+      BUILD: 0
+      COMMIT: 0
+      SECRETS: 0
+      AUTH: 0
+      LOG_LEVEL: warning
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs:
+      - /run
+    networks:
+      dockerapi:
+        aliases:
+          - logbot-socket-proxy
+
+  # ----------------------------------------------------------------------------
   # Portainer - Container-Oberflaeche (fremdes Image)
   # ----------------------------------------------------------------------------
   portainer:
-    image: portainer/portainer-ce:${PORTAINER_VERSION:-2.21.4-alpine}
+    image: portainer/portainer-ce:${PORTAINER_VERSION:-2.45.3-alpine}
     container_name: logbot-ext-portainer
     hostname: portainer
     restart: unless-stopped
@@ -89,16 +145,19 @@ services:
     command: >
       --admin-password-file /run/secrets/portainer_password
       --http-enabled
+      -H tcp://logbot-socket-proxy:2375
     ports:
       # Standard: nur vom Server selbst erreichbar. Wer aus dem Netz herankommen
       # will, setzt PORTAINER_BIND=0.0.0.0 - und sollte vorher HTTPS einrichten.
       - "${PORTAINER_BIND:-127.0.0.1}:${PORTAINER_PORT:-9000}:9000"
       - "${PORTAINER_BIND:-127.0.0.1}:${PORTAINER_HTTPS_PORT:-9443}:9443"
+    depends_on:
+      - socket-proxy
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - portainer_data:/data
       - ./data/portainer_password:/run/secrets/portainer_password:ro
     networks:
+      dockerapi:
       logbot:
         aliases:
           - portainer
@@ -136,15 +195,17 @@ services:
       # gesetzt da, weil ein leeres Geheimnis ein offenes Scheunentor waere.
       AGENT_SECRET: ${TUGTAINER_AGENT_SECRET:-}
       TZ: ${TZ:-Europe/Berlin}
+      # Ueber den Filter: nur lesen, nichts austauschen.
+      DOCKER_HOST: ${TUGTAINER_DOCKER_HOST:-tcp://logbot-socket-proxy:2375}
     ports:
       # Wie ueberall hier: standardmaessig nur vom Server selbst erreichbar.
       - "${TUGTAINER_BIND:-127.0.0.1}:${TUGTAINER_PORT:-9412}:80"
     volumes:
       - tugtainer_data:/tugtainer
-      # LESEND. Damit kann Tugtainer nachsehen und vergleichen - aber nichts
-      # anfassen. Fuer "darf auch tauschen": TUGTAINER_SOCKET_MODE=rw.
-      - /var/run/docker.sock:/var/run/docker.sock:${TUGTAINER_SOCKET_MODE:-ro}
+    depends_on:
+      - socket-proxy
     networks:
+      dockerapi:
       logbot:
         aliases:
           - tugtainer
@@ -154,7 +215,9 @@ services:
   # n8n - Automatisierung (fremdes Image)
   # ----------------------------------------------------------------------------
   n8n:
-    image: n8nio/n8n:${N8N_VERSION:-1.68.0}
+    # Mindestens 1.123.18 (1.x) bzw. 2.5.2 (2.x): aeltere Fassungen haben kritische
+    # Luecken (u.a. CVE-2026-21858 "Ni8mare", CVE-2026-21877, CVE-2026-25049).
+    image: n8nio/n8n:${N8N_VERSION:-1.123.87}
     container_name: logbot-ext-n8n
     hostname: n8n
     restart: unless-stopped
@@ -282,6 +345,11 @@ services:
         aliases:
           - postfix
           - logbot-postfix
+
+networks:
+  # Eigenes, internes Netz nur fuer den Zugriff auf die Docker-API.
+  dockerapi:
+    internal: true
 
 volumes:
   portainer_data:

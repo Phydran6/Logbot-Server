@@ -53,8 +53,52 @@
           Zeilen gehen dorthin.
         </p>
 
+        <!-- ================================================ OpenRouter-Assistent -->
+        <div v-if="config.provider === 'openrouter'" class="openrouter space-y-4">
+          <div>
+            <p class="step-head"><span class="step-no">1</span> Mit OpenRouter verbinden
+              <span v-if="config.api_key_set" class="badge badge-success ml-2">verbunden</span></p>
+            <p class="hint mb-2">
+              OpenRouter bündelt Claude, GPT, Gemini, Llama und viele weitere Modelle – auch kostenlose – hinter
+              einem Konto. Bei der Anmeldung legt OpenRouter einen Schlüssel nur für LogBot an; er lässt sich dort
+              jederzeit widerrufen.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button class="btn btn-primary btn-sm" :disabled="orBusy" @click="openRouterLogin">Mit OpenRouter anmelden</button>
+              <button class="btn btn-secondary btn-sm" @click="orManual = !orManual">Schlüssel selbst einfügen</button>
+            </div>
+            <div v-if="orManual" class="flex gap-2 mt-2">
+              <input v-model="orKey" type="password" class="input" placeholder="sk-or-v1-…" autocomplete="off">
+              <button class="btn btn-secondary btn-sm" :disabled="orBusy || !orKey" @click="openRouterKey">Übernehmen</button>
+            </div>
+            <p v-if="orInfo" class="hint mt-1">{{ orInfo }}</p>
+          </div>
+          <div>
+            <p class="step-head"><span class="step-no">2</span> Modell wählen
+              <span class="hint ml-2">aktuell: <code>{{ config.model || '–' }}</code></span></p>
+            <div class="flex gap-2 flex-wrap mb-2">
+              <input v-model="orFilter" class="input" placeholder="Suchen: claude, gpt, llama, gemini …" style="max-width: 20rem">
+              <label class="flex items-center gap-1 text-sm"><input v-model="orFreeOnly" type="checkbox"> nur kostenlose</label>
+              <button class="btn btn-ghost btn-sm" :disabled="orBusy" @click="loadOpenRouterModels(true)">Liste laden</button>
+            </div>
+            <div v-if="orModels.length" class="model-list">
+              <button v-for="m in shownModels" :key="m.id" class="model" :class="{ 'is-picked': config.model === m.id }"
+                      :title="m.description" @click="pickOpenRouterModel(m.id)">
+                <span class="model-name">{{ m.name }}</span>
+                <span class="model-meta font-mono">{{ m.id }}</span>
+                <span class="model-meta">
+                  <span v-if="m.free" class="badge badge-success">kostenlos</span>
+                  <template v-else>{{ m.price_in }} $ / {{ m.price_out }} $ je 1 Mio. Token</template>
+                  <template v-if="m.context"> · {{ Math.round(m.context / 1000) }}k Kontext</template>
+                </span>
+              </button>
+            </div>
+            <p class="hint">Kostenlose Modelle haben bei OpenRouter enge Tageslimits und können Anfragen für Training nutzen – für Logdaten lieber ein bezahltes Modell.</p>
+          </div>
+        </div>
+
         <!-- Nur zeigen, was der gewählte Weg braucht. -->
-        <div v-if="current?.needs_key" class="space-y-1">
+        <div v-if="current?.needs_key && config.provider !== 'openrouter'" class="space-y-1">
           <label class="label">{{ t('ai.apiKey') }}</label>
           <input
             v-model="apiKey"
@@ -81,7 +125,7 @@
         </div>
 
         <div v-if="config.provider !== 'off'" class="grid gap-3 sm:grid-cols-2">
-          <div v-if="current?.needs_key">
+          <div v-if="current?.needs_key && config.provider !== 'openrouter'">
             <label class="label">{{ t('ai.model') }}</label>
             <!-- Bei Open WebUI hängt hinter der Adresse das, was der Betreiber
                  selbst installiert hat - den Namen kann niemand erraten. Also
@@ -208,10 +252,107 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from '../i18n'
 
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+
+// --- OpenRouter-Assistent -----------------------------------------------------
+const orBusy = ref(false)
+const orManual = ref(false)
+const orKey = ref('')
+const orInfo = ref('')
+const orModels = ref([])
+const orFilter = ref('')
+const orFreeOnly = ref(false)
+const shownModels = computed(() => {
+  const term = orFilter.value.trim().toLowerCase()
+  return orModels.value
+    .filter(m => !orFreeOnly.value || m.free)
+    .filter(m => !term || m.id.toLowerCase().includes(term) || m.name.toLowerCase().includes(term))
+    .slice(0, 60)
+})
+
+function keyInfo(key) {
+  if (!key) return ''
+  const used = key.usage != null ? `verbraucht ${Number(key.usage).toFixed(2)} $` : ''
+  const limit = key.limit != null ? ` von ${key.limit} $` : ''
+  return `Schlüssel aktiv${key.label ? ' („' + key.label + '“)' : ''}${used ? ' · ' + used + limit : ''}${key.is_free_tier ? ' · kostenloses Kontingent' : ''}`
+}
+
+async function openRouterLogin() {
+  orBusy.value = true
+  error.value = ''
+  try {
+    const data = await auth.api('/api/ai/openrouter/start', { method: 'POST',
+      body: { callback_url: `${window.location.origin}/ai/openrouter` } })
+    window.location.href = data.auth_url
+  } catch (err) {
+    error.value = err.message
+    orBusy.value = false
+  }
+}
+
+async function openRouterKey() {
+  orBusy.value = true
+  error.value = ''
+  try {
+    const data = await auth.api('/api/ai/openrouter/key', { method: 'POST', body: { api_key: orKey.value.trim(), model: config.value.model } })
+    config.value = data.config
+    orInfo.value = keyInfo(data.key)
+    orKey.value = ''
+    orManual.value = false
+    message.value = 'OpenRouter ist eingerichtet.'
+    loadOpenRouterModels()
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    orBusy.value = false
+  }
+}
+
+async function loadOpenRouterModels(force = false) {
+  try {
+    orModels.value = (await auth.api(`/api/ai/openrouter/models${force ? '?force=true' : ''}`)).items
+  } catch (err) {
+    orInfo.value = err.message
+  }
+}
+
+async function pickOpenRouterModel(id) {
+  try {
+    const data = await auth.api(`/api/ai/openrouter/model?model=${encodeURIComponent(id)}`, { method: 'PUT' })
+    config.value = data.config
+    message.value = `Modell ${id} gewählt.`
+  } catch (err) {
+    // Noch nicht verbunden: Auswahl merken, beim Verbinden mitgeben.
+    config.value.model = id
+    if (!config.value.api_key_set) message.value = `Modell ${id} vorgemerkt – jetzt verbinden.`
+    else error.value = err.message
+  }
+}
+
+async function finishOpenRouterCallback() {
+  const { code, state } = route.query
+  if (route.name !== 'OpenRouterCallback' || !code || !state) return
+  orBusy.value = true
+  try {
+    const data = await auth.api('/api/ai/openrouter/exchange', { method: 'POST',
+      body: { code: String(code), state: String(state), model: config.value.model || null } })
+    config.value = data.config
+    orInfo.value = keyInfo(data.key)
+    message.value = 'Mit OpenRouter verbunden. Jetzt ein Modell wählen.'
+    loadOpenRouterModels()
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    orBusy.value = false
+    router.replace('/ai')
+  }
+}
 const { t, locale } = useI18n()
 
 const config = ref({ provider: 'off', max_logs: 100 })
@@ -340,7 +481,11 @@ async function analyze() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await finishOpenRouterCallback()
+  if (config.value.provider === 'openrouter') loadOpenRouterModels()
+})
 </script>
 
 <style scoped>
@@ -465,4 +610,48 @@ onMounted(load)
   color: var(--color-warning);
   border-color: var(--color-warning);
 }
+
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-weight: 600;
+  margin-bottom: 0.375rem;
+}
+
+.step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-primary);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
+.model-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.5rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  margin-bottom: 0.5rem;
+}
+
+.model {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+.model:hover { border-color: var(--color-primary); }
+.model.is-picked { border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }
+.model-name { font-weight: 600; font-size: 0.8125rem; }
+.model-meta { font-size: 0.6875rem; color: var(--color-text-muted); }
 </style>

@@ -18,16 +18,26 @@ from ..auth import get_current_user, get_current_admin
 router = APIRouter(prefix="/api/webhooks", tags=["Webhooks"])
 
 @router.get("", response_model=List[WebhookResponse])
-async def list_webhooks(db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+async def list_webhooks(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     result = await db.execute(select(Webhook).order_by(Webhook.created_at.desc()))
-    return result.scalars().all()
+    hooks = result.scalars().all()
+    if user.role == "admin":
+        return hooks
+    # Der Token in der Aufruf-Adresse gibt Logs ohne Anmeldung heraus. Anlegen
+    # duerfen nur Administratoren - dann darf ihn auch nur ein Administrator
+    # sehen, sonst baut sich ein Lesekonto den offenen Abgriff eben per Kopie.
+    return [WebhookResponse.model_validate(hook, from_attributes=True).model_copy(update={"token": ""})
+            for hook in hooks]
 
 @router.get("/{webhook_id}", response_model=WebhookResponse)
-async def get_webhook(webhook_id: int, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+async def get_webhook(webhook_id: int, db: AsyncSession = Depends(get_db),
+                      user: User = Depends(get_current_user)):
     result = await db.execute(select(Webhook).where(Webhook.id == webhook_id))
     webhook = result.scalar_one_or_none()
     if not webhook:
         raise HTTPException(status_code=404, detail="Webhook nicht gefunden")
+    if user.role != "admin":
+        return WebhookResponse.model_validate(webhook, from_attributes=True).model_copy(update={"token": ""})
     return webhook
 
 # ==============================================================================

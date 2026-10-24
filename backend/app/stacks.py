@@ -111,7 +111,7 @@ STACKS: Dict[str, dict] = {
     },
     "postfix": {
         "label": "Postfix (Mailversand)",
-        "hint": "Damit der Server Mails verschicken kann. Eingestellt unter System → Mail.",
+        "hint": "Damit der Server Mails verschicken kann. Eingestellt unter Meldungen → Kanäle → E-Mail.",
         "container": "logbot-ext-postfix",
         "legacy_container": "logbot-postfix",
         "default_port": 1587,

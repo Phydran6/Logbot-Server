@@ -10,30 +10,6 @@
 
 <template>
   <div class="p-6">
-    <div class="mb-5">
-      <h1 class="text-2xl font-bold" :style="{ color: 'var(--color-text-primary)' }">Einstellungen</h1>
-      <p class="text-sm mt-1" :style="{ color: 'var(--color-text-muted)' }">
-        Alles zum System an einem Ort. Die Adresse wechselt mit dem Reiter – so lässt sich
-        ein Bereich verlinken oder als Lesezeichen ablegen.
-      </p>
-    </div>
-
-    <!-- Reiter, nach Themen gruppiert -->
-    <div class="space-y-2 mb-6">
-      <div v-for="group in availableGroups" :key="group.title" class="flex flex-wrap items-center gap-2">
-        <span class="tab-group-label">{{ group.title }}</span>
-        <button
-          v-for="tab in group.tabs"
-          :key="tab.id"
-          class="px-3 py-2 rounded text-sm"
-          :style="tabButtonStyle(tab.id)"
-          @click="setTab(tab.id)"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
-    </div>
-
     <!-- Allgemein -->
     <div v-if="activeTab === 'general'" class="rounded-lg shadow p-6" :style="cardStyle">
       <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Allgemeine Einstellungen</h2>
@@ -145,61 +121,12 @@
       </div>
     </div>
 
-    <!-- Agent Token -->
-    <div v-if="activeTab === 'agents'" class="rounded-lg shadow p-6 mt-6" :style="cardStyle">
-      <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Agent Token (global)</h2>
-      <p class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
-        Ein Token für alle Agenten (Linux/Windows). Für höhere Sicherheit kannst du es bei Bedarf regenerieren.
-      </p>
-
-      <div v-if="tokenError" class="text-sm mb-2" :style="{ color: 'var(--color-danger)' }">{{ tokenError }}</div>
-      <div v-if="tokenMessage" class="text-sm mb-2" :style="{ color: 'var(--color-success)' }">{{ tokenMessage }}</div>
-
-      <div class="flex flex-col md:flex-row gap-3 items-start md:items-end">
-        <div class="flex-1 w-full">
-          <label class="block text-sm font-medium mb-1" :style="{ color: 'var(--color-text-secondary)' }">Token</label>
-          <input :value="agentToken?.token || ''" readonly class="w-full rounded px-3 py-2 font-mono" :style="inputStyle">
-          <p class="text-xs mt-1" :style="{ color: 'var(--color-text-muted)' }">
-            Name: {{ agentToken?.name || 'global-agent' }}
-          </p>
-        </div>
-        <div class="flex gap-2">
-          <button
-            class="px-3 py-2 rounded text-white hover:opacity-90"
-            :style="{ backgroundColor: 'var(--color-primary)' }"
-            :disabled="tokenLoading || !agentToken"
-            @click="copyAgentToken"
-          >
-            Kopieren
-          </button>
-          <button
-            class="px-3 py-2 rounded text-white hover:opacity-90"
-            :style="{ backgroundColor: 'var(--color-danger)' }"
-            :disabled="tokenLoading || !agentToken"
-            @click="regenerateAgentToken"
-          >
-            {{ tokenLoading ? 'Regeneriere…' : 'Neu generieren' }}
-          </button>
-        </div>
-      </div>
-    </div>
     <!-- Netzwerk (Reverse Proxy + DNS, nur Admin) -->
-    <div v-if="authStore.isAdmin && activeTab === 'network'" class="mt-6 space-y-4">
-      <!-- Unter-Navigation -->
-      <div class="flex flex-wrap gap-2">
-        <button
-          v-for="sub in networkSubTabs"
-          :key="sub.id"
-          class="px-3 py-2 rounded text-sm"
-          :style="subTabButtonStyle(sub.id)"
-          @click="networkSubTab = sub.id"
-        >
-          {{ sub.label }}
-        </button>
-      </div>
+    <!-- Unterpunkte stehen im linken Menue (Netzwerk → Reverse Proxy / DNS). -->
+    <div v-if="authStore.isAdmin && ['proxy', 'dns', 'network'].includes(activeTab)" class="space-y-4">
 
     <!-- Reverse Proxy & TLS (Caddy) -->
-    <div v-if="networkSubTab === 'caddy'" class="rounded-lg shadow p-6" :style="cardStyle">
+    <div v-if="activeTab === 'proxy' || activeTab === 'network'" class="rounded-lg shadow p-6" :style="cardStyle">
       <h2 class="text-lg font-semibold mb-2" :style="{ color: 'var(--color-text-primary)' }">Reverse Proxy & TLS (Caddy)</h2>
       <p class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
         Angewendet wird <strong>genau das, was unten im Editor steht</strong>. Die Konfiguration wird vorher
@@ -357,7 +284,7 @@
       </div>
 
       <!-- DNS -->
-      <div v-if="networkSubTab === 'dns'" class="rounded-lg shadow p-6" :style="cardStyle">
+      <div v-if="activeTab === 'dns'" class="rounded-lg shadow p-6" :style="cardStyle">
         <h2 class="text-lg font-semibold mb-2" :style="{ color: 'var(--color-text-primary)' }">DNS</h2>
         <p class="text-sm mb-4" :style="{ color: 'var(--color-text-muted)' }">
           Standardmäßig wird der im Netzwerk per DHCP vergebene DNS verwendet. Alternativ kannst du eigene DNS-Server hinterlegen.
@@ -436,7 +363,7 @@
     <!-- /Netzwerk -->
 
     <!-- Datenbank (nur Admin) -->
-    <div v-if="authStore.isAdmin && activeTab === 'database'" class="rounded-lg shadow p-6 mt-6" :style="cardStyle">
+    <div v-if="authStore.isAdmin && activeTab === 'database'" class="rounded-lg shadow p-6" :style="cardStyle">
       <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Datenbank</h2>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <div>
@@ -491,7 +418,7 @@
     </div>
     
     <!-- Wartung (nur Admin) -->
-    <div v-if="authStore.isAdmin && activeTab === 'maintenance'" class="rounded-lg shadow p-6 mt-6" :style="cardStyle">
+    <div v-if="authStore.isAdmin && activeTab === 'maintenance'" class="rounded-lg shadow p-6" :style="cardStyle">
       <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Neustart</h2>
       <p class="text-sm mb-4" :style="{ color: 'var(--color-text-secondary)' }">
         Startet das Betriebssystem neu. Aktive Nutzer werden getrennt.
@@ -511,7 +438,7 @@
     </div>
     
     <!-- Passwort ändern -->
-    <div v-if="activeTab === 'password'" class="rounded-lg shadow p-6 mt-6" :style="cardStyle">
+    <div v-if="activeTab === 'password'" class="rounded-lg shadow p-6" :style="cardStyle">
       <h2 class="text-lg font-semibold mb-4" :style="{ color: 'var(--color-text-primary)' }">Passwort ändern</h2>
       <form @submit.prevent="changePassword" class="max-w-md space-y-4">
         <div>
@@ -600,7 +527,6 @@ const tabGroups = [
       { id: 'password', label: 'Passwort' },
       { id: 'security', label: 'Anmeldesicherheit' },
       { id: 'ldap', label: 'Verzeichnis (LDAP)', adminOnly: true },
-      { id: 'agents', label: 'Zugangsschlüssel', adminOnly: true },
     ],
   },
   {
@@ -608,6 +534,8 @@ const tabGroups = [
     tabs: [
       { id: 'general', label: 'Allgemein' },
       { id: 'network', label: 'Netzwerk', adminOnly: true },
+      { id: 'proxy', label: 'Reverse Proxy', adminOnly: true },
+      { id: 'dns', label: 'DNS', adminOnly: true },
       { id: 'maintenance', label: 'Neustart', adminOnly: true },
       { id: 'branding', label: 'Erscheinungsbild' },
     ],
@@ -617,11 +545,6 @@ const tabGroups = [
 const tabs = tabGroups.flatMap(group => group.tabs)
 const activeTab = ref('general')
 const tabLoaded = ref({ network: false, database: false })
-const networkSubTabs = [
-  { id: 'caddy', label: 'Reverse Proxy' },
-  { id: 'dns', label: 'DNS' }
-]
-const networkSubTab = ref('caddy')
 
 const settings = ref({
   app_name: 'LogBot',
@@ -815,29 +738,12 @@ onMounted(async () => {
     if (authStore.isAdmin) {
       // lazy: nur laden, wenn Tab geöffnet wird
     }
-    await loadAgentToken()
   } catch (e) {
     console.error('Fehler:', e)
   }
 })
 
-function tabButtonStyle(id) {
-  const isActive = activeTab.value === id
-  return {
-    backgroundColor: isActive ? 'var(--color-primary)' : 'var(--color-surface-elevated)',
-    color: isActive ? '#fff' : 'var(--color-text-primary)',
-    border: '1px solid var(--color-border)'
-  }
-}
 
-function subTabButtonStyle(id) {
-  const isActive = networkSubTab.value === id
-  return {
-    backgroundColor: isActive ? 'var(--color-primary)' : 'var(--color-surface-elevated)',
-    color: isActive ? '#fff' : 'var(--color-text-primary)',
-    border: '1px solid var(--color-border)'
-  }
-}
 
 /** Reiter wechseln und dabei die Adresse mitziehen (/settings/<id>). */
 async function setTab(id) {
@@ -854,7 +760,7 @@ async function openTab(id) {
     await loadDatabaseSettings()
     tabLoaded.value.database = true
   }
-  if (id === 'network' && authStore.isAdmin && !tabLoaded.value.network) {
+  if (['network', 'proxy', 'dns'].includes(id) && authStore.isAdmin && !tabLoaded.value.network) {
     await loadCaddyConfig()
     await loadDnsConfig()
     tabLoaded.value.network = true
@@ -880,30 +786,6 @@ async function loadDatabaseSettings() {
   }
 }
 
-async function loadAgentToken() {
-  tokenLoading.value = true
-  tokenError.value = ''
-  tokenMessage.value = ''
-  try {
-    let list = await authStore.api('/api/agent-tokens')
-    if (!Array.isArray(list)) list = []
-    const preferred = list.find(t => t.name === 'global-agent')
-    if (!preferred) {
-      const created = await authStore.api('/api/agent-tokens', {
-        method: 'POST',
-        body: { name: 'global-agent' }
-      })
-      agentToken.value = created
-      tokenMessage.value = 'Standard-Token erstellt'
-    } else {
-      agentToken.value = preferred
-    }
-  } catch (e) {
-    tokenError.value = e.message || 'Token laden fehlgeschlagen'
-  } finally {
-    tokenLoading.value = false
-  }
-}
 
 async function loadCaddyConfig() {
   caddyLoading.value = true
@@ -1116,33 +998,7 @@ async function copyDbPassword() {
   setTimeout(() => { dbCopyMessage.value = '' }, 2000)
 }
 
-async function regenerateAgentToken() {
-  if (!agentToken.value) return
-  if (!confirm(`Agent-Token "${agentToken.value.name}" regenerieren?`)) return
-  tokenLoading.value = true
-  tokenMessage.value = ''
-  tokenError.value = ''
-  try {
-    const updated = await authStore.api(`/api/agent-tokens/${agentToken.value.id}/regenerate`, { method: 'POST' })
-    agentToken.value = updated
-    tokenMessage.value = 'Token regeneriert'
-  } catch (e) {
-    tokenError.value = e.message || 'Fehler beim Regenerieren'
-  } finally {
-    tokenLoading.value = false
-  }
-}
 
-async function copyAgentToken() {
-  if (!agentToken.value?.token) return
-  try {
-    await navigator.clipboard.writeText(agentToken.value.token)
-    tokenMessage.value = 'Token kopiert'
-    tokenError.value = ''
-  } catch (e) {
-    tokenError.value = 'Kopieren fehlgeschlagen'
-  }
-}
 
 async function saveAllSettings() {
   saving.value = true

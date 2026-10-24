@@ -64,10 +64,16 @@ CATEGORIES: Dict[str, str] = {
     "archiving": "Archivierung",
     "mail": "Mail",
     "ai": "KI-Auswertung",
+    "notify": "Meldungen",
+    "agent_update": "Agent-Updates",
     "system": "System",
 }
 
 LEVELS = ("debug", "info", "notice", "warning", "error", "critical")
+
+# Laufende Meldungs-Aufgaben festhalten, damit der Garbage Collector sie nicht
+# mitten im Versand einsammelt.
+_notify_tasks: set = set()
 
 # Wie lange das Tagebuch aufgehoben wird. Bewusst lang: die Zeilen sind winzig,
 # und die Frage "was ist da vor drei Monaten passiert?" kommt spaet.
@@ -127,6 +133,19 @@ async def record(session: AsyncSession, *, category: str, event: str, message: s
         }, sticky=False)
     except Exception:                                               # defensiv
         pass
+
+    # Meldungen: was schiefging, soll auch jemand erfahren, der gerade nicht
+    # auf das Tagebuch schaut (app/notify.py prueft die Regeln).
+    if level in ("warning", "error", "critical"):
+        try:
+            from . import notify
+            task = asyncio.get_running_loop().create_task(notify.on_journal({
+                "category": row.category, "level": row.level, "event": row.event,
+                "message": row.message, "actor": row.actor, "target": row.target}))
+            _notify_tasks.add(task)
+            task.add_done_callback(_notify_tasks.discard)
+        except RuntimeError:
+            pass
 
     # Zusaetzlich ins Anwendungsprotokoll - dort sucht man bei einem Problem
     # zuerst, und `docker logs` soll dieselbe Geschichte erzaehlen.

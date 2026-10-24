@@ -324,7 +324,14 @@ async def get_asset(filename: str):
     filepath = _asset_path(filename)
     if not filepath or not os.path.isfile(filepath):
         raise HTTPException(404, "Asset nicht gefunden")
-    return FileResponse(filepath)
+    # Ein SVG ist auch ein Dokument mit Skripten. Direkt aufgerufen liefe ein
+    # darin versteckter Code sonst im Namen dieser Seite (gespeichertes XSS).
+    # Die Sandbox-Richtlinie laesst das Bild Bild sein - und sonst nichts.
+    return FileResponse(filepath, headers={
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "public, max-age=3600",
+    })
 
 
 @branding_router.post("/reset")

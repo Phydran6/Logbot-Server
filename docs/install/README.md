@@ -227,10 +227,10 @@ COMPOSE_PROFILES=portainer,tugtainer
 ## Nach der Installation
 
 1. **Passwort ändern** — `admin`/`admin` ist nur der Einstieg.
-2. **HTTPS einschalten** — Einstellungen → Netzwerk → Reverse Proxy.
+2. **HTTPS einschalten** — System → Netzwerk → Reverse Proxy & TLS.
    Let's Encrypt, eigenes Zertifikat oder selbstsigniert.
 3. **Systemcheck laufen lassen** — System → Systemzustand.
-4. **Zugangsschlüssel holen** — Verwaltung → Zugang & Sicherheit → Zugangsschlüssel (am besten eine „Einladung“), dann
+4. **Zugangsschlüssel holen** — Agents → Zugangsschlüssel (am besten eine „Einladung“), dann
    [Rechner anbinden](../../agents/README.md).
 5. **Sicherung einrichten** — [System → Sicherung](../backup/README.md).
 

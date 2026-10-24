@@ -118,6 +118,7 @@
               >
                 <AppIcon :name="item.icon" :size="16" class="shrink-0" />
                 <span class="nav-label">{{ item.label }}</span>
+                <span v-if="item.badge" class="nav-badge">{{ item.badge > 99 ? '99+' : item.badge }}</span>
               </router-link>
 
               <!-- Ebene 3: Unterpunkte -->
@@ -241,6 +242,12 @@
         </div>
         <div class="flex-1" />
 
+        <!-- Meldungen: Glocke mit Zahl der ungelesenen -->
+        <router-link to="/notifications" class="bell" :title="t('nav.inbox')" :aria-label="t('nav.inbox')">
+          <AppIcon name="bell" :size="18" />
+          <span v-if="unread" class="bell-count">{{ unread > 99 ? '99+' : unread }}</span>
+        </router-link>
+
         <!-- Meldet sich, sobald auf GitHub etwas Neues liegt -->
         <router-link v-if="updateNotice" to="/updates" class="update-pill" :title="updateNotice">
           <AppIcon name="download" :size="14" />
@@ -253,6 +260,9 @@
       <div class="flex-1">
         <router-view />
       </div>
+
+      <!-- Pflicht: E-Mail-Adresse und ggf. neues Passwort, bevor es weitergeht -->
+      <AccountGate />
 
       <!-- Die Fusszeile verweist auf die Herkunft statt einen Rechtevorbehalt
            zu behaupten, den es bei einer MIT-Lizenz gar nicht gibt. -->
@@ -272,6 +282,8 @@ import { useThemeStore } from '../stores/themeStore'
 import { useBrandingStore } from '../stores/brandingStore'
 import { useI18n } from '../i18n'
 import AppIcon from '../components/AppIcon.vue'
+import AccountGate from '../components/AccountGate.vue'
+import { openTicketStream } from '../utils/stream'
 import pkg from '../../package.json'
 
 const route = useRoute()
@@ -348,6 +360,9 @@ const roleLabel = computed(() => (
   auth.user?.role === 'admin' ? t('nav.administrator') : t('nav.user')
 ))
 
+// Ungelesene Meldungen - für die Glocke oben und die Zahl im Menü.
+const unread = ref(0)
+
 // =============================================================================
 // Navigation
 // =============================================================================
@@ -359,10 +374,18 @@ const roleLabel = computed(() => (
 // Der Aufbau folgt Fragen, nicht Technik. Jeder Bereich beantwortet genau eine:
 //
 //   Überwachung   Was ist im Netz passiert?
+//   Meldungen     Wer muss davon erfahren - und wie (Mail, Telegram, App)?
 //   Auswertung    Was mache ich damit?
+//   Agents        Womit liefern die Geräte, in welcher Fassung, wie viel?
 //   Verwaltung    Wer darf was, und wie lange werden Daten aufgehoben?
+//   Mein Konto    Meine Adresse, mein Passwort, meine Anmeldung.
 //   System        Womit läuft das hier, und was tut es gerade?
 //   Hilfe         Was ist das eigentlich, und wo kommt es her?
+//
+// Neu 2026.10.23: Es gibt KEINE Auswahlleisten mehr im Inhaltsbereich. Was
+// früher als Reiter rechts stand (Einstellungen, Netzwerk → Proxy/DNS), hängt
+// jetzt als Unterpunkt hier im Baum. Ebene 1 = Bereich, Ebene 2 = Seite oder
+// Gruppe, Ebene 3 = Seite. Tiefer geht es nicht.
 //
 // Die Trennlinie zwischen Verwaltung und System ist bewusst diese: Verwaltung
 // handelt von Menschen und Daten, System von der Maschine. Vorher lagen
@@ -371,42 +394,10 @@ const roleLabel = computed(() => (
 // Glückssache.
 const navGroups = computed(() => {
   const admin = auth.isAdmin
-
-  // --- Verwaltung -> Zugang & Sicherheit --------------------------------------
-  const accessChildren = [
-    { to: '/settings/password', name: 'Settings', tab: 'password', label: t('nav.password') },
-    { to: '/settings/security', name: 'Settings', tab: 'security', label: t('nav.security') },
-    ...(admin ? [
-      { to: '/sso', name: 'SsoSettings', label: t('nav.sso') },
-      { to: '/settings/ldap', name: 'Settings', tab: 'ldap', label: t('nav.ldap') },
-      { to: '/settings/agents', name: 'Settings', tab: 'agents', label: t('nav.agentTokens') },
-    ] : []),
-  ]
-
-  // --- Verwaltung -> Daten & Aufbewahrung -------------------------------------
-  const dataChildren = [
-    { to: '/settings/retention', name: 'Settings', tab: 'retention', label: t('nav.retention') },
-    ...(admin ? [
-      { to: '/storage', name: 'Storage', label: t('nav.storage') },
-      { to: '/settings/archiving', name: 'Settings', tab: 'archiving', label: t('nav.archiving') },
-      { to: '/settings/database', name: 'Settings', tab: 'database', label: t('nav.database') },
-    ] : []),
-  ]
-
-  // --- System -> Container ----------------------------------------------------
-  const containerChildren = [
-    { to: '/containers', name: 'Containers', label: t('nav.containerOverview') },
-    { to: '/stacks', name: 'Stacks', label: t('nav.stacks') },
-  ]
-
-  // --- System -> Netzwerk & Zustellung ----------------------------------------
-  const networkChildren = [
-    { to: '/settings/network', name: 'Settings', tab: 'network', label: t('nav.network') },
-    { to: '/mail', name: 'Mail', label: t('nav.mail') },
-    { to: '/alerts', name: 'Alerts', label: t('nav.alerts') },
-  ]
+  const onlyAdmin = (entries) => (admin ? entries : [])
 
   return [
+    // --- Was ist im Netz passiert? -----------------------------------------
     {
       key: 'monitoring',
       title: t('nav.monitoring'),
@@ -414,51 +405,128 @@ const navGroups = computed(() => {
       items: [
         { key: 'dashboard', to: '/', name: 'Dashboard', icon: 'dashboard', label: t('nav.dashboard') },
         { key: 'logs', to: '/logs', name: 'Logs', icon: 'logs', label: t('nav.logs') },
-        { key: 'agents', to: '/agents', name: 'Agents', icon: 'agents', label: t('nav.devices'), match: ['DeviceLogs'] },
-        ...(admin ? [{ key: 'discovery', to: '/discovery', name: 'Discovery', icon: 'network', label: t('nav.discovery') }] : []),
+        { key: 'agents', to: '/agents', name: 'Agents', icon: 'devices', label: t('nav.devices'), match: ['DeviceLogs'] },
+        ...onlyAdmin([{ key: 'discovery', to: '/discovery', name: 'Discovery', icon: 'network', label: t('nav.discovery') }]),
         { key: 'health', to: '/health', name: 'Health', icon: 'health', label: t('nav.health') },
       ],
     },
+    // --- Wer muss davon erfahren? -------------------------------------------
+    {
+      key: 'notifications',
+      title: t('nav.notifications'),
+      icon: 'bell',
+      items: [
+        { key: 'inbox', to: '/notifications', name: 'Notifications', icon: 'bell', label: t('nav.inbox'), badge: unread.value },
+        ...onlyAdmin([
+          { key: 'rules', to: '/notifications/rules', name: 'NotificationRules', icon: 'filter', label: t('nav.rules') },
+          { key: 'watch', to: '/alerts', name: 'Alerts', icon: 'health', label: t('nav.alerts') },
+          {
+            key: 'channels', icon: 'mail', label: t('nav.channels'), children: [
+              { to: '/notifications/mail', name: 'NotifyMail', label: t('nav.mail') },
+              { to: '/notifications/telegram', name: 'NotifyTelegram', label: t('nav.telegram') },
+              { to: '/notifications/app', name: 'NotifyApp', label: t('nav.pushApp') },
+            ],
+          },
+        ]),
+      ],
+    },
+    // --- Was mache ich damit? -----------------------------------------------
     {
       key: 'analysis',
       title: t('nav.analysis'),
       icon: 'ai',
       items: [
-        ...(admin ? [{ key: 'ai', to: '/ai', name: 'AiSettings', icon: 'ai', label: t('nav.ai') }] : []),
+        ...onlyAdmin([{ key: 'ai', to: '/ai', name: 'AiSettings', icon: 'ai', label: t('nav.ai'), match: ['OpenRouterCallback'] }]),
         { key: 'webhooks', to: '/webhooks', name: 'Webhooks', icon: 'webhooks', label: t('nav.webhooks') },
         { key: 'app', to: '/app', name: 'AppQR', icon: 'mobile', label: t('nav.app') },
       ],
     },
+    // --- Womit liefern die Geraete? (nur Admin) -----------------------------
+    ...onlyAdmin([{
+      key: 'agentAdmin',
+      title: t('nav.agentAdmin'),
+      icon: 'agents',
+      items: [
+        { key: 'agentUpdates', to: '/agents/updates', name: 'AgentUpdates', icon: 'download', label: t('nav.agentUpdates') },
+        { key: 'agentTokens', to: '/agents/tokens', name: 'AgentTokens', icon: 'key', label: t('nav.agentTokens') },
+        { key: 'agentDefaults', to: '/agents/limits', name: 'AgentDefaults', icon: 'filter', label: t('nav.agentLimits') },
+      ],
+    }]),
+    // --- Wer darf was, wie lange bleiben Daten? -----------------------------
     {
       key: 'management',
       title: t('nav.management'),
       icon: 'users',
       items: [
-        ...(admin ? [{ key: 'users', to: '/users', name: 'Users', icon: 'users', label: t('nav.users') }] : []),
-        { key: 'access', icon: 'shield', label: t('nav.access'), children: accessChildren },
-        { key: 'data', icon: 'database', label: t('nav.data'), children: dataChildren },
+        ...onlyAdmin([
+          { key: 'users', to: '/users', name: 'Users', icon: 'users', label: t('nav.users') },
+          {
+            key: 'signin', icon: 'shield', label: t('nav.signin'), children: [
+              { to: '/sso', name: 'SsoSettings', label: t('nav.sso') },
+              { to: '/settings/ldap', name: 'Settings', tab: 'ldap', label: t('nav.ldap') },
+            ],
+          },
+        ]),
+        {
+          key: 'data', icon: 'database', label: t('nav.data'), children: [
+            { to: '/settings/retention', name: 'Settings', tab: 'retention', label: t('nav.retention') },
+            ...onlyAdmin([
+              { to: '/storage', name: 'Storage', label: t('nav.storage') },
+              { to: '/settings/archiving', name: 'Settings', tab: 'archiving', label: t('nav.archiving') },
+              { to: '/settings/database', name: 'Settings', tab: 'database', label: t('nav.database') },
+            ]),
+          ],
+        },
       ],
     },
+    // --- Mein Konto ---------------------------------------------------------
+    {
+      key: 'account',
+      title: t('nav.account'),
+      icon: 'lock',
+      items: [
+        { key: 'profile', to: '/account', name: 'Account', icon: 'mail', label: t('nav.profile') },
+        { key: 'security', to: '/settings/security', name: 'Settings', tab: 'security', icon: 'shield', label: t('nav.security') },
+      ],
+    },
+    // --- Womit laeuft das hier? ---------------------------------------------
     {
       key: 'system',
       title: t('nav.system'),
       icon: 'settings',
       items: [
-        ...(admin ? [
-          { key: 'containers', icon: 'stacks', label: t('nav.containers'), children: containerChildren },
-          { key: 'updates', to: '/updates', name: 'Updates', icon: 'download', label: t('nav.updates') },
-          { key: 'journal', to: '/journal', name: 'Journal', icon: 'logs', label: t('nav.journal') },
-          { key: 'backup', to: '/backup', name: 'Backup', icon: 'backup', label: t('nav.backup') },
-          { key: 'terminal', to: '/terminal', name: 'Terminal', icon: 'terminal', label: t('nav.console') },
-          { key: 'network', icon: 'globe', label: t('nav.connectivity'), children: networkChildren },
-        ] : []),
-        { key: 'branding', to: '/settings/branding', name: 'Settings', tab: 'branding', icon: 'branding', label: t('nav.branding') },
-        ...(admin ? [
-          { key: 'general', to: '/settings/general', name: 'Settings', tab: 'general', icon: 'settings', label: t('nav.general') },
-          { key: 'maintenance', to: '/settings/maintenance', name: 'Settings', tab: 'maintenance', icon: 'power', label: t('nav.maintenance') },
-        ] : []),
+        ...onlyAdmin([
+          {
+            key: 'operation', icon: 'refresh', label: t('nav.operation'), children: [
+              { to: '/updates', name: 'Updates', label: t('nav.updates') },
+              { to: '/backup', name: 'Backup', label: t('nav.backup') },
+              { to: '/journal', name: 'Journal', label: t('nav.journal') },
+              { to: '/terminal', name: 'Terminal', label: t('nav.console') },
+            ],
+          },
+          {
+            key: 'services', icon: 'stacks', label: t('nav.containers'), children: [
+              { to: '/containers', name: 'Containers', label: t('nav.containerOverview') },
+              { to: '/stacks', name: 'Stacks', label: t('nav.stacks') },
+            ],
+          },
+          {
+            key: 'network', icon: 'globe', label: t('nav.network'), children: [
+              { to: '/settings/proxy', name: 'Settings', tab: 'proxy', label: t('nav.proxy') },
+              { to: '/settings/dns', name: 'Settings', tab: 'dns', label: t('nav.dns') },
+            ],
+          },
+        ]),
+        {
+          key: 'preferences', icon: 'settings', label: t('nav.settings'), children: [
+            ...onlyAdmin([{ to: '/settings/general', name: 'Settings', tab: 'general', label: t('nav.general') }]),
+            { to: '/settings/branding', name: 'Settings', tab: 'branding', label: t('nav.branding') },
+            ...onlyAdmin([{ to: '/settings/maintenance', name: 'Settings', tab: 'maintenance', label: t('nav.maintenance') }]),
+          ],
+        },
       ],
     },
+    // --- Was ist das eigentlich? --------------------------------------------
     {
       key: 'help',
       title: t('nav.help'),
@@ -592,38 +660,49 @@ const breadcrumb = computed(() => {
 // app/events.py). Ohne das müsste die Seite im Takt nachfragen - und man sähe
 // den Hinweis erst beim nächsten Klick.
 const updateNotice = ref('')
-let updateStream = null
+let closeStream = null
+let unreadTimer = null
+
+async function refreshUnread() {
+  try {
+    const data = await auth.api('/api/notifications/unread')
+    unread.value = data.unread_count || 0
+  } catch {
+    // Kein Netz oder abgemeldet - die Zahl bleibt, wie sie ist.
+  }
+}
 
 function listenForUpdates() {
   if (!auth.isAdmin || typeof EventSource === 'undefined') return
-  // EventSource kennt keine eigenen Kopfzeilen - der Token geht als Parameter.
-  updateStream = new EventSource(`/api/updates/stream?token=${encodeURIComponent(auth.token)}`)
-
-  updateStream.addEventListener('update.available', (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      updateNotice.value = data.reason || t('updates.updateAvailable')
-    } catch {
-      updateNotice.value = t('updates.updateAvailable')
-    }
+  // Ticket statt Zugangstoken in der Adresse (utils/stream.js).
+  closeStream = openTicketStream('/api/updates/stream', {
+    'update.available': (data) => {
+      updateNotice.value = data?.reason || t('updates.updateAvailable')
+    },
+    'update.cleared': () => { updateNotice.value = '' },
+    'notification.new': () => { refreshUnread() },
   })
-  updateStream.addEventListener('update.cleared', () => { updateNotice.value = '' })
-
-  // Bricht die Verbindung ab (Neustart, Proxy-Zeitlimit), versucht der Browser
-  // es von selbst erneut. Nichts zu tun - nur nicht in einer Fehlerschleife
-  // lärmen.
-  updateStream.onerror = () => {}
 }
 
-onMounted(listenForUpdates)
-onBeforeUnmount(() => updateStream?.close())
+onMounted(() => {
+  listenForUpdates()
+  refreshUnread()
+  // Nicht-Admins haben keinen Ereignisstrom - für sie reicht ein ruhiger Takt.
+  unreadTimer = setInterval(refreshUnread, auth.isAdmin ? 120000 : 60000)
+  window.addEventListener('logbot:notifications-read', refreshUnread)
+})
+onBeforeUnmount(() => {
+  closeStream?.()
+  clearInterval(unreadTimer)
+  window.removeEventListener('logbot:notifications-read', refreshUnread)
+})
 
 function toggleTheme() {
   themeStore.toggleTheme()
 }
 
 function handleLogout() {
-  updateStream?.close()
+  closeStream?.()
   auth.logout()
   router.push('/login')
 }
@@ -951,6 +1030,42 @@ function handleLogout() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius);
+  color: var(--color-text-secondary);
+}
+
+.bell:hover {
+  background-color: var(--hover-surface);
+  color: var(--color-text-primary);
+}
+
+.bell-count,
+.nav-badge {
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 0.3125rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-danger);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.125rem;
+  text-align: center;
+}
+
+.bell-count {
+  position: absolute;
+  top: 0.125rem;
+  right: 0.0625rem;
 }
 
 .update-pill {

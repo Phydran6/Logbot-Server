@@ -43,7 +43,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import logparse
+from . import logparse, secretbox
 from .models import Setting
 
 logger = logging.getLogger("logbot.ai")
@@ -84,6 +84,19 @@ PROVIDERS: Dict[str, dict] = {
         "default_model": "gpt-4o-mini",
         "endpoint": "https://api.openai.com/v1/chat/completions",
         "key_url": "https://platform.openai.com/api-keys",
+    },
+    "openrouter": {
+        "label": "OpenRouter — viele Modelle, ein Zugang",
+        "label_en": "OpenRouter — many models, one account",
+        "hint": ("Über OpenRouter stehen Claude, GPT, Gemini, Llama und viele weitere Modelle "
+                 "bereit - auch kostenlose. Einrichten per Assistent: mit dem OpenRouter-Konto "
+                 "anmelden, Modell auswählen, fertig."),
+        "needs_key": True,
+        "needs_url": False,
+        "default_model": "anthropic/claude-sonnet-4.5",
+        "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+        "key_url": "https://openrouter.ai/settings/keys",
+        "wizard": True,
     },
     "n8n_external": {
         "label": "n8n — extern per Webhook",
@@ -150,6 +163,8 @@ async def load_config(db: AsyncSession) -> dict:
         config.update({k: v for k, v in row.value.items() if k in DEFAULT_CONFIG})
     if config["provider"] not in PROVIDERS:
         config["provider"] = "off"
+    # Im Speicher im Klartext, in der Datenbank verschluesselt (app/secretbox.py).
+    config["api_key"] = secretbox.open_(config.get("api_key") or "")
     return config
 
 
@@ -190,15 +205,21 @@ async def save_config(db: AsyncSession, incoming: dict) -> dict:
     if not config["model"] and spec.get("default_model"):
         config["model"] = spec["default_model"]
 
-    row = (await db.execute(select(Setting).where(Setting.key == SETTING_KEY))).scalar_one_or_none()
-    if row:
-        row.value = config
-    else:
-        db.add(Setting(key=SETTING_KEY, value=config,
-                       description="Anbindung an eine KI zur Log-Auswertung"))
-    await db.commit()
+    await _store(db, config)
     logger.warning("KI-Anbindung gespeichert: %s", provider)
     return public_config(config)
+
+
+async def _store(db: AsyncSession, config: dict) -> None:
+    stored = dict(config)
+    stored["api_key"] = secretbox.seal(config.get("api_key") or "")
+    row = (await db.execute(select(Setting).where(Setting.key == SETTING_KEY))).scalar_one_or_none()
+    if row:
+        row.value = stored
+    else:
+        db.add(Setting(key=SETTING_KEY, value=stored,
+                       description="Anbindung an eine KI zur Log-Auswertung"))
+    await db.commit()
 
 
 def public_config(config: dict) -> dict:
@@ -221,7 +242,8 @@ def catalog() -> List[dict]:
          "key_hint": spec.get("key_hint", ""),
          # 'local' heisst: die Logzeilen verlassen den Server nicht, sofern der
          # Dienst hier laeuft. Die Oberflaeche hebt das hervor.
-         "local": bool(spec.get("local"))}
+         "local": bool(spec.get("local")),
+         "wizard": bool(spec.get("wizard"))}
         for key, spec in PROVIDERS.items()
     ]
 
@@ -336,6 +358,100 @@ async def _ask_openai(config: dict, payload: dict) -> dict:
     text = ((choices[0].get("message") or {}).get("content") or "").strip()
     return {"answer": text, "model": data.get("model", model),
             "usage": data.get("usage", {})}
+
+
+def openrouter_headers(config: dict) -> dict:
+    """Kopfzeilen fuer OpenRouter. Referer/Titel sind freiwillig (Zuordnung bei OpenRouter)."""
+    return {"Authorization": f"Bearer {config['api_key']}", "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/Phydran6/Logbot-Server", "X-Title": "LogBot"}
+
+
+async def _ask_openrouter(config: dict, payload: dict) -> dict:
+    """OpenRouter spricht dieselbe Sprache wie OpenAI - nur mit Modellnamen wie
+    'anthropic/claude-sonnet-4.5' oder 'meta-llama/llama-3.3-70b-instruct:free'."""
+    spec = PROVIDERS["openrouter"]
+    model = config.get("model") or spec["default_model"]
+    system = config.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
+    question = payload["question"] or "Was fällt an diesen Logs auf?"
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user",
+             "content": (f"{question}\n\nHier sind {payload['count']} Logzeilen:\n\n"
+                         f"{_as_text(payload)}")},
+        ],
+    }
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        response = await client.post(spec["endpoint"], json=body, headers=openrouter_headers(config))
+        data = _json_or_error(response, "OpenRouter")
+    choices = data.get("choices") or [{}]
+    text = ((choices[0].get("message") or {}).get("content") or "").strip()
+    return {"answer": text, "model": data.get("model", model), "usage": data.get("usage", {})}
+
+
+OPENROUTER_AUTH = "https://openrouter.ai/auth"
+OPENROUTER_KEYS = "https://openrouter.ai/api/v1/auth/keys"
+OPENROUTER_MODELS = "https://openrouter.ai/api/v1/models"
+_models_cache: Dict[str, Any] = {"at": 0.0, "items": []}
+
+
+async def openrouter_models(force: bool = False) -> List[dict]:
+    """Die Modellliste von OpenRouter (oeffentlich, ohne Schluessel), 1 h gemerkt."""
+    if not force and _models_cache["items"] and time.time() - _models_cache["at"] < 3600:
+        return _models_cache["items"]
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(OPENROUTER_MODELS)
+    if response.status_code >= 400:
+        raise RuntimeError(f"OpenRouter-Modellliste nicht abrufbar (HTTP {response.status_code}).")
+    items = []
+    for entry in (response.json() or {}).get("data") or []:
+        pricing = entry.get("pricing") or {}
+        try:
+            prompt = float(pricing.get("prompt") or 0) * 1_000_000
+            completion = float(pricing.get("completion") or 0) * 1_000_000
+        except (TypeError, ValueError):
+            prompt = completion = 0.0
+        items.append({
+            "id": entry.get("id"), "name": entry.get("name") or entry.get("id"),
+            "context": entry.get("context_length"),
+            "free": entry.get("id", "").endswith(":free") or (prompt == 0 and completion == 0),
+            "price_in": round(prompt, 3), "price_out": round(completion, 3),
+            "description": (entry.get("description") or "")[:300],
+        })
+    items.sort(key=lambda m: (not m["free"], m["name"].lower()))
+    _models_cache.update({"at": time.time(), "items": items})
+    return items
+
+
+async def openrouter_exchange(code: str, verifier: str) -> str:
+    """Tauscht den Code aus der OpenRouter-Anmeldung gegen einen API-Schluessel."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(OPENROUTER_KEYS, json={
+            "code": code, "code_verifier": verifier, "code_challenge_method": "S256"})
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            detail = (response.json().get("error") or {}).get("message") or ""
+        except (ValueError, AttributeError):
+            detail = response.text[:200]
+        raise RuntimeError(f"OpenRouter hat die Anmeldung nicht angenommen: {detail or response.status_code}")
+    key = (response.json() or {}).get("key")
+    if not key:
+        raise RuntimeError("OpenRouter hat keinen Schlüssel geschickt.")
+    return key
+
+
+async def openrouter_key_info(api_key: str) -> dict:
+    """Guthaben/Limit des Schluessels - damit man sieht, ob er funktioniert."""
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get("https://openrouter.ai/api/v1/key",
+                                    headers={"Authorization": f"Bearer {api_key}"})
+    if response.status_code >= 400:
+        raise RuntimeError("Der OpenRouter-Schlüssel wurde abgelehnt.")
+    data = (response.json() or {}).get("data") or {}
+    return {"label": data.get("label"), "usage": data.get("usage"), "limit": data.get("limit"),
+            "is_free_tier": data.get("is_free_tier")}
 
 
 async def _ask_openwebui(config: dict, payload: dict) -> dict:
@@ -503,6 +619,7 @@ async def ask(config: dict, logs: List[Any], question: str = "") -> dict:
         "anthropic": _ask_anthropic,
         "openai": _ask_openai,
         "openwebui": _ask_openwebui,
+        "openrouter": _ask_openrouter,
         "n8n_external": _ask_n8n,
         "n8n_local": _ask_n8n,
     }

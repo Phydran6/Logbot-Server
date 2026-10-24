@@ -2,6 +2,24 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.23.12.00.00
+
+### Changed
+- **Menü neu geordnet** – nur noch links, höchstens drei Ebenen, nach Fragen statt Technik: Überwachung · Meldungen · Auswertung · Agents · Verwaltung · Mein Konto · System · Hilfe. Im Inhaltsbereich gibt es **keine Auswahlleisten** mehr: die Reiter der Einstellungsseite und die Unterreiter „Reverse Proxy/DNS“ sind Unterpunkte im Baum. Alte Adressen leiten weiter.
+- **Geräte als Baum:** VM → Compose-Projekt → Container, mit Zustand, Image, Dienst und Docker-/Compose-Fassung. In Logliste und Geräteansicht steht ein Container als `vm › ▣ container`, mit Verweis auf seine VM; die VM-Ansicht kann die Logs ihrer Container einblenden.
+- Ereignisströme, Terminal und Sicherungs-Downloads holen vorher ein Kurzzeit-Ticket statt das Zugangstoken in die Adresse zu schreiben; Ströme bauen sich danach mit frischem Ticket selbst neu auf.
+- Build mit Node 24 (Node 20 ist seit April 2026 ohne Sicherheitsupdates) und Vite 7.3 (Vite 5 wird nicht mehr gepflegt); `postcss-selector-parser` auf ≥ 7.1.6 gezogen (GHSA-rj75-hqrm-r3gf). `npm audit`: 0.
+- nginx sendet eine Content-Security-Policy (Skripte nur vom eigenen Server) und weitere Schutz-Kopfzeilen.
+
+### Added
+- **Meldungen:** Eingang mit Glocke und Zahl der ungelesenen, Regeln, Kanäle **E-Mail** (Assistent: Google per App-Passwort oder Anmeldung, Microsoft 365 mit automatischer App-Registrierung, Outlook.com, Anbieter-Vorlagen, Postfix), **Telegram** (Bot-Token, Verbindung per Link/QR-Code, Test) und **App & Push**.
+- **Agents:** Agent-Updates (Regel, Wartungsfenster, Stand je Gerät, „Jetzt aktualisieren“), Zugangsschlüssel (jetzt mit eigener Seite), Grenzen & Vorgaben (Aufbewahrung, Drossel).
+- **Mein Konto:** E-Mail-Adresse mit Bestätigungscode, Passwort ändern, überall abmelden. Fehlt die Adresse oder gilt noch ein vorgegebenes Passwort, fragt ein Dialog danach, bevor es weitergeht.
+- **Anmeldung:** „Benutzername oder E-Mail“, „Passwort vergessen?“ und die Seite zum Zurücksetzen.
+- **KI-Auswertung:** OpenRouter-Assistent (Anmeldung, Modellauswahl mit Preisen und Filter „kostenlos“).
+
+### Fixed
+- Die Einstellungsseite legte bei jedem Öffnen durch einen Administrator still einen neuen Schlüssel „global-agent“ an (veraltete Karte, die die neue Schlüsselverwaltung nicht kannte). Die Karte ist entfernt; „Zugangsschlüssel“ führt auf die richtige Verwaltung.
 ## 2026.10.18.22.00.00
 
 ### Fixed

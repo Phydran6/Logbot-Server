@@ -192,6 +192,9 @@
               Gehört zum Gerät <router-link class="link" :to="{ name: 'DeviceLogs', params: { hostname: selected.agent.hostname } }">{{ selected.agent.hostname }}</router-link>
               ({{ AGENT_TYPES[selected.agent.device_type] || selected.agent.device_type }}, erkannt an {{ MATCHED_BY[selected.agent.matched_by] }}).
               Letzte Logzeile: {{ formatTime(selected.agent.last_seen) }}.
+              <template v-if="selected.agent.agent_version"> Agent-Fassung {{ selected.agent.agent_version }}.</template>
+              <template v-if="selected.agent.containers"> Darauf laufen {{ selected.agent.containers }} Docker-Container – sie werden mit erfasst und hängen in der Geräteansicht unter diesem System.</template>
+              <template v-else-if="selected.agent.docker"> Docker ist installiert, aber es laufen keine Container.</template>
               <template v-if="selected.status === 'stale'"> Seitdem kommt nichts mehr.</template>
             </div>
           </div>
@@ -279,8 +282,8 @@
                 <p class="text-sm">Oder von Hand auf dem System ausführen:</p>
                 <CopyBlock :text="linuxCommand" @copy="copy" />
                 <p class="hint">
-                  <code>EINLADUNG</code> durch eine Einladung ersetzen: Verwaltung → Zugang &amp; Sicherheit →
-                  <router-link class="link" to="/settings/agents">Agent-Token</router-link>, Art „Einladung“.
+                  <code>EINLADUNG</code> durch eine Einladung ersetzen: Agents →
+                  <router-link class="link" to="/agents/tokens">Zugangsschlüssel</router-link>, Art „Einladung“.
                 </p>
               </template>
             </template>

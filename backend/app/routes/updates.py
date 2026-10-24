@@ -98,7 +98,8 @@ async def get_log(lines: int = Query(200, ge=10, le=2000), _=Depends(get_current
 
 
 @router.get("/log/stream")
-async def stream_log(token: str = Query(..., description="Access-Token eines Admins")):
+async def stream_log(ticket: str = Query("", description="Kurzzeit-Ticket (POST /api/auth/ticket)"),
+                 token: str = Query("", description="veraltet: Access-Token")):
     """Die Ausgabe des laufenden Updates — live, Zeile für Zeile.
 
     Ein Fortschrittsbalken sagt „43 %". Er sagt nicht, woran es gerade hängt,
@@ -109,7 +110,7 @@ async def stream_log(token: str = Query(..., description="Access-Token eines Adm
     Der Token kommt als Abfrageparameter, weil `EventSource` im Browser keine
     eigenen Kopfzeilen mitschicken kann. Geprüft wird er genauso streng.
     """
-    if not await admin_from_token(token):
+    if not await admin_from_token(ticket or token):
         raise HTTPException(status_code=401,
                             detail="Nicht angemeldet oder keine Administratorrechte.")
 
@@ -150,7 +151,8 @@ async def set_channel(data: ChannelRequest, _=Depends(get_current_admin)):
 # Sofortmeldung: Ereignisstrom und GitHub-Webhook
 # =============================================================================
 @router.get("/stream")
-async def stream(token: str = Query(..., description="Access-Token eines Admins")):
+async def stream(ticket: str = Query("", description="Kurzzeit-Ticket (POST /api/auth/ticket)"),
+                 token: str = Query("", description="veraltet: Access-Token")):
     """Offener Kanal zur Oberfläche (Server-Sent Events).
 
     Darüber kommt der Hinweis auf einen neuen Stand in dem Moment an, in dem der
@@ -159,7 +161,7 @@ async def stream(token: str = Query(..., description="Access-Token eines Admins"
     Der Token kommt als Abfrageparameter statt im Kopf: `EventSource` im Browser
     kann keine eigenen Kopfzeilen mitschicken. Geprüft wird er genauso streng.
     """
-    if not await admin_from_token(token):
+    if not await admin_from_token(ticket or token):
         raise HTTPException(status_code=401,
                             detail="Nicht angemeldet oder keine Administratorrechte.")
 

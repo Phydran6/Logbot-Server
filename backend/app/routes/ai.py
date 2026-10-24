@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
 # Changelog:   ../../../CHANGELOG/backend.md
@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import ai
+from .. import ai, aichat
 from ..auth import get_current_admin, get_current_user
 from ..database import get_db
 from ..models import Agent, Log
@@ -30,6 +30,18 @@ from ..models import Agent, Log
 logger = logging.getLogger("logbot.routes.ai")
 
 router = APIRouter(prefix="/api/ai", tags=["KI-Auswertung"])
+
+
+class ChatMessage(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., max_length=8000)
+
+
+class ChatRequest(BaseModel):
+    """Ein Gespraech - der Verlauf liegt in der App und kommt jedes Mal mit."""
+    messages: List[ChatMessage] = Field(..., min_length=1, max_length=40)
+    hostname: Optional[str] = Field(default=None, max_length=255,
+                                    description="Gespraech auf ein Geraet beschraenken")
 
 
 class ConfigRequest(BaseModel):
@@ -214,3 +226,134 @@ async def analyze(data: AskRequest, db: AsyncSession = Depends(get_db),
 
     logger.info("KI-Auswertung von %s (%s Zeilen)", user.username, result.get("logs_sent"))
     return result
+
+
+@router.post("/chat")
+async def chat(data: ChatRequest, db: AsyncSession = Depends(get_db),
+               user=Depends(get_current_user)):
+    """Beantwortet eine Frage in Alltagssprache - die KI sieht selbst in den Logs nach.
+
+    Siehe app/aichat.py. Die Antwort sagt, wie viele Logzeilen von welchen
+    Geraeten an die KI gingen.
+    """
+    config = await _require_usage_permission(db, user)
+    try:
+        result = await aichat.chat(db, config, [m.model_dump() for m in data.messages],
+                                   hostname=data.hostname)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    logger.info("KI-Chat von %s: %s Zeilen, %s Werkzeugaufrufe (%s)", user.username,
+                result.get("logs_sent"), len(result.get("tools_used") or []), result.get("mode"))
+    return result
+
+
+# =============================================================================
+# OpenRouter-Assistent
+# =============================================================================
+# Ablauf: "Mit OpenRouter anmelden" -> OpenRouter fragt nach Zustimmung ->
+# zurueck auf /ai/openrouter mit ?code= -> der Server tauscht den Code (PKCE)
+# gegen einen API-Schluessel, der nur fuer LogBot gilt und bei OpenRouter
+# jederzeit widerrufbar ist. Das Geheimnis (code_verifier) verlaesst den
+# Server nie; der Browser bekommt nur die Herausforderung.
+import base64 as _b64
+import hashlib as _hashlib
+import secrets as _secrets
+import time as _time
+from urllib.parse import urlencode as _urlencode, urlsplit as _urlsplit
+
+_openrouter_flows: dict = {}
+
+
+class OpenRouterStart(BaseModel):
+    callback_url: str = Field(..., max_length=500)
+
+
+class OpenRouterExchange(BaseModel):
+    code: str = Field(..., min_length=4, max_length=500)
+    state: str = Field(..., min_length=10, max_length=100)
+    model: Optional[str] = Field(default=None, max_length=200)
+
+
+class OpenRouterKey(BaseModel):
+    api_key: str = Field(..., min_length=10, max_length=300)
+    model: Optional[str] = Field(default=None, max_length=200)
+
+
+async def _activate_openrouter(db: AsyncSession, api_key: str, model: Optional[str]) -> dict:
+    info = await ai.openrouter_key_info(api_key)
+    config = await ai.load_config(db)
+    incoming = {"provider": "openrouter", "api_key": api_key,
+                "model": (model or "").strip() or (config.get("model") if config.get("provider") == "openrouter" else "")
+                or ai.PROVIDERS["openrouter"]["default_model"]}
+    saved = await ai.save_config(db, incoming)
+    return {"config": saved, "key": info}
+
+
+@router.post("/openrouter/start")
+async def openrouter_start(data: OpenRouterStart, admin=Depends(get_current_admin)):
+    parts = _urlsplit(data.callback_url)
+    if parts.scheme not in ("http", "https") or not parts.netloc or parts.query or parts.fragment:
+        raise HTTPException(status_code=400, detail="Ungültige Rückkehradresse.")
+    now = _time.time()
+    for key in [k for k, v in _openrouter_flows.items() if v["at"] < now - 900]:
+        _openrouter_flows.pop(key, None)
+    verifier = _b64.urlsafe_b64encode(_secrets.token_bytes(48)).decode().rstrip("=")
+    challenge = _b64.urlsafe_b64encode(_hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    state = _secrets.token_urlsafe(24)
+    _openrouter_flows[state] = {"verifier": verifier, "user_id": admin.id, "at": now}
+    callback = f"{data.callback_url}?state={state}"
+    url = f"{ai.OPENROUTER_AUTH}?" + _urlencode({"callback_url": callback, "code_challenge": challenge,
+                                                  "code_challenge_method": "S256"})
+    return {"auth_url": url, "state": state}
+
+
+@router.post("/openrouter/exchange")
+async def openrouter_exchange(data: OpenRouterExchange, db: AsyncSession = Depends(get_db),
+                              admin=Depends(get_current_admin)):
+    flow = _openrouter_flows.pop(data.state, None)
+    if not flow or flow["user_id"] != admin.id or flow["at"] < _time.time() - 900:
+        raise HTTPException(status_code=410, detail="Die Anmeldung ist abgelaufen - bitte neu starten.")
+    try:
+        key = await ai.openrouter_exchange(data.code, flow["verifier"])
+        result = await _activate_openrouter(db, key, data.model)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    from .. import journal as _journal
+    await _journal.record(db, category="ai", event="openrouter.connected", level="notice",
+                          message="KI-Auswertung über OpenRouter eingerichtet (Anmeldung).",
+                          actor=admin.username)
+    return result
+
+
+@router.post("/openrouter/key")
+async def openrouter_key(data: OpenRouterKey, db: AsyncSession = Depends(get_db),
+                         admin=Depends(get_current_admin)):
+    try:
+        result = await _activate_openrouter(db, data.api_key.strip(), data.model)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from .. import journal as _journal
+    await _journal.record(db, category="ai", event="openrouter.connected", level="notice",
+                          message="KI-Auswertung über OpenRouter eingerichtet (Schlüssel).",
+                          actor=admin.username)
+    return result
+
+
+@router.get("/openrouter/models")
+async def openrouter_models(force: bool = Query(False), _=Depends(get_current_admin)):
+    try:
+        return {"items": await ai.openrouter_models(force=force)}
+    except (RuntimeError, Exception) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.put("/openrouter/model")
+async def openrouter_model(model: str = Query(..., min_length=3, max_length=200),
+                           db: AsyncSession = Depends(get_db), _=Depends(get_current_admin)):
+    config = await ai.load_config(db)
+    if config.get("provider") != "openrouter":
+        raise HTTPException(status_code=400, detail="OpenRouter ist nicht eingerichtet.")
+    return {"config": await ai.save_config(db, {"provider": "openrouter", "model": model.strip()})}

@@ -29,6 +29,7 @@ router = APIRouter(prefix="/api/logs", tags=["Logs"])
 # Columns die die Logliste wirklich braucht (reduziert I/O)
 LIST_COLUMNS = (
     Log.id,
+    Log.agent_id,
     Log.hostname,
     Log.ip_address,
     Log.timestamp,
@@ -162,7 +163,8 @@ LOG_CATEGORIES = {
     "container": {
         "label": "Container",
         "facilities": [],
-        "sources": ["docker", "dockerd", "containerd", "podman", "kubelet"],
+        "sources": ["docker", "dockerd", "containerd", "podman", "kubelet",
+                    "container/stdout", "container/stderr", "docker-events"],
     },
     "cron": {
         "label": "Zeitpläne (Cron)",
@@ -223,6 +225,7 @@ def _category_condition(category: str):
 def _apply_filters(
     query, hostname, level, source, search, start_date, end_date,
     hostname_exact=False, min_severity=None, category=None, facility=None, device_type=None,
+    with_children=False,
 ):
     """Filter-Bedingungen auf eine Query anwenden.
 
@@ -237,7 +240,12 @@ def _apply_filters(
     source = source.strip() if source else None
     search = search.strip() if search else None
 
-    if hostname and hostname_exact:
+    if hostname and hostname_exact and with_children:
+        # Die VM und alle ihre Container ("docker01" und "docker01/...").
+        query = query.where(or_(
+            Log.hostname.ilike(_escape_like(hostname), escape=_LIKE_ESCAPE_CHAR),
+            Log.hostname.ilike(_escape_like(hostname) + "/%", escape=_LIKE_ESCAPE_CHAR)))
+    elif hostname and hostname_exact:
         # ilike ohne Wildcards: case-insensitiv und nutzt den Trigramm-Index.
         query = query.where(Log.hostname.ilike(_escape_like(hostname), escape=_LIKE_ESCAPE_CHAR))
     elif hostname:
@@ -284,6 +292,7 @@ async def list_logs(
     facility: Optional[int] = Query(None, ge=0, le=23, description="Syslog-Facility (0-23)"),
     device_type: Optional[str] = Query(None, description="Geräteart, z.B. linux_agent, windows_agent, syslog"),
     readable: bool = Query(False, description="Zeilen zusätzlich lesbar aufbereitet zurückgeben"),
+    with_children: bool = Query(False, description="Bei exaktem Hostnamen auch die Container der VM"),
     db: AsyncSession = Depends(get_db),
     _=Depends(get_current_user)
 ):
@@ -297,6 +306,7 @@ async def list_logs(
         hostname=hostname, level=level, source=source, search=search,
         start_date=start_date, end_date=end_date, hostname_exact=hostname_exact,
         min_severity=min_severity, category=category, facility=facility, device_type=device_type,
+        with_children=with_children,
     )
 
     # Nur wenn wirklich lesbar gewuenscht ist, kommen die dicken Spalten mit.

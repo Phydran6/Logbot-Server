@@ -265,7 +265,7 @@
           <thead :style="{ backgroundColor: 'var(--color-surface-elevated)' }">
             <tr>
               <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide" :style="{ color: 'var(--color-text-muted)' }">Zeit</th>
-              <th v-if="!lockedHostname" class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide" :style="{ color: 'var(--color-text-muted)' }">Host</th>
+              <th v-if="!lockedHostname || withChildren" class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide" :style="{ color: 'var(--color-text-muted)' }">Host</th>
               <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide" :style="{ color: 'var(--color-text-muted)' }">Level</th>
               <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide" :style="{ color: 'var(--color-text-muted)' }">Source</th>
               <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide" :style="{ color: 'var(--color-text-muted)' }">Nachricht</th>
@@ -282,15 +282,15 @@
               <td class="px-4 py-2.5 text-xs whitespace-nowrap font-mono" :style="{ color: 'var(--color-text-muted)' }">
                 {{ formatTime(log.timestamp) }}
               </td>
-              <td v-if="!lockedHostname" class="px-4 py-2.5 text-sm font-medium" :style="{ color: 'var(--color-text-primary)' }">
+              <td v-if="!lockedHostname || withChildren" class="px-4 py-2.5 text-sm font-medium" :style="{ color: 'var(--color-text-primary)' }">
                 <router-link
                   v-if="log.hostname"
                   :to="{ name: 'DeviceLogs', params: { hostname: log.hostname } }"
-                  class="hover:underline"
+                  class="hover:underline host-cell"
                   :style="{ color: 'var(--color-primary)' }"
-                  title="Geräte-Ansicht öffnen"
+                  :title="log.hostname.includes('/') ? `Container ${log.hostname.split('/')[1]} auf ${log.hostname.split('/')[0]}` : 'Geräte-Ansicht öffnen'"
                   @click.stop
-                >{{ log.hostname }}</router-link>
+                ><template v-if="log.hostname.includes('/')"><span class="host-parent">{{ log.hostname.split('/')[0] }} ›</span> <span class="host-container">▣ {{ log.hostname.split('/').slice(1).join('/') }}</span></template><template v-else>{{ log.hostname }}</template></router-link>
                 <span v-else>–</span>
               </td>
               <td class="px-4 py-2.5">
@@ -494,6 +494,8 @@ const props = defineProps({
   // Fixiert die Liste auf genau ein Geraet (exakter Hostname-Vergleich).
   // Leer = alle Hosts, Host-Filter und Host-Spalte werden dann angezeigt.
   lockedHostname: { type: String, default: '' },
+  // Bei fixiertem Host zusaetzlich die Logs seiner Container ("vm/container").
+  withChildren: { type: Boolean, default: false },
   // Filter zusaetzlich in der URL spiegeln (teilbare Links, Reload-fest).
   syncUrl: { type: Boolean, default: false },
 })
@@ -571,7 +573,7 @@ const quickRanges = [
 
 // ── Computed ─────────────────────────────────────────────────────────────────
 
-const columnCount = computed(() => (props.lockedHostname ? 4 : 5))
+const columnCount = computed(() => (props.lockedHostname && !props.withChildren ? 4 : 5))
 
 const cardStyle = computed(() => ({
   backgroundColor: 'var(--color-surface)',
@@ -629,7 +631,7 @@ onMounted(() => {
 })
 
 // Geraetewechsel (z.B. /devices/a -> /devices/b) ohne Neuaufbau der Komponente
-watch(() => props.lockedHostname, () => {
+watch(() => [props.lockedHostname, props.withChildren], () => {
   page.value = 1
   loadLogs()
 })
@@ -709,6 +711,7 @@ function buildFilterParams() {
   if (props.lockedHostname) {
     p.append('hostname', props.lockedHostname)
     p.append('hostname_exact', 'true')
+    if (props.withChildren) p.append('with_children', 'true')
   } else if (f.hostname) {
     p.append('hostname', f.hostname)
   }
@@ -933,6 +936,15 @@ function levelBadge(level) {
 </script>
 
 <style scoped>
+.host-parent {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.host-container {
+  font-weight: 600;
+}
+
 .hover-row:hover {
   background-color: var(--color-surface-elevated);
 }

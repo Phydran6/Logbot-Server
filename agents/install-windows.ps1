@@ -36,7 +36,7 @@ Skriptblock, und der nimmt Parameter entgegen wie eine normale Funktion.
 
 param(
     # install | test | uninstall | menu (leer = Menue)
-    [ValidateSet("", "install", "test", "uninstall", "menu")]
+    [ValidateSet("", "install", "test", "uninstall", "menu", "upgrade")]
     [string]$Action = "",
 
     # Server
@@ -55,6 +55,7 @@ param(
     [ValidateSet("", "info", "warning", "error")]
     [string]$MinLevel = "",
     [switch]$Yes,                      # keine Rueckfragen, Standardwerte nehmen
+    [switch]$NoRemoteUpdate,           # Server darf diesen Agent nicht aktualisieren
     [switch]$PurgeServer               # beim Deinstallieren auch auf dem Server abraeumen
 )
 
@@ -91,7 +92,7 @@ function Read-Answer {
 $INSTALL_DIR = "$env:ProgramData\LogBot-Agent"
 $SCRIPT_NAME = "LogBotAgent.ps1"
 $TASK_NAME = "LogBotAgent"
-$AGENT_VERSION = "2026.10.11.20.00.00"
+$AGENT_VERSION = "2026.10.23.12.00.00"
 
 # ==============================================================================
 # Hilfsfunktionen
@@ -257,6 +258,7 @@ $ServerIP = $Config.server_ip
 $ServerPort = $Config.server_port
 $AgentToken = $Config.agent_token
 $SkipTlsVerify = $Config.skip_tls_verify
+$AgentVersion = "__AGENT_VERSION__"
 $MinLevel = $Config.min_level
 $Hostname = if ($Config.hostname) { $Config.hostname } else { $env:COMPUTERNAME }
 
@@ -356,6 +358,7 @@ function Send-LogBatch {
     $body = @{
         hostname = $Hostname
         device_type = "windows_agent"
+        agent_version = $AgentVersion
         events = @($Events)
     } | ConvertTo-Json -Depth 4
 
@@ -435,6 +438,101 @@ function Read-Channel {
                 -MaxEvents $Max -Oldest -ErrorAction SilentlyContinue)
 }
 
+# ------------------------------------------------------------------------------
+# Heartbeat und Selbst-Aktualisierung
+# ------------------------------------------------------------------------------
+# Jede Minute meldet sich der Agent beim Server (Fassung, Faehigkeiten). Kommt
+# eine Update-Anweisung zurueck, wird das Paket geladen, gegen SHA-256 UND die
+# RSA-Unterschrift des Servers geprueft (Schluessel aus der Anmeldung) und ueber
+# eine einmalige geplante Aufgabe installiert - als SYSTEM, losgeloest von
+# diesem Prozess, der dabei neu gestartet wird.
+$PubKeyFile = Join-Path $PSScriptRoot "update_pubkey.xml"
+$RemoteUpdate = -not ($Config.remote_update -eq $false)
+$script:LastHeartbeat = (Get-Date).AddMinutes(-2)
+
+function Get-BaseUrl {
+    $url = Get-IngestUrl
+    if (-not $url) { return $null }
+    return ($url -replace '/api/agents/ingest$', '')
+}
+
+function Send-UpdateReport {
+    param([string]$State, [string]$Version = "", [string]$Message = "")
+    $base = Get-BaseUrl
+    if (-not $base) { return }
+    $body = @{ hostname = $Hostname; state = $State; version = $Version; message = $Message } | ConvertTo-Json -Compress
+    try { Invoke-RestMethod -Uri "$base/api/agents/update/report" -Method POST -Headers $Headers -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 20 @script:TlsParam | Out-Null } catch {}
+}
+
+function Test-UpdateSignature {
+    param([byte[]]$Content, [string]$SignatureB64)
+    if (-not (Test-Path $PubKeyFile)) { return $null }
+    try {
+        $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
+        $rsa.FromXmlString((Get-Content $PubKeyFile -Raw))
+        $sig = [Convert]::FromBase64String($SignatureB64)
+        return $rsa.VerifyData($Content, "SHA256", $sig)
+    } catch {
+        return $false
+    }
+}
+
+function Invoke-SelfUpdate {
+    param($Update)
+    $version = "$($Update.version)"
+    if (-not $RemoteUpdate) { Send-UpdateReport -State "failed" -Version $version -Message "Fernaktualisierung ist auf diesem Geraet abgeschaltet."; return }
+    $base = Get-BaseUrl
+    Send-UpdateReport -State "downloading" -Version $version
+    $target = Join-Path $PSScriptRoot "update"
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
+    $file = Join-Path $target "install-windows.ps1"
+    try {
+        Invoke-WebRequest -Uri ($base + $Update.url) -Headers @{ "Authorization" = "Bearer $AgentToken" } -OutFile $file -UseBasicParsing -TimeoutSec 120 @script:TlsParam
+    } catch {
+        Send-UpdateReport -State "failed" -Version $version -Message "Paket nicht ladbar: $_"; return
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($file)
+    $sha = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)).Replace("-", "").ToLower()
+    if ($sha -ne "$($Update.sha256)") {
+        Remove-Item $file -Force -ErrorAction SilentlyContinue
+        Send-UpdateReport -State "failed" -Version $version -Message "Pruefsumme stimmt nicht - Paket verworfen."; return
+    }
+    $verified = Test-UpdateSignature -Content $bytes -SignatureB64 "$($Update.signature)"
+    if ($verified -eq $false -or ($verified -eq $null -and $SkipTlsVerify)) {
+        Remove-Item $file -Force -ErrorAction SilentlyContinue
+        $why = if ($verified -eq $false) { "Unterschrift ungueltig - Paket verworfen." } else { "Unterschrift nicht pruefbar und TLS ohne Pruefung - abgelehnt. Agent einmal neu installieren." }
+        Send-UpdateReport -State "failed" -Version $version -Message $why; return
+    }
+    Send-UpdateReport -State "installing" -Version $version
+    try {
+        $taskName = "LogBotAgentUpgrade"
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$file`" -Action upgrade -Yes"
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Description "LogBot Agent Update auf $version" | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+    } catch {
+        Send-UpdateReport -State "failed" -Version $version -Message "Update-Aufgabe nicht startbar: $_"
+    }
+}
+
+function Send-Heartbeat {
+    $base = Get-BaseUrl
+    if (-not $base) { return }
+    $os = ""
+    try { $os = (Get-CimInstance Win32_OperatingSystem).Caption } catch {}
+    $body = @{
+        hostname = $Hostname; device_type = "windows_agent"; agent_version = $AgentVersion
+        os = $os; remote_update = $RemoteUpdate
+        capabilities = @("heartbeat", "self-update", "signed-update")
+    } | ConvertTo-Json -Compress
+    try {
+        $response = Invoke-RestMethod -Uri "$base/api/agents/heartbeat" -Method POST -Headers $Headers -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 30 @script:TlsParam
+        Save-AgentId -Response $response
+        if ($response.update) { Invoke-SelfUpdate -Update $response.update }
+    } catch {}
+}
+
 # Alle verfuegbaren Event Logs ermitteln
 function Get-ActiveLogNames {
     $logs = Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
@@ -449,6 +547,7 @@ Write-Host "Ermittle alle verfuegbaren Event Logs..."
 
 $AllLogs = Get-ActiveLogNames
 Write-Host "Gefunden: $($AllLogs.Count) aktive Log-Kanaele"
+Write-Host "Agent-Fassung: $AgentVersion"
 Write-Host "---"
 
 $Positions = Load-Positions
@@ -457,6 +556,10 @@ $Failures = 0
 
 while ($true) {
     $Dirty = $false
+    if ((Get-Date) -gt $script:LastHeartbeat.AddSeconds(60)) {
+        $script:LastHeartbeat = Get-Date
+        Send-Heartbeat
+    }
 
     # Log-Kanaele regelmaessig aktualisieren (neue Logs koennen hinzukommen)
     # und geleerte Protokolle erkennen: dort beginnt die RecordId neu, die
@@ -719,6 +822,10 @@ function Install-Agent {
                     -Headers @{ "Authorization" = "Bearer $AgentToken"; "Content-Type" = "application/json" } `
                     -Body $EnrollBody
 
+                if ($EnrollResult.update_pubkey_xml) {
+                    # Damit prueft der Agent spaeter jedes Update auf die Unterschrift des Servers.
+                    Set-Content -Path "$INSTALL_DIR\update_pubkey.xml" -Value $EnrollResult.update_pubkey_xml -Encoding ascii
+                }
                 if ($EnrollResult.token) {
                     $AgentToken = $EnrollResult.token
                     Write-LogSuccess "Eigener Geraeteschluessel erhalten - der mitgegebene wird nicht gespeichert."
@@ -778,7 +885,7 @@ function Install-Agent {
 
     # --- Agent Script speichern ---
     if ($Mode -eq "https") {
-        $AgentScriptHttps | Set-Content "$INSTALL_DIR\$SCRIPT_NAME" -Encoding UTF8
+        $AgentScriptHttps.Replace("__AGENT_VERSION__", $AGENT_VERSION) | Set-Content "$INSTALL_DIR\$SCRIPT_NAME" -Encoding UTF8
     } else {
         $AgentScriptSyslog | Set-Content "$INSTALL_DIR\$SCRIPT_NAME" -Encoding UTF8
     }
@@ -797,6 +904,7 @@ function Install-Agent {
     if ($Mode -eq "https") {
         $Config.agent_token = $AgentToken
         $Config.skip_tls_verify = $SkipTlsVerify
+        $Config.remote_update = -not $NoRemoteUpdate.IsPresent
     }
 
     $Config | ConvertTo-Json | Set-Content "$INSTALL_DIR\config.json" -Encoding UTF8
@@ -1154,6 +1262,47 @@ function Uninstall-Agent {
 }
 
 # ==============================================================================
+# Upgrade (vom Agent selbst angestossen)
+# ==============================================================================
+# Laeuft als eigene geplante Aufgabe (LogBotAgentUpgrade). Konfiguration und
+# Schluessel bleiben, ersetzt werden Agent-Skript und Aufgabe. Laeuft die neue
+# Fassung nicht an, wird die alte zurueckgelegt und das gemeldet.
+function Invoke-Upgrade {
+    $ConfigFile = "$INSTALL_DIR\config.json"
+    if (-not (Test-Path $ConfigFile)) { Write-LogError "Kein Agent installiert."; exit 1 }
+    $Config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+    if ($Config.mode -ne "https") { Write-LogError "Nur der HTTPS-Agent aktualisiert sich selbst."; exit 1 }
+
+    $scriptPath = "$INSTALL_DIR\$SCRIPT_NAME"
+    Copy-Item $scriptPath "$scriptPath.bak" -Force -ErrorAction SilentlyContinue
+    Stop-ScheduledTask -TaskName $TASK_NAME -ErrorAction SilentlyContinue
+    Stop-AgentProcesses
+    $AgentScriptHttps.Replace("__AGENT_VERSION__", $AGENT_VERSION) | Set-Content $scriptPath -Encoding UTF8
+    Install-ScheduledTask
+    Start-ScheduledTask -TaskName $TASK_NAME
+    Start-Sleep -Seconds 15
+
+    $base = if ($Config.server_port -eq 443) { "https://$($Config.server_fqdn)" } else { "https://$($Config.server_fqdn):$($Config.server_port)" }
+    if ($Config.skip_tls_verify) { [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true } }
+    $hdr = @{ "Authorization" = "Bearer $($Config.agent_token)"; "Content-Type" = "application/json" }
+    $state = (Get-ScheduledTask -TaskName $TASK_NAME).State
+    if ($state -eq "Running") {
+        Remove-Item "$scriptPath.bak" -Force -ErrorAction SilentlyContinue
+        $body = @{ hostname = $env:COMPUTERNAME; state = "done"; version = $AGENT_VERSION; message = "Aktualisiert auf $AGENT_VERSION." } | ConvertTo-Json -Compress
+        try { Invoke-RestMethod -Uri "$base/api/agents/update/report" -Method POST -Headers $hdr -Body $body -TimeoutSec 20 | Out-Null } catch {}
+        Write-LogSuccess "Agent laeuft in Fassung $AGENT_VERSION"
+    } else {
+        Write-LogError "Neue Fassung laeuft nicht ($state) - nehme die alte zurueck."
+        Stop-ScheduledTask -TaskName $TASK_NAME -ErrorAction SilentlyContinue
+        Move-Item "$scriptPath.bak" $scriptPath -Force -ErrorAction SilentlyContinue
+        Start-ScheduledTask -TaskName $TASK_NAME
+        $body = @{ hostname = $env:COMPUTERNAME; state = "rolled_back"; version = $AGENT_VERSION; message = "Neue Fassung startete nicht ($state), alte wiederhergestellt." } | ConvertTo-Json -Compress
+        try { Invoke-RestMethod -Uri "$base/api/agents/update/report" -Method POST -Headers $hdr -Body $body -TimeoutSec 20 | Out-Null } catch {}
+    }
+    Unregister-ScheduledTask -TaskName "LogBotAgentUpgrade" -Confirm:$false -ErrorAction SilentlyContinue
+}
+
+# ==============================================================================
 # Zusammenfassung
 # ==============================================================================
 
@@ -1218,6 +1367,7 @@ if ([string]::IsNullOrWhiteSpace($Action) -or $Action -eq "menu") {
 
 switch ($Action) {
     "uninstall" { Uninstall-Agent }
+    "upgrade"   { Invoke-Upgrade }
     "test"      { Send-TestMessage }
     "install"   {
         Install-Agent
