@@ -1,0 +1,77 @@
+name: Release
+
+# Ein Tag v<Version> wird zum GitHub-Release: Titel "LogBot <Version>", Text
+# aus dem passenden Abschnitt in CHANGELOG/releases.md.
+#
+# Warum ein Workflow: Ein Release-Objekt anzulegen braucht einen GitHub-Token.
+# Hier liefert ihn GitHub selbst (GITHUB_TOKEN) - auf dem Rechner, der den Tag
+# pusht, genuegt damit ein SSH-Schluessel.
+#
+# Schon gepushte Tags ohne Release: Actions -> Release -> "Run workflow" und
+# den Tag eintragen.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Vorhandener Tag, z.B. v2026.10.25.18.00.00"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Tag bestimmen
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          tag="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          case "$tag" in v*) ;; *) echo "::error::Tag muss mit v beginnen: $tag"; exit 1 ;; esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Text aus CHANGELOG/releases.md holen
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          base="https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG/"
+          # Abschnitt "## <tag> (" bis zur naechsten "## v"-Zeile, ohne Ueberschrift.
+          awk -v head="## ${TAG} (" '
+            index($0, head) == 1 { inside = 1; next }
+            inside && /^## v/     { exit }
+            inside                { print }
+          ' CHANGELOG/releases.md > notes.md
+          # Relative Links zeigen sonst ins Leere: auf GitHub umschreiben.
+          sed -i -E "s#\]\((\.\./)?([A-Za-z0-9_./-]+\.md[^)]*)\)#](${base}\1\2)#g" notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::warning::Kein Abschnitt fuer ${TAG} in CHANGELOG/releases.md"
+            echo "Siehe [Release-Verlauf](${base}releases.md)." > notes.md
+          fi
+          cat notes.md
+
+      - name: Release anlegen oder aktualisieren
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          title="LogBot ${TAG#v}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$title" --notes-file notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --notes-file notes.md --verify-tag --latest
+          fi

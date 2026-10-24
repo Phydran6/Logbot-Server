@@ -13,14 +13,13 @@ Der Ablauf, und warum er so aussieht:
    SHA-256-Abdruck (`code_challenge`) mit der Anfrage. Das Geheimnis verlaesst
    das Handy erst beim Einloesen.
 2. Der Server verschickt einen Link. Gespeichert wird nur sein Abdruck.
-3. **Gleiches Geraet:** Der Link fuehrt ueber eine kleine Seite zurueck in die
-   App, die ihn zusammen mit dem Geheimnis einloest. Wer nur die Mail abfaengt,
-   hat das Geheimnis nicht - der Link allein oeffnet nichts.
-4. **Anderes Geraet** (Mail am Rechner gelesen): Auf derselben Seite gibt man
-   den Code ein, den die App anzeigt. Die App fragt im Hintergrund nach und ist
-   angemeldet, sobald bestaetigt wurde. Der Code steht bewusst *nicht* in der
-   Mail: sonst koennte jeder, der eine Anmeldung fuer fremde Adressen anstoesst,
-   sie vom Empfaenger arglos bestaetigen lassen.
+3. Antippen des Links auf dem Handy oeffnet sofort die App: Android-Browser
+   bekommen eine Weiterleitung auf `intent://`, ohne Zwischenseite und ohne
+   zweiten Klick. Die App loest den Link zusammen mit dem Geheimnis ein. Wer
+   nur die Mail abfaengt, hat das Geheimnis nicht - der Link allein oeffnet
+   nichts.
+4. Eine Anmeldung im Browser gibt es hier bewusst nicht. Wird der Link an
+   einem Rechner geoeffnet, sagt eine kurze Seite, dass er aufs Handy gehoert.
 
 Was sonst noch gilt:
 
@@ -33,8 +32,7 @@ Was sonst noch gilt:
 * Ist MFA eingeschaltet, folgt nach dem Link der zweite Faktor wie beim
   Passwort - der Link ersetzt das Passwort, nicht den zweiten Faktor.
 * Ein GET auf den Link loest nichts aus. Mailprogramme und Virenscanner rufen
-  Links vorab auf; wuerde das schon bestaetigen, waere die Anmeldung erledigt,
-  bevor jemand hingesehen hat.
+  Links vorab auf; eingeloest wird nur von der App, mit dem Geheimnis.
 """
 
 import asyncio
@@ -48,8 +46,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,7 +67,6 @@ router = APIRouter(prefix="/api/auth/magic-link", tags=["Auth"])
 
 TTL_MINUTES = 15
 POLL_SECONDS = 3
-MAX_CODE_ATTEMPTS = 5
 # So viele offene Anfragen pro Konto in einem Zeitfenster - danach geht keine
 # weitere Mail raus. Sonst laesst sich ein Postfach per Knopfdruck fluten.
 MAX_OPEN_PER_USER = 3
@@ -203,7 +200,8 @@ async def request_link(request: Request, data: LinkRequest, db: AsyncSession = D
         user_id=user.id if send else None,
         token_hash=_digest(token),
         code_challenge=data.code_challenge,
-        match_code=f"{secrets.randbelow(10_000):04d}",
+        # Die Spalte stammt aus der Fassung mit Bestaetigung im Browser.
+        match_code="",
         device_name=device,
         source_ip=source_ip,
         status="pending",
@@ -219,13 +217,12 @@ async def request_link(request: Request, data: LinkRequest, db: AsyncSession = D
             f"Hallo {user.username},\n\n"
             f"für dein Konto auf {base} wurde gerade die Anmeldung in der Logbot-App "
             f"angefordert — vom Gerät „{device}“ (IP {source_ip}).\n\n"
-            f"Zum Anmelden diesen Link auf dem Handy öffnen:\n\n{link}\n\n"
-            "Mail an einem anderen Gerät gelesen? Öffne den Link trotzdem und gib dort den "
-            "Code ein, den die App gerade anzeigt.\n\n"
-            f"Der Link gilt {TTL_MINUTES} Minuten und nur ein einziges Mal.\n\n"
+            f"Zum Anmelden diesen Link auf dem Handy antippen – die App öffnet sich und "
+            f"meldet dich an:\n\n{link}\n\n"
+            f"Der Link gilt {TTL_MINUTES} Minuten und nur ein einziges Mal, und nur auf dem "
+            "Handy, auf dem die Anmeldung angefordert wurde.\n\n"
             "Warst du das nicht? Dann ignoriere diese Mail. Ohne die App, die die Anmeldung "
-            "angefordert hat, und ohne den Code aus dieser App lässt sich mit dem Link nichts "
-            "anfangen — gib den Code nie an jemand anderen weiter.\n"
+            "angefordert hat, lässt sich mit dem Link nichts anfangen.\n"
         )
         _send_in_background(mail_config, user.email, "LogBot — Anmelde-Link für die App", body)
         await journal.record(
@@ -235,7 +232,6 @@ async def request_link(request: Request, data: LinkRequest, db: AsyncSession = D
 
     return {
         "request_id": row.request_id,
-        "match_code": row.match_code,
         "expires_in_seconds": TTL_MINUTES * 60,
         "poll_interval_seconds": POLL_SECONDS,
     }
@@ -252,10 +248,10 @@ async def _load(db: AsyncSession, request_id: str) -> Optional[MagicLinkRequest]
 @router.post("/exchange")
 @limiter.limit("40/minute")
 async def exchange(request: Request, data: ExchangeRequest, db: AsyncSession = Depends(get_db)):
-    """Loest den Link ein - oder meldet, dass noch nicht bestaetigt wurde.
+    """Loest den Link ein (Token aus dem Link plus Geheimnis der App).
 
     Antwort `status`:
-      * `pending`       - noch nicht bestaetigt, weiter nachfragen
+      * `pending`       - ohne Token: der Link wurde noch nicht geoeffnet
       * `ok`            - `access_token` liegt bei
       * `mfa_required`  - weiter mit `/api/auth/login/mfa` und `mfa_token`
     Abgelaufen, schon benutzt oder gesperrt: HTTP 410.
@@ -278,7 +274,7 @@ async def exchange(request: Request, data: ExchangeRequest, db: AsyncSession = D
     if data.token:
         if not hmac.compare_digest(_digest(data.token), row.token_hash):
             raise HTTPException(status_code=401, detail="Der Link ist unvollständig oder falsch.")
-    elif row.status != "approved":
+    else:
         return {"status": "pending", "poll_interval_seconds": POLL_SECONDS}
 
     # Unbekannte Adresse: verhaelt sich wie eine Anfrage, die nie bestaetigt
@@ -320,7 +316,7 @@ _PAGE = """<!doctype html>
 <title>LogBot — Anmeldung</title>
 <style>
 :root {{ color-scheme: light dark; --bg:#f6f7fb; --card:#fff; --fg:#1a1c1e; --muted:#5b6170;
-        --accent:#2d7ff9; --err:#c62828; --ok:#1b8a4a; --border:#dde1ea; }}
+        --accent:#2d7ff9; --border:#dde1ea; }}
 @media (prefers-color-scheme: dark) {{ :root {{ --bg:#000820; --card:#10182e; --fg:#e2e2e6;
         --muted:#9aa3b5; --border:#24304d; }} }}
 body {{ margin:0; background:var(--bg); color:var(--fg);
@@ -328,15 +324,9 @@ body {{ margin:0; background:var(--bg); color:var(--fg);
 main {{ max-width:440px; margin:0 auto; padding:32px 16px; }}
 .card {{ background:var(--card); border:1px solid var(--border); border-radius:14px;
         padding:22px; margin-bottom:16px; }}
-h1 {{ font-size:22px; margin:0 0 8px; }} h2 {{ font-size:17px; margin:0 0 6px; }}
+h1 {{ font-size:22px; margin:0 0 8px; }}
 p {{ margin:6px 0; }} .muted {{ color:var(--muted); font-size:14px; }}
-.btn {{ display:block; width:100%; box-sizing:border-box; text-align:center; padding:14px;
-       border-radius:10px; border:0; background:var(--accent); color:#fff; font-size:16px;
-       font-weight:600; text-decoration:none; cursor:pointer; margin-top:12px; }}
-input {{ width:100%; box-sizing:border-box; font-size:24px; letter-spacing:8px; text-align:center;
-        padding:10px; border-radius:10px; border:1px solid var(--border); background:transparent;
-        color:var(--fg); margin-top:10px; }}
-.err {{ color:var(--err); }} .ok {{ color:var(--ok); }}
+a {{ color:var(--accent); }}
 </style></head><body><main>{body}</main></body></html>"""
 
 
@@ -346,7 +336,7 @@ def _page(body: str, code: int = 200) -> HTMLResponse:
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; "
         "base-uri 'none'; frame-ancestors 'none'")
     return response
 
@@ -369,79 +359,42 @@ async def _valid_row(db: AsyncSession, rid: str, token: str) -> Optional[MagicLi
     return row
 
 
-@router.get("/open", response_class=HTMLResponse, include_in_schema=False)
+def _is_android(request: Request) -> bool:
+    return "android" in (request.headers.get("user-agent") or "").lower()
+
+
+@router.get("/open", include_in_schema=False)
 @limiter.limit("30/minute")
-async def open_link(request: Request, rid: str = "", t: str = "",
+async def open_link(request: Request, rid: str = "", t: str = "", fallback: int = 0,
                     db: AsyncSession = Depends(get_db)):
-    """Zeigt die Seite zum Link. Loest selbst nichts aus (siehe Moduldoku)."""
+    """Fuehrt vom Link in der Mail direkt in die App. Loest selbst nichts ein.
+
+    Android: Weiterleitung auf `intent://` - der Browser oeffnet die App sofort,
+    ohne Zwischenseite. Ist die App nicht installiert, schickt Chrome hierher
+    zurueck (`fallback=1`), und es gibt eine kurze Erklaerung statt einer
+    Endlosschleife. Andere Geraete: Hinweis, dass der Link aufs Handy gehoert.
+    """
     row = await _valid_row(db, rid, t)
     if row is None:
         return _invalid_page()
 
     query = f"rid={quote(rid)}&t={quote(t)}"
-    # Chrome auf Android oeffnet Apps zuverlaessig ueber intent://, andere
-    # Browser ueber das eigene Schema.
-    intent_url = f"intent://magic-login?{query}#Intent;scheme={APP_SCHEME};package={APP_PACKAGE};end"
+    if _is_android(request) and not fallback:
+        back = quote(f"{await _base_url(db)}/api/auth/magic-link/open?{query}&fallback=1", safe="")
+        target = (f"intent://magic-login?{query}#Intent;scheme={APP_SCHEME};package={APP_PACKAGE};"
+                  f"S.browser_fallback_url={back};end")
+        response = RedirectResponse(target, status_code=302)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    if fallback:
+        text = ("<p>Die Logbot-App ist auf diesem Gerät nicht installiert – oder der Link wurde "
+                "nicht auf dem Handy geöffnet, auf dem die Anmeldung angefordert wurde.</p>")
+    else:
+        text = ("<p>Dieser Link meldet dich in der <b>Logbot-App</b> an. Öffne ihn auf dem "
+                "Handy, auf dem du die Anmeldung angefordert hast – dort öffnet sich die App "
+                "von selbst.</p>")
     scheme_url = f"{APP_SCHEME}://magic-login?{query}"
-    requested = row.created_at.strftime("%d.%m.%Y %H:%M") + " UTC" if row.created_at else ""
-    body = f"""
-<div class="card">
-  <h1>Anmeldung in der Logbot-App</h1>
-  <p>Angefordert von <b>{html.escape(row.device_name or "unbekanntes Gerät")}</b>
-     <span class="muted">(IP {html.escape(row.source_ip or "?")}, {html.escape(requested)})</span></p>
-  <a class="btn" href="{html.escape(intent_url)}">In der App anmelden</a>
-  <p class="muted">Klappt der Knopf nicht? <a href="{html.escape(scheme_url)}">Alternativer Link</a></p>
-</div>
-<div class="card">
-  <h2>Mail auf einem anderen Gerät geöffnet?</h2>
-  <p class="muted">Gib den vierstelligen Code ein, den die App gerade anzeigt.
-     Nur bestätigen, wenn <b>du selbst</b> die Anmeldung eben angefordert hast.</p>
-  <form method="post" action="approve">
-    <input type="hidden" name="rid" value="{html.escape(rid)}">
-    <input type="hidden" name="t" value="{html.escape(t)}">
-    <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{{4}}"
-           maxlength="4" required aria-label="Code aus der App">
-    <button class="btn" type="submit">Anmeldung bestätigen</button>
-  </form>
-</div>"""
-    return _page(body)
-
-
-@router.post("/approve", response_class=HTMLResponse, include_in_schema=False)
-@limiter.limit("10/minute")
-async def approve(request: Request, rid: str = Form(""), t: str = Form(""),
-                  code: str = Form(""), db: AsyncSession = Depends(get_db)):
-    """Bestaetigt die Anmeldung fuer das andere Geraet - mit dem Code aus der App."""
-    row = await _valid_row(db, rid, t)
-    if row is None:
-        return _invalid_page()
-
-    if not hmac.compare_digest((code or "").strip(), row.match_code):
-        row.attempts = (row.attempts or 0) + 1
-        blocked = row.attempts >= MAX_CODE_ATTEMPTS
-        if blocked:
-            row.status = "blocked"
-        await db.commit()
-        await journal.record(
-            db, category="auth", event="magiclink.code_failed", level="warning",
-            message="Falscher Code beim Bestätigen eines Anmelde-Links"
-                    + (" — Anfrage gesperrt." if blocked else "."),
-            source_ip=real_client_ip(request), ok=False)
-        if blocked:
-            return _page('<div class="card"><h1 class="err">Gesperrt</h1>'
-                         '<p>Zu viele falsche Codes. Diese Anmeldung ist gesperrt — '
-                         'bitte in der App einen neuen Link anfordern.</p></div>', 403)
-        left = MAX_CODE_ATTEMPTS - row.attempts
-        return _page(f'<div class="card"><h1 class="err">Code stimmt nicht</h1>'
-                     f'<p>Noch {left} Versuch(e). Gehe zurück und gib den Code ein, den die App '
-                     f'anzeigt.</p></div>', 400)
-
-    row.status = "approved"
-    row.approved_at = datetime.utcnow()
-    await db.commit()
-    await journal.record(
-        db, category="auth", event="magiclink.approved",
-        message=f"Anmelde-Link für '{row.device_name}' bestätigt.",
-        source_ip=real_client_ip(request), detail={"device": row.device_name})
-    return _page('<div class="card"><h1 class="ok">Bestätigt</h1>'
-                 '<p>Die App meldet sich jetzt an. Dieses Fenster kann geschlossen werden.</p></div>')
+    return _page(f'''<div class="card"><h1>Anmeldung in der Logbot-App</h1>{text}
+<p class="muted">Bist du schon auf dem richtigen Handy? <a href="{html.escape(scheme_url)}">App öffnen</a></p></div>''')

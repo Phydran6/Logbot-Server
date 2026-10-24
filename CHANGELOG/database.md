@@ -3,6 +3,11 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.25.20.00.00
+
+### Added
+- **Releases per Tag** (`.github/workflows/release.yml`). Ein Tag `v*` erzeugt das GitHub-Release; Titel „LogBot <Version>“, Text aus dem passenden Abschnitt in `CHANGELOG/releases.md` (relative Links auf GitHub umgeschrieben). Über „Run workflow“ mit Eingabe `tag` lässt sich ein schon gepushter Tag nachträglich veröffentlichen. Damit braucht ein Release keinen lokalen GitHub-Token mehr – ein Tag-Push per SSH genügt.
+
 ## 2026.10.23.12.00.00
 
 ### Security

@@ -2,6 +2,16 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.25.20.00.00
+
+### Changed
+- **Anmelde-Link (`/api/auth/magic-link/open`) leitet auf Android direkt in die App** (302 auf `intent://…` mit `S.browser_fallback_url`). Ist die App nicht installiert, kommt Chrome mit `fallback=1` zurück und bekommt eine Erklärung statt einer Schleife. Andere Geräte bekommen eine kurze Seite, dass der Link aufs Handy gehört.
+- `POST /api/auth/magic-link/request` gibt keinen `match_code` mehr zurück, die Mail erwähnt keinen Code mehr.
+- `GET /api/auth/app-qr`: Die Adresse im QR-Code kommt aus `publicurl` (öffentliche Adresse, Fallback `SITE_URL`) statt aus `SITE_URL` bzw. `X-Forwarded-Host`. Hinter einem Proxy ohne passende Kopfzeilen stand dort eine interne Adresse.
+
+### Removed
+- `POST /api/auth/magic-link/approve` und das Formular zur Bestätigung im Browser per Code. Der Nutzer wollte keine Anmeldung über den Browser; die App fragt nicht mehr nach Bestätigung, sondern wartet auf den Link. Ohne Token liefert `/exchange` weiterhin `pending` – ältere App-Fassungen, die nachfragen, laufen damit bis zum Ablauf ins Leere statt in einen Fehler.
+
 ## 2026.10.25.18.00.00
 
 ### Changed

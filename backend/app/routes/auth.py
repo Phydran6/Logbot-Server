@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.10.23.12.00.00
+# Version:     2026.10.25.20.00.00
 # Beschreibung: LogBot - Auth API Endpoints + App-Login (QR-Code) + MFA-Login
 # ==============================================================================
 
@@ -311,8 +311,12 @@ async def get_app_qr(
     db.add(app_token)
     await db.commit()
 
-    # API-URL ermitteln: SITE_URL hat Vorrang, sonst aus Request ableiten
-    api_url = settings.site_url
+    # Adresse fuer die App: die eingetragene oeffentliche Adresse (dieselbe wie in
+    # den Mail-Links, Fallback SITE_URL). Nur ohne sie aus der Anfrage ableiten -
+    # das liefert hinter manchem Proxy eine interne Adresse, und die App landet
+    # dann beim falschen Ziel.
+    from .. import publicurl
+    api_url = await publicurl.get(db)
     if not api_url:
         forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
         forwarded_host = request.headers.get("x-forwarded-host", request.url.netloc)

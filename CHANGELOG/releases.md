@@ -11,6 +11,24 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.25.20.00.00 (2026-10-25)
+
+- **Der Anmelde-Link aus der Mail öffnet die App direkt.** Bisher landete man
+  zuerst auf einer Seite im Browser, musste dort noch einmal „In der App
+  anmelden“ antippen, und darunter stand ein Formular, um die Anmeldung am
+  Rechner per Code zu bestätigen. Jetzt leitet der Link auf Android sofort in
+  die App weiter. Die Bestätigung im Browser ist entfallen – die Anmeldung per
+  Link gehört aufs Handy, das sie angefordert hat. Am Rechner geöffnet, sagt
+  eine kurze Seite genau das.
+- **QR-Anmeldung der App: richtige Adresse im Code.** Die Adresse im QR-Code
+  kam aus `SITE_URL` oder aus den Kopfzeilen der Anfrage – hinter manchem Proxy
+  eine interne Adresse, und die App fragte den falschen Server. Jetzt steht dort
+  dieselbe öffentliche Adresse wie in den Mail-Links (Meldungen → Kanäle →
+  E-Mail); nur ohne sie wird wie bisher abgeleitet.
+- **Releases entstehen selbst.** Ein neuer Tag `v…` erzeugt das GitHub-Release
+  mit dem Text aus diesem Verlauf (`.github/workflows/release.yml`); ältere Tags
+  lassen sich über „Run workflow“ nachträglich veröffentlichen.
+
 ## v2026.10.25.18.00.00 (2026-10-25)
 
 - **„Mit Microsoft anmelden“ wie bei anderen Diensten.** Das Postfach meldet
