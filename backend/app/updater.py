@@ -863,11 +863,14 @@ async def list_releases(force: bool = False, limit: int = 30) -> dict:
 async def latest_release(force: bool = False) -> Optional[dict]:
     """Das neueste veroeffentlichte Release (ohne Prerelease)."""
     data = await list_releases(force=force)
-    for entry in data.get("releases", []):
-        if not entry.get("prerelease"):
-            return entry
     releases = data.get("releases") or []
-    return releases[0] if releases else None
+    # Hoechste Version, nicht das zuletzt angelegte Release: wird fuer einen
+    # aelteren Tag nachtraeglich ein Release angelegt, steht es bei GitHub vorn -
+    # "Stabil" boete dann einen aelteren Stand an.
+    stable = [r for r in releases if not r.get("prerelease")] or releases
+    if not stable:
+        return None
+    return max(stable, key=lambda r: parse_version((r.get("tag") or "").lstrip("v")))
 
 
 # =============================================================================

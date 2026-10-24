@@ -43,6 +43,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
 
       - name: Text aus CHANGELOG/releases.md holen
         env:
@@ -72,6 +73,10 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$title" --notes-file notes.md
           else
+            # Nachtraeglich fuer einen alten Tag angelegt? Dann nicht als "Latest" markieren.
+            newest="$(git tag -l 'v*' --sort=-v:refname | head -n1)"
+            latest="--latest"
+            [ "$newest" = "$TAG" ] || latest="--latest=false"
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$title" \
-              --notes-file notes.md --verify-tag --latest
+              --notes-file notes.md --verify-tag "$latest"
           fi

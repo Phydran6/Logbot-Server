@@ -2,6 +2,11 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.25.21.00.00
+
+### Fixed
+- Update-Prüfung: `latest_release()` wählt das Release mit der höchsten Versionsnummer statt des zuletzt angelegten. Ein nachträglich für einen älteren Tag angelegtes Release ließ „Stabil“ sonst auf einen älteren Stand zeigen.
+
 ## 2026.10.25.20.00.00
 
 ### Changed

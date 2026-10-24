@@ -11,6 +11,24 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.25.21.00.00 (2026-10-25)
+
+- **„Stabil“ zeigt immer auf die höchste Version.** Die Update-Prüfung nahm das
+  zuletzt *angelegte* GitHub-Release. Wird für einen älteren Tag nachträglich ein
+  Release angelegt, hätte „Stabil“ einen älteren Stand angeboten. Jetzt zählt die
+  Versionsnummer; der Release-Workflow markiert nachträglich angelegte Releases
+  auch nicht mehr als „Latest“.
+- **Seit v2026.10.23.12.00.00 ohne eigenes Release mitgekommen** (v2026.10.25.12
+  und v2026.10.25.18):
+  - **„Mit Microsoft anmelden“ wie bei anderen Diensten:** Das Postfach meldet
+    sich im selben Tab bei Microsoft an und landet direkt wieder in LogBot – kein
+    Zurückkopieren mehr. Die App-Registrierung läuft über einen Knopf: LogBot
+    kopiert den Anmeldecode und öffnet die Microsoft-Seite, dort nur einfügen und
+    zustimmen, LogBot macht von selbst weiter.
+  - **Google-Anmeldung repariert:** Mit öffentlicher HTTPS-Adresse scheiterte sie
+    an `redirect_uri_mismatch` (Anleitung verlangte „Desktop-App“). Jetzt
+    „Webanwendung“ mit der einzutragenden Adresse zum Kopieren.
+
 ## v2026.10.25.20.00.00 (2026-10-25)
 
 - **Der Anmelde-Link aus der Mail öffnet die App direkt.** Bisher landete man

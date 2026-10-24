@@ -3,6 +3,11 @@
 Datenbank-Image & Deploy-Konfiguration (`docker-compose.yml`, `db/`, `install.sh`).
 Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.25.21.00.00
+
+### Fixed
+- `.github/workflows/release.yml`: Ein Release für einen älteren Tag (über „Run workflow“) wird nicht mehr als „Latest“ markiert; dafür holt der Checkout alle Tags.
+
 ## 2026.10.25.20.00.00
 
 ### Added
