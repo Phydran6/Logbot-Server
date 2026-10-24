@@ -7,7 +7,7 @@
 """
 Wie das Backend mit Caddy spricht.
 
-Bis 2026.10.22 lauschte Caddys Admin-Schnittstelle auf ``0.0.0.0:2019`` - ohne
+Bis 2026.10.18.22.00.00 lauschte Caddys Admin-Schnittstelle auf ``0.0.0.0:2019`` - ohne
 Anmeldung. Erreichbar war sie damit fuer *jeden* Container im Docker-Netz:
 n8n, Open WebUI, Portainer, Postfix. Wer einen davon uebernahm (n8n hatte 2026
 mehrere kritische Luecken), konnte Caddy umkonfigurieren und den gesamten

@@ -1,7 +1,7 @@
 ﻿# ==============================================================================
 # Name:        Phydran6
 # Kontakt:     Phydran6
-# Version:     2026.10.22.23.00.00
+# Version:     2026.10.23.12.00.00
 # Changelog:   ../../CHANGELOG/backend.md
 # Beschreibung: LogBot - Auth Hilfsfunktionen (JWT, MFA-Pending-Token, Lockout,
 #               Kurzzeit-Tickets fuer Ereignisstroeme und Terminal)
