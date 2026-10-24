@@ -11,6 +11,24 @@ Einzelheiten je Bereich stehen in den [Bereichs-Changelogs](README.md).
 
 ---
 
+## v2026.10.25.18.00.00 (2026-10-25)
+
+- **„Mit Microsoft anmelden“ wie bei anderen Diensten.** Das Postfach meldet
+  sich jetzt im selben Tab bei Microsoft an und landet danach direkt wieder in
+  LogBot – nichts mehr zurückkopieren. Das geht mit der App, die der Assistent
+  selbst anlegt: Sie bekommt LogBots öffentliche HTTPS-Adresse als Rücksprung.
+- **App anlegen ohne Zurückkopieren:** ein Knopf „Mit Microsoft anmelden und App
+  anlegen“. LogBot kopiert den Anmeldecode, öffnet die Microsoft-Seite – dort nur
+  einfügen, anmelden, zustimmen; LogBot macht von selbst weiter. (Microsofts
+  Verwaltungswerkzeug lässt keinen anderen Rücksprung als `localhost` zu; der
+  Weg über den Browser bleibt als Notlösung für Mandanten, die die Code-Anmeldung
+  sperren.)
+- **Google-Anmeldung repariert:** Mit öffentlicher HTTPS-Adresse schickte LogBot
+  Google seine eigene Rücksprungadresse, die Anleitung verlangte aber einen
+  Client vom Typ „Desktop-App“ – der nimmt sie nicht an
+  (`redirect_uri_mismatch`). Die Anleitung nennt jetzt „Webanwendung“ samt der
+  einzutragenden Adresse; die Anmeldung kommt von selbst zurück.
+
 ## v2026.10.25.12.00.00 (2026-10-25)
 
 - **Microsoft-365-Anmeldung im Browser verständlicher.** Nach der Zustimmung

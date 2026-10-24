@@ -2,6 +2,14 @@
 
 Vue-3-Weboberfläche (`frontend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.25.18.00.00
+
+### Changed
+- E-Mail-Assistent, Microsoft: Postfach-Anmeldung im selben Tab mit direktem Rücksprung, wenn die App von LogBot mit dessen HTTPS-Adresse angelegt wurde; sonst Anmeldecode als Hauptweg. App-Registrierung über einen Knopf: Code wird kopiert, die Microsoft-Seite geöffnet, die Seite macht von selbst weiter. Der Browser-Weg mit Zurückkopieren steht nur noch unter „Anmeldung per Code ist bei euch gesperrt?“.
+
+### Fixed
+- E-Mail-Assistent, Google: Anleitung nennt bei öffentlicher HTTPS-Adresse den Client-Typ „Webanwendung“ und die einzutragende Weiterleitungs-URI (zum Kopieren) statt „Desktop-App“, mit der die Anmeldung an `redirect_uri_mismatch` scheiterte.
+
 ## 2026.10.25.12.00.00
 
 ### Fixed

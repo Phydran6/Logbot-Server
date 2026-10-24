@@ -73,7 +73,7 @@ class MicrosoftStart(BaseModel):
     tenant: str = Field(default="", max_length=100)
     account_type: str = Field(default="work", pattern="^(work|personal)$")
     method: str = Field(default="device", pattern="^(device|browser)$")
-    return_mode: str = Field(default="paste", pattern="^(auto|paste)$")
+    return_mode: str = Field(default="auto", pattern="^(auto|paste)$")
 
 
 class RegisterStart(BaseModel):
@@ -101,6 +101,8 @@ async def get_config(db: AsyncSession = Depends(get_db), _=Depends(get_current_a
         "encryptions": [{"id": key, "label": label} for key, label in mail.ENCRYPTIONS.items()],
         "google_loopback": mailoauth.GOOGLE_LOOPBACK,
         "microsoft_loopback": mailoauth.MS_LOOPBACK,
+        # Rueckweg direkt zu LogBot (leer ohne oeffentliche HTTPS-Adresse).
+        "callback_url": await _callback_url(db, "auto"),
     }
 
 
@@ -207,9 +209,15 @@ async def microsoft_start(data: MicrosoftStart, db: AsyncSession = Depends(get_d
             return await mailoauth.start_device(
                 user_id=admin.id, client_id=client_id, tenant=tenant,
                 scopes=mailoauth.MS_MAIL_SCOPES, purpose="mailbox", retries=8)
+        # Direkt zurueck zu LogBot geht nur mit der App, die LogBot selbst mit
+        # genau dieser Adresse angelegt hat - Microsoft nimmt nur eingetragene
+        # Ruecksprungadressen. Sonst Adresse zurueckkopieren (oder Geraetecode).
+        callback = await _callback_url(db, data.return_mode)
+        if callback and not (app.get("app_id") == client_id and app.get("callback_url") == callback):
+            callback = ""
         return mailoauth.start_authorize(
             provider="microsoft", user_id=admin.id, client_id=client_id, tenant=tenant,
-            callback_url=await _callback_url(db, data.return_mode))
+            callback_url=callback)
     except mailoauth.OAuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -250,7 +258,7 @@ async def _do_register(db: AsyncSession, flow: dict, tokens: dict, admin, reques
     config = await mail.load_config(db)
     config["ms_app"] = {k: report[k] for k in ("app_id", "object_id", "tenant_id", "tenant_name",
                                               "display_name", "personal_accounts",
-                                              "consent_granted", "registered_by")}
+                                              "consent_granted", "registered_by", "callback_url")}
     await mail._store(db, config)
     await journal.record(
         db, category="mail", event="mail.ms_app.registered", level="warning",

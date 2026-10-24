@@ -102,7 +102,7 @@ Der Assistent kennt fünf Wege:
 
 | Weg | Wie |
 |---|---|
-| **Google** | *App-Passwort* (zwei Felder: Adresse + 16-stelliges App-Passwort, braucht die Bestätigung in zwei Schritten) **oder** *Mit Google anmelden* (OAuth, Gmail-API; eigener OAuth-Client vom Typ „Desktop-App“ in der Google Cloud Console – der Assistent verlinkt jeden Schritt). |
+| **Google** | *App-Passwort* (zwei Felder: Adresse + 16-stelliges App-Passwort, braucht die Bestätigung in zwei Schritten) **oder** *Mit Google anmelden* (OAuth, Gmail-API; eigener OAuth-Client vom Typ „Webanwendung“ (ohne HTTPS-Adresse: „Desktop-App“) in der Google Cloud Console – der Assistent verlinkt jeden Schritt). |
 | **Microsoft 365** | Der Assistent **legt die App-Registrierung selbst an**: einmal mit einem Konto anmelden, das Anwendungen registrieren darf (Globaler Administrator, Anwendungs- oder Cloudanwendungsadministrator) – per Gerätecode oder im Browser. LogBot erzeugt „LogBot Mail (…)“ im Mandanten, nur mit der delegierten Berechtigung `Mail.Send`, und erteilt die Administratorzustimmung. Danach mit dem Postfach anmelden, von dem die Mails kommen. Gesendet wird über Microsoft Graph. |
 | **Outlook.com** | Wie Microsoft 365, die App wird dabei für private Konten freigegeben (dafür braucht es einmalig irgendeinen Entra-Mandanten mit Admin-Recht) – oder eine vorhandene App-Registrierung eintragen. |
 | **Anderer Anbieter** | SMTP mit Vorlagen für GMX, WEB.DE, IONOS, Strato, T-Online, Posteo, mailbox.org, iCloud, Yahoo – oder ein eigener Mailserver. |
@@ -113,17 +113,27 @@ Werkzeug *Microsoft Graph Command Line Tools* an – dieselbe Anwendung, die
 `Connect-MgGraph` in PowerShell benutzt. Der Admin-Zugang wird nur für diesen
 einen Schritt gebraucht und nirgends gespeichert.
 
-Der einfachste Weg ist der **Gerätecode**: Code eingeben, der Assistent macht
-von selbst weiter. Beim **Browser-Weg** kommt der Browser nicht immer von selbst
-zurück – bei der App-Registrierung nie (Microsofts Werkzeug kennt nur
-`http://localhost` als Rücksprung), sonst wenn LogBot keine öffentliche
-HTTPS-Adresse hat. Der Assistent zeigt dann drei Schritte: Anmeldeseite per Knopf
-öffnen, anmelden und zustimmen; der Tab landet auf `http://localhost/?code=…` bzw.
-`http://127.0.0.1:53682/?code=…` und zeigt eine Fehlerseite – **das ist
-richtig**; die komplette Adresse aus der Adresszeile kopieren und im Assistenten
-einfügen (er schließt sofort ab). Der Code gilt nur wenige Minuten; ist er
-abgelaufen, den Schritt einfach neu starten. Ohne den Assistenten, der die
-Anmeldung begonnen hat, ist der Code wertlos (PKCE).
+**Microsoft, Schritt 1 (App anlegen):** ein Knopf. LogBot kopiert den
+Anmeldecode und öffnet Microsofts Anmeldeseite – dort einfügen, anmelden,
+zustimmen; der Assistent macht von selbst weiter. Ein direkter Rücksprung ist
+hier nicht möglich: Microsofts Werkzeug kennt nur `http://localhost`. Sperrt der
+Mandant die Code-Anmeldung, gibt es unter „Anmeldung per Code ist bei euch
+gesperrt?“ den Browser-Weg; danach die Adresse `http://localhost/?code=…` aus der
+Fehlerseite zurückkopieren (der Code gilt nur wenige Minuten und ist ohne den
+Assistenten, der ihn angefordert hat, wertlos – PKCE).
+
+**Microsoft, Schritt 2 (Postfach):** „Mit Microsoft anmelden“ – im selben Tab zu
+Microsoft und danach direkt zurück in LogBot. Das klappt, wenn die App vom
+Assistenten mit LogBots öffentlicher **HTTPS**-Adresse angelegt wurde (die Adresse
+steht oben im Assistenten). Bei einer selbst eingetragenen App oder ohne
+HTTPS-Adresse ist der Anmeldecode der Hauptweg.
+
+**Google:** Mit öffentlicher HTTPS-Adresse einen OAuth-Client vom Typ
+**„Webanwendung“** anlegen und als Weiterleitungs-URI
+`https://<LogBot-Adresse>/api/mail/oauth/callback` eintragen (der Assistent zeigt
+sie zum Kopieren) – die Anmeldung kommt von selbst zurück. Ohne HTTPS-Adresse:
+Typ „Desktop-App“, Rücksprung auf `http://127.0.0.1:53682/…`, Adresse
+zurückkopieren.
 
 Alle Zugangsdaten (SMTP-Passwörter, Refresh-Token, Client-Geheimnisse) liegen
 **verschlüsselt** in der Datenbank (Schlüssel aus `JWT_SECRET`) und kommen nie

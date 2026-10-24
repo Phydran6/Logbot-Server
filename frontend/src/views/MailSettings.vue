@@ -98,7 +98,11 @@
             <li>In der <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener" class="link">Google Cloud Console</a> ein Projekt anlegen.</li>
             <li><a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noopener" class="link">Gmail-API aktivieren</a>.</li>
             <li><a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener" class="link">OAuth-Zustimmungsbildschirm</a>: „Extern“, eigene Adresse eintragen, danach <b>„App veröffentlichen“</b> (sonst läuft die Anmeldung nach 7 Tagen ab; der Hinweis „nicht verifiziert“ ist für eigene Apps normal).</li>
-            <li><a href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank" rel="noopener" class="link">OAuth-Client-ID anlegen</a>, Typ <b>„Desktop-App“</b>. Client-ID und Clientschlüssel hier einfügen.</li>
+            <li v-if="callbackUrl"><a href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank" rel="noopener" class="link">OAuth-Client-ID anlegen</a>, Typ <b>„Webanwendung“</b>, unter „Autorisierte Weiterleitungs-URIs“ diese Adresse eintragen:
+              <code class="copyable" @click="copy(callbackUrl)">{{ callbackUrl }}</code>
+              Client-ID und Clientschlüssel hier einfügen. Nach der Anmeldung kommt der Browser von selbst zurück.</li>
+            <li v-else><a href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank" rel="noopener" class="link">OAuth-Client-ID anlegen</a>, Typ <b>„Desktop-App“</b>. Client-ID und Clientschlüssel hier einfügen.
+              (Ohne öffentliche HTTPS-Adresse oben muss die Adresse nach der Anmeldung einmal zurückkopiert werden.)</li>
           </ol>
           <label class="label">Client-ID<input v-model="form.clientId" class="input w-full" placeholder="….apps.googleusercontent.com"></label>
           <label class="label">Clientschlüssel<input v-model="form.clientSecret" type="password" class="input w-full"></label>
@@ -128,14 +132,16 @@
               <span v-if="choice === 'outlook'">Für Outlook.com reicht dafür ein beliebiger Microsoft-365-/Entra-Mandant –
                 die App wird für private Konten freigegeben.</span>
             </p>
-            <div class="flex flex-wrap gap-2">
-              <button class="btn btn-primary btn-sm" :disabled="busy" @click="startRegister('device')">Automatisch anlegen (Gerätecode)</button>
-              <button class="btn btn-secondary btn-sm" :disabled="busy" @click="startRegister('browser')">Automatisch anlegen (Browser)</button>
-            </div>
-            <p class="hint">Gerätecode ist der einfachste Weg: Code eingeben, fertig – die Seite macht von selbst weiter.
-              Beim Browser-Weg muss die Adresse am Ende einmal hierher zurückkopiert werden.</p>
+            <button class="btn btn-primary" :disabled="busy" @click="startRegister('device')">Mit Microsoft anmelden und App anlegen</button>
             <DeviceStep v-if="flow && flow.kind === 'device' && flow.purpose === 'register'" :flow="flow" />
             <PasteStep v-if="flow && flow.kind === 'register_authorize'" :flow="flow" :busy="busy" @submit="completePaste" />
+            <details class="text-sm">
+              <summary class="link">Anmeldung per Code ist bei euch gesperrt?</summary>
+              <p class="hint mt-1">Manche Mandanten sperren die Code-Anmeldung per bedingtem Zugriff. Dann geht es auch über
+                den Browser – Microsofts Werkzeug springt danach aber auf <code>{{ msLoopback }}</code>, die Adresse muss
+                einmal zurückkopiert werden.</p>
+              <button class="btn btn-ghost btn-sm mt-1" :disabled="busy" @click="startRegister('browser')">Über den Browser anlegen</button>
+            </details>
             <ul v-if="registerReport" class="steps-report">
               <li v-for="line in registerReport" :key="line">{{ line }}</li>
             </ul>
@@ -158,10 +164,13 @@
             Mit dem Konto anmelden, <b>von dem</b> die Mails kommen sollen (z.B. logbot@firma.de –
             braucht ein Postfach bzw. eine Exchange-Lizenz).
           </p>
-          <div class="flex flex-wrap gap-2">
-            <button class="btn btn-primary btn-sm" :disabled="busy || !(msApp.app_id || form.msClientId)" @click="startMailbox('device')">Anmelden (Gerätecode)</button>
-            <button class="btn btn-secondary btn-sm" :disabled="busy || !(msApp.app_id || form.msClientId)" @click="startMailbox('browser')">Anmelden (Browser)</button>
+          <div class="flex flex-wrap gap-2 items-center">
+            <button v-if="msDirect" class="btn btn-primary" :disabled="busy || !(msApp.app_id || form.msClientId)" @click="startMailbox('browser')">Mit Microsoft anmelden</button>
+            <button class="btn" :class="msDirect ? 'btn-ghost btn-sm' : 'btn-primary'" :disabled="busy || !(msApp.app_id || form.msClientId)" @click="startMailbox('device')">{{ msDirect ? 'Lieber per Code anmelden' : 'Mit Microsoft anmelden' }}</button>
+            <button v-if="!msDirect" class="btn btn-ghost btn-sm" :disabled="busy || !(msApp.app_id || form.msClientId)" @click="startMailbox('browser')">Über den Browser (Adresse zurückkopieren)</button>
           </div>
+          <p v-if="!msDirect && msApp.app_id && !changeApp" class="hint mt-2">Direkt zurück zu LogBot geht es, wenn die App mit LogBots
+            öffentlicher HTTPS-Adresse angelegt wurde – dafür oben „Andere App verwenden“ und neu anlegen lassen.</p>
           <DeviceStep v-if="flow && flow.kind === 'device' && flow.purpose === 'mailbox'" :flow="flow" />
           <PasteStep v-if="flow && flow.kind === 'authorize'" :flow="flow" :busy="busy" @submit="completePaste" />
         </section>
@@ -231,11 +240,12 @@
 
 <script setup>
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 
 const OPTIONS = [
   { id: 'google', label: 'Google', hint: 'Gmail und Workspace' },
@@ -268,6 +278,10 @@ const form = ref({
 })
 
 const msApp = computed(() => config.value?.ms_app || {})
+const callbackUrl = ref('')
+// Postfach-Anmeldung kommt von selbst zurueck: nur mit der App, die LogBot mit genau dieser Adresse angelegt hat.
+const msDirect = computed(() => !!callbackUrl.value && !changeApp.value
+  && msApp.value.app_id && msApp.value.callback_url === callbackUrl.value)
 const modeLabel = computed(() => ({
   off: 'Aus', google: 'Google', microsoft: 'Microsoft', relay: 'SMTP-Server', container: 'Postfix-Container',
 }[config.value?.mode] || '–'))
@@ -282,10 +296,16 @@ function say(text, isError = false) {
 const DeviceStep = defineComponent({
   props: { flow: Object },
   setup(props) {
-    return () => h('div', { class: 'device-box' }, [
-      h('p', { class: 'text-sm' }, ['Öffne ', h('a', { href: props.flow.verification_uri, target: '_blank', rel: 'noopener', class: 'link' }, props.flow.verification_uri),
-        ' und gib diesen Code ein:']),
+    return () => h('div', { class: 'device-box space-y-2' }, [
+      h('p', { class: 'text-sm' }, props.flow.copied
+        ? ['Die Microsoft-Anmeldung ist im neuen Tab offen und der Code ', h('b', 'schon kopiert'),
+            ' – dort einfügen (Strg+V), anmelden, zustimmen. Fertig.']
+        : ['Bei Microsoft diesen Code eingeben, anmelden und zustimmen:']),
       h('p', { class: 'device-code' }, props.flow.user_code),
+      h('div', { class: 'flex flex-wrap gap-2' }, [
+        h('a', { href: props.flow.verification_uri, target: '_blank', rel: 'noopener', class: 'btn btn-secondary btn-sm' }, 'Microsoft-Anmeldung öffnen'),
+        h('button', { class: 'btn btn-ghost btn-sm', onClick: () => navigator.clipboard?.writeText(props.flow.user_code) }, 'Code kopieren'),
+      ]),
       h('p', { class: 'hint' }, 'Diese Seite wartet und macht von selbst weiter, sobald die Anmeldung erledigt ist.'),
     ])
   },
@@ -328,6 +348,7 @@ async function load() {
   config.value = data.config
   presets.value = data.presets
   msLoopback.value = data.microsoft_loopback
+  callbackUrl.value = data.callback_url || ''
   publicUrl.value = data.public_url || window.location.origin
   if (!choice.value) {
     choice.value = { google: 'google', microsoft: msApp.value.personal_accounts ? 'outlook' : 'm365',
@@ -424,6 +445,19 @@ async function disconnect() {
   say('Anmeldung entfernt.')
 }
 
+function copy(text) {
+  navigator.clipboard?.writeText(text).then(() => say('In die Zwischenablage kopiert.'), () => {})
+}
+
+// Gerätecode: Code gleich kopieren und die Microsoft-Seite öffnen - der Nutzer fügt nur noch ein.
+async function showDevice(data, purpose) {
+  let copied = false
+  try { await navigator.clipboard.writeText(data.user_code); copied = true } catch { /* Code steht groß da */ }
+  window.open(data.verification_uri, '_blank', 'noopener')
+  flow.value = { ...data, kind: 'device', purpose, copied }
+  poll()
+}
+
 // --- OAuth ------------------------------------------------------------------
 async function startGoogle() {
   busy.value = true
@@ -431,8 +465,8 @@ async function startGoogle() {
     await ensurePublicUrl()
     const data = await auth.api('/api/mail/oauth/google/start', { method: 'POST', body: {
       client_id: form.value.clientId, client_secret: form.value.clientSecret, return_mode: 'auto' } })
+    if (data.returns_by_itself) { window.location.assign(data.auth_url); return }
     flow.value = { ...data, kind: 'authorize' }
-    if (data.returns_by_itself) window.open(data.auth_url, '_blank', 'noopener')
   } catch (e) { say(e.message, true) } finally { busy.value = false }
 }
 
@@ -440,11 +474,12 @@ async function startRegister(method) {
   busy.value = true
   registerReport.value = null
   try {
+    // Die App bekommt LogBots oeffentliche Adresse als Ruecksprung - vorher speichern.
+    await ensurePublicUrl()
     const data = await auth.api('/api/mail/oauth/microsoft/register/start', { method: 'POST', body: {
       method, personal_accounts: choice.value === 'outlook' } })
     if (method === 'device') {
-      flow.value = { ...data, kind: 'device', purpose: 'register' }
-      poll()
+      await showDevice(data, 'register')
     } else {
       // Zurueckkopieren noetig: erst die Anleitung zeigen, die Seite oeffnet der Knopf darin.
       flow.value = { ...data, kind: 'register_authorize', returns_by_itself: false }
@@ -461,11 +496,12 @@ async function startMailbox(method) {
       tenant: form.value.msTenant, account_type: choice.value === 'outlook' ? 'personal' : 'work',
       method, return_mode: 'paste' } })
     if (method === 'device') {
-      flow.value = { ...data, kind: 'device', purpose: 'mailbox' }
-      poll()
+      await showDevice(data, 'mailbox')
+    } else if (data.returns_by_itself) {
+      // Wie bei anderen Diensten: im selben Tab zu Microsoft und von dort direkt hierher zurück.
+      window.location.assign(data.auth_url)
     } else {
       flow.value = { ...data, kind: 'authorize' }
-      if (data.returns_by_itself) window.open(data.auth_url, '_blank', 'noopener')
     }
   } catch (e) { say(e.message, true) } finally { busy.value = false }
 }
@@ -517,6 +553,7 @@ onMounted(async () => {
       failed: ['Die Anmeldung ist fehlgeschlagen – Details im Systemtagebuch.', true] }
     const [text, isError] = texts[state] || ['', false]
     if (text) say(text, isError)
+    router.replace({ query: {} })
   }
 })
 onBeforeUnmount(stopPolling)
@@ -563,6 +600,11 @@ onBeforeUnmount(stopPolling)
   gap: 0.375rem;
 }
 
+.copyable {
+  display: inline-block;
+  cursor: copy;
+  word-break: break-all;
+}
 .paste-steps {
   list-style: decimal;
   padding-left: 1.25rem;

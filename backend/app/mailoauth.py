@@ -492,7 +492,8 @@ async def register_app(admin_access_token: str, *, personal_accounts: bool = Fal
     return {"app_id": app_id, "object_id": app.get("id"), "tenant_id": tenant_id,
             "tenant_name": tenant_name, "display_name": app.get("displayName"),
             "personal_accounts": personal_accounts, "consent_granted": consent,
-            "registered_by": me.get("userPrincipalName"), "steps": steps}
+            "registered_by": me.get("userPrincipalName"), "callback_url": callback_url or "",
+            "steps": steps}
 
 
 # =============================================================================

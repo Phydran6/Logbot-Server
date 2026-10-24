@@ -2,6 +2,11 @@
 
 FastAPI-API (`backend/`). Versionsformat: `YYYY.MM.DD.HH.MM.SS`.
 
+## 2026.10.25.18.00.00
+
+### Changed
+- Mail-OAuth: Die automatisch angelegte Microsoft-App merkt sich ihre Rücksprungadresse (`ms_app.callback_url`). `POST /api/mail/oauth/microsoft/start` nutzt jetzt standardmäßig den direkten Rückweg (`return_mode=auto`) – aber nur, wenn die Client-ID die eigene App ist und deren eingetragene Adresse zur aktuellen öffentlichen Adresse passt; sonst wie bisher Zurückkopieren. `GET /api/mail/config` liefert `callback_url`.
+
 ## 2026.10.23.12.00.00
 
 ### Security
